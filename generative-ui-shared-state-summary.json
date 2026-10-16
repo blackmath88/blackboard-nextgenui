@@ -1,0 +1,90 @@
+{
+  "title": "Generative UI, semantic compilation and shared state — session summary",
+  "date": "2026-10-16",
+  "status": "open — next topic: how an LLM 'listens'",
+
+  "findings": {
+    "openai_intelligent_ui": {
+      "facts": [
+        "Launched with GPT-6 on 2026-10-07 (paid tiers; Free/Go from 10-08), Chat tab only",
+        "Official: library of native streamable components + compiler that renders progressively; model trained to judge layout",
+        "No public API/SDK (secondary sources)"
+      ],
+      "reverse_engineered_by_thesys_unconfirmed": [
+        "Model writes DIL (Markdown + JSX-like tags + JS state); server recompiles full program every ~250ms, repairs partial output, validates props against catalog",
+        "Client runs program in sandboxed iframe + locked-down worker; native renderer accepts only known component types",
+        "Server-resolved data (images, products, citations, tool-result bindings) — model never retypes values",
+        "Only path UI -> model is issueNewTurn (a plain user message); model cannot see UI state; state lost on reload",
+        "AppBlock = open-ended HTML escape hatch in sandboxed iframe"
+      ],
+      "assessment": "Today mostly frame selection among ~70 components; looks nicer, little AI benefit yet. Real leap needs UI state the model can see, persistence, stable schemas."
+    },
+    "observstory": {
+      "principle": "State belongs to the project. Form belongs to the projection.",
+      "pipeline": "observations (impure) -> derive -> snapshot (typed) -> map_compiler -> scene IR (zone/group/node/edge + attention, details; no coordinates) -> renderer",
+      "adapts_to": "project state and shape (lanes, overlap, waiting, freeze), not viewer or question; at build time, not live",
+      "ui_evolution": "radar (read as dashboard) -> Project Map + scene contract (ADR-023) -> draw-once rule (ADR-024) -> mission rail above map (ADR-032) -> renderer-only density fixes (ADR-033)",
+      "ai_hook_named_not_built": "FrameIntent { focus, foreground[], collapse[], reason } — model may only propose"
+    },
+    "deterministic_vs_generative": "Deterministic compile needs the ontology up front (known shapes); generative UI guesses the shape per question and can write ad-hoc logic — value and risk (silent logic errors)."
+  },
+
+  "positions_taken": [
+    "For repo state: deterministic and not live is preferred",
+    "Semantic UI compilation is underused in app/web dev",
+    "LLM for content and intent; deterministic compiler for form",
+    "Interesting part is interaction, not looking: UI as working state the model can see",
+    "Against the 'agent owns everything' paradigm: LLM is one module in a multi-module architecture, used only where semantic intelligence is needed (cf. Weavr)",
+    "MCP Apps is the wrong center for this — it makes the chat the owner and the state a guest; MCP belongs at the edge as an adapter"
+  ],
+
+  "architecture": {
+    "pattern": "Blackboard architecture (VS Code as reference)",
+    "shape": "Files = shared state. Editor, live view, chat agent are modules that read/render/write. LLM = a 'semantic language server', like LSP: separate, watches, contributes.",
+    "two_way_loop": "state.json -> render -> user change -> typed update -> state.json (UI never owns hidden truth)",
+    "requirements": [
+      "storage: files, git-versioned",
+      "schema: shared meaning across modules",
+      "change signal: file watcher",
+      "revision + identity: who wrote what on which version",
+      "write permissions: propose vs declare"
+    ],
+    "conflict_rule_for_prototype": "last write wins per field + revision counter (Figma-style)"
+  },
+
+  "prior_art": {
+    "non_ai": {
+      "view_from_state": ["spreadsheets", "Elm architecture", "Redux (typed actions, replayable log)"],
+      "concurrent_writers": ["Google Docs (OT)", "Yjs / Automerge (CRDT)", "Figma (server-authoritative, LWW per property)"],
+      "desired_vs_actual": ["Terraform plan/apply", "Kubernetes reconcile loops"],
+      "files_as_truth": ["local-first software (Ink & Switch)", "Linear sync engine"]
+    },
+    "ai": {
+      "AG-UI / CopilotKit": "bidirectional shared state via STATE_SNAPSHOT / STATE_DELTA (JSON Patch); conflicts left to implementer",
+      "MCP Apps (spec 2026-01-26)": "ui/update-model-context — UI tells model its state, overwrites, deferred to next user message; app-only tool visibility",
+      "ChatGPT Intelligent UI": "one-way except issueNewTurn",
+      "Claude artifacts": "shared artifact database Claude can read/write"
+    },
+    "gap": "Pipes and visibility exist; governance (proposal -> human confirms) is missing in AI UI protocols"
+  },
+
+  "open_questions": [
+    "How does an LLM 'listen'? It only runs when called — what wakes it: next human message, watcher rule, schedule?",
+    "Trigger rules as deterministic code deciding when semantic intelligence is needed",
+    "Cross-device signal (Mac mini, Tailscale): git sync vs small relay server",
+    "State granularity: meaningful state (decisions, statuses, notes) over raw events",
+    "Escape hatch when content doesn't fit the catalog: AppBlock-style or text fallback?"
+  ],
+
+  "first_experiment_candidate": "Build-plan tracker: already has a state object and JSON export; add a small local server (POST -> state.json, watch -> push to page) and a revision counter.",
+
+  "sources": [
+    "https://openai.com/index/gpt-6-for-everyone/",
+    "https://www.openui.com/blog/how-chatgpt-intelligent-ui-works",
+    "https://github.com/thesysdev/generative-ui-bench",
+    "https://docs.ag-ui.com/concepts/state",
+    "https://docs.copilotkit.ai/built-in-agent/shared-state",
+    "https://apps.extensions.modelcontextprotocol.io/api/interfaces/app.McpUiUpdateModelContextRequest.html",
+    "https://github.com/blackmath88/observstory"
+  ]
+}
