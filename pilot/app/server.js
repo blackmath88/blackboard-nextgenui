@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// CLI Pilot (P0-P2 + pilot-v0.3 + pilot-v0.4): serves the page, proxies POST /chat to the `chat` role with
+// CLI Pilot (P0-P2 + pilot-v0.3 + pilot-v0.4 + pilot-v0.5): serves the page, proxies POST /chat to the `chat` role with
 // streaming and per-role candidates/policies, appends lines to .pilot/transcript.jsonl,
 // runs the deterministic growth controller (rules.json -> consent -> modules.json),
 // runs the `extract` role in the background after each reply (proposals -> .pilot/state.json),
-// handles commands via POST /command and answers via POST /answer, logs to .pilot/metrics.jsonl.
+// handles commands via POST /command and answers via POST /answer, logs to .pilot/metrics.jsonl,
+// watches .pilot/ (fs.watch, 150 ms debounce) and pushes {file, rev} to the page over SSE (GET /events).
 // Node 20+, no dependencies. All paths resolve against this file's folder.
 'use strict';
 const http = require('http');
@@ -78,14 +79,36 @@ function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return fallback; throw e; }
 }
 
+// Hand-editable JSON files (modules.json, roles.json): the last version that parsed is kept, so a broken hand edit
+// never crashes the server and the page keeps showing the last good version. Writes never use it: while a file is
+// broken the server refuses to write it (it is never overwritten). Returns {doc, error}; doc is null when the file
+// is broken and nothing good was seen since the start.
+const lastGood = {};
+function readJsonGood(file, fallback) {
+  const name = path.basename(file);
+  try {
+    const doc = readJson(file, fallback);
+    lastGood[name] = doc;
+    return { doc };
+  } catch (e) {
+    const error = e instanceof SyntaxError ? `${name} is not valid JSON: ${e.message}` : `${name}: ${e.message}`;
+    return { doc: lastGood[name] === undefined ? null : lastGood[name], error };
+  }
+}
+
 // ---- growth: deterministic controller over rules.json, consent answers in modules.json ----
 const ANSWERS = { y: 'yes', n: 'no', a: 'always', x: 'never', yes: 'yes', no: 'no', always: 'always', never: 'never' };
 
+// A broken modules.json reads as its last good version with `error` set; callers must not write it then.
 function readModules() {
-  const m = readJson(MODULES, null) || {};
-  return { rev: m.rev || 0, panes: m.panes || [], answers: m.answers || {}, pending: m.pending || null };
+  const r = readJsonGood(MODULES, null);
+  const m = r.doc && typeof r.doc === 'object' && !Array.isArray(r.doc) ? r.doc : {};
+  const out = { rev: Number.isInteger(m.rev) ? m.rev : 0, panes: Array.isArray(m.panes) ? m.panes : [],
+    answers: m.answers && typeof m.answers === 'object' ? m.answers : {}, pending: m.pending || null };
+  if (r.error) out.error = r.error;
+  return out;
 }
-function writeModules(m) { m.rev = (m.rev || 0) + 1; atomicWrite(MODULES, JSON.stringify(m, null, 2) + '\n'); }
+function writeModules(m) { delete m.error; m.rev = (m.rev || 0) + 1; atomicWrite(MODULES, JSON.stringify(m, null, 2) + '\n'); lastGood['modules.json'] = m; }
 
 // Visible panes: only those with a recorded yes/always answer (a hand-added pane without one stays hidden).
 function visiblePanes(m) {
@@ -115,6 +138,7 @@ function runController() {
     try { rules = readJson(RULES, { rules: [] }).rules || []; }
     catch (err) { appendJsonl(METRICS, { ts: new Date().toISOString(), event: 'controller_error', error: `rules.json: ${err.message}` }); return; }
     const m = readModules();
+    if (m.error) { appendJsonl(METRICS, { ts: new Date().toISOString(), event: 'controller_error', error: m.error }); return; }
     if (m.pending) return;
     const c = counts(readTranscript());
     for (const rule of rules) {
@@ -138,12 +162,15 @@ function runController() {
   });
 }
 
-// POST /answer {module, answer}: records the answer; yes/always add the pane.
-function answer(module, raw) {
+// POST /answer {module, answer, rev?}: records the answer; yes/always add the pane. With `rev` (the modules.json rev
+// the page last saw), a stale rev is rejected with 409 {stale: true}; without it the answer is accepted (curl, old checks).
+function answer(module, raw, seenRev) {
   const ans = ANSWERS[String(raw || '').toLowerCase()];
   return serial(() => {
     if (!ans) return { code: 400, body: { error: 'answer must be y/n/a/x or yes/no/always/never' } };
     const m = readModules();
+    if (m.error) return { code: 409, body: { error: `${m.error}; fix the file by hand first` } };
+    if (seenRev !== undefined && seenRev !== m.rev) return stale('modules.json', seenRev, m.rev);
     if (!module || m.pending !== module) return { code: 409, body: { error: `no pending question for "${module}"`, pending: m.pending } };
     const ts = new Date().toISOString();
     // count = the rule's own metric (decisions for map, tasks for kanban), so "no" waits for that count to double
@@ -172,10 +199,11 @@ function roleConfig(role) {
 
 // The pinned candidate for a role, or null. An explicit `/model <role> <name>` pins; `/model <role> auto` unpins.
 // A saved name that no longer exists in the config is ignored.
+// A broken roles.json keeps its last good pins (losing a pin silently could send a private chat to the cloud).
 function pinnedName(role) {
   const names = roleConfig(role).candidates.map((c) => c.name);
-  let saved;
-  try { saved = (readJson(ROLES, {}).active || {})[role]; } catch { saved = null; }
+  const doc = readJsonGood(ROLES, {}).doc;
+  const saved = doc && doc.active ? doc.active[role] : null;
   return names.includes(saved) ? saved : null;
 }
 
@@ -305,17 +333,23 @@ async function callRole(role, messages, onDelta, signal, extraBody) {
 // ---- state.json: decisions, tasks, sources. Hand-editable; a broken file is reported, never overwritten ----
 // readState() -> {doc, rev, items, error}: doc is the file as parsed (written back with every unknown field and
 // item kept), items the usable view (objects with string id, kind, text).
+// pilot-v0.5: a broken file reads as {doc: null, error} with rev/items of the last good version (for display and
+// counts only; doc stays null so nothing is ever written over the broken file).
+let lastGoodState = { rev: 0, items: [] };
 function readState() {
+  const broken = (error) => ({ doc: null, rev: lastGoodState.rev, items: lastGoodState.items, error });
   let raw;
   try { raw = fs.readFileSync(STATE, 'utf8'); } catch (e) {
-    if (e.code === 'ENOENT') return { doc: { rev: 0, items: [] }, rev: 0, items: [] };
-    return { doc: null, rev: 0, items: [], error: `state.json: ${e.message}` };
+    if (e.code === 'ENOENT') { lastGoodState = { rev: 0, items: [] }; return { doc: { rev: 0, items: [] }, rev: 0, items: [] }; }
+    return broken(`state.json: ${e.message}`);
   }
   let doc;
-  try { doc = JSON.parse(raw); } catch (e) { return { doc: null, rev: 0, items: [], error: `state.json is not valid JSON: ${e.message}` }; }
-  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.items)) return { doc: null, rev: 0, items: [], error: 'state.json: expected {"rev": n, "items": [...]}' };
+  try { doc = JSON.parse(raw); } catch (e) { return broken(`state.json is not valid JSON: ${e.message}`); }
+  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.items)) return broken('state.json: expected {"rev": n, "items": [...]}');
   const items = doc.items.filter((i) => i && typeof i === 'object' && typeof i.id === 'string' && typeof i.kind === 'string' && typeof i.text === 'string');
-  return { doc, rev: Number.isInteger(doc.rev) ? doc.rev : 0, items };
+  const rev = Number.isInteger(doc.rev) ? doc.rev : 0;
+  lastGoodState = { rev, items };
+  return { doc, rev, items };
 }
 function writeState(doc) { doc.rev = (Number.isInteger(doc.rev) ? doc.rev : 0) + 1; atomicWrite(STATE, JSON.stringify(doc, null, 2) + '\n'); return doc.rev; }
 
@@ -407,10 +441,11 @@ function queueExtraction(userLine, replyLine) {
   const turns = readTranscript().filter((l) => l.role === 'assistant').length;
   if (turns % every !== 0) return;
   extracting++;
+  if (extracting === 1) broadcast('status', { extracting: true });
   extractChain = extractChain.then(() => runExtraction(userLine, replyLine))
     .catch((err) => { console.error('extraction failed:', err); return metric('extract_error', { reason: 'internal', error: String(err.message || err) }); })
     .catch(() => {})
-    .finally(() => { extracting--; });
+    .finally(() => { extracting--; if (!extracting) broadcast('status', { extracting: false }); });
 }
 
 async function runExtraction(userLine, replyLine) {
@@ -463,14 +498,21 @@ async function runExtraction(userLine, replyLine) {
   await runController();   // new proposals may cross a map/kanban threshold
 }
 
-// POST /answer {itemId, decision}: confirm or reject a proposed item; records decidedAt and decidedBy: "user".
+// A write from the page carried a rev that is no longer the file's: 409 with stale: true; the page reloads state.
+function stale(file, sent, current) {
+  return { code: 409, body: { error: `${file} changed since this page last saw it (rev ${sent}, now ${current}); reloaded, try again`, stale: true, file, rev: current } };
+}
+
+// POST /answer {itemId, decision, rev?}: confirm or reject a proposed item; records decidedAt and decidedBy: "user".
+// `rev` = the state.json rev the page last saw (optional; a stale one is rejected with 409 {stale: true}).
 const DECISIONS = { c: 'confirmed', confirm: 'confirmed', confirmed: 'confirmed', r: 'rejected', reject: 'rejected', rejected: 'rejected' };
-function decide(itemId, raw) {
+function decide(itemId, raw, seenRev) {
   const status = DECISIONS[String(raw || '').toLowerCase()];
   return serial(() => {
     if (!status) return { code: 400, body: { error: 'decision must be c/r or confirm/reject' } };
     const st = readState();
     if (st.error) return { code: 409, body: { error: `${st.error}; fix the file by hand first` } };
+    if (seenRev !== undefined && seenRev !== st.rev) return stale('state.json', seenRev, st.rev);
     const item = st.doc.items.find((i) => i && i.id === itemId);
     if (!item) return { code: 404, body: { error: `no item "${itemId}"` } };
     if (item.status !== 'proposed') return { code: 409, body: { error: `${itemId} is ${item.status || 'not a proposal'}, only proposed items can be decided` } };
@@ -481,6 +523,94 @@ function decide(itemId, raw) {
     appendJsonl(METRICS, { ts, event: 'decide', itemId, kind: item.kind, decision: status, decidedBy: 'user', author: item.author || null, model: item.model || null, rev });
     return { code: 200, body: { ok: true, item, rev } };
   });
+}
+
+// ---- live files (pilot-v0.5): fs.watch on the pilot dir -> SSE {file, rev} ----
+// fs.watch filenames are only a hint (macOS coalesces events, editors save by rename, the name can be null), so any
+// event (debounced 150 ms) re-stats every file in the dir and pushes one `change` event per file whose mtime, size
+// or inode changed, own writes and hand edits alike. The server's own temp files (.<name>.<pid>.<ts>.tmp) and other
+// dotfiles are ignored. rev: JSON files -> their `rev` field (null while the file is not valid JSON, 0 when it is
+// missing or has none); JSONL files -> the number of non-empty lines (so a hand edit that keeps the count keeps the
+// rev, but is still pushed).
+const DEBOUNCE_MS = 150;
+const clients = new Set();   // open GET /events responses
+function broadcast(event, data) {
+  const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of clients) res.write(msg);
+}
+function fileRev(name) {
+  const file = path.join(PILOT, name);
+  let raw;
+  try { raw = fs.readFileSync(file, 'utf8'); } catch (e) { return { rev: 0, missing: true }; }
+  if (name.endsWith('.jsonl')) return { rev: raw.split('\n').filter((l) => l.trim()).length };
+  if (!name.endsWith('.json')) return { rev: null };
+  try {
+    const j = JSON.parse(raw);
+    if (name === 'modules.json' || name === 'roles.json') lastGood[name] = j;   // keep the last good version fresh
+    return { rev: j && Number.isInteger(j.rev) ? j.rev : 0 };
+  }
+  catch (e) { return { rev: null, error: `${name} is not valid JSON: ${e.message}` }; }
+}
+const watched = (name) => !!name && !name.startsWith('.') && !name.endsWith('.tmp') && !name.endsWith('~');
+const sig = (st) => `${st.mtimeMs}|${st.size}|${st.ino}`;
+function snapshot() {
+  const out = new Map();
+  let names = [];
+  try { names = fs.readdirSync(PILOT); } catch { return out; }
+  for (const n of names) {
+    if (!watched(n)) continue;
+    try { const st = fs.statSync(path.join(PILOT, n)); if (st.isFile()) out.set(n, sig(st)); } catch { /* gone meanwhile */ }
+  }
+  return out;
+}
+let known = snapshot();
+let debounce = null;
+function scan() {
+  debounce = null;
+  try {
+    const now = snapshot();
+    const changed = [...now.keys()].filter((n) => known.get(n) !== now.get(n));
+    for (const n of known.keys()) if (!now.has(n)) changed.push(n);
+    known = now;
+    for (const file of changed.sort()) broadcast('change', { file, ...fileRev(file) });
+  } catch (err) { console.error('watch:', err.message); }
+}
+function startWatch() {
+  try {
+    const w = fs.watch(PILOT, () => { clearTimeout(debounce); debounce = setTimeout(scan, DEBOUNCE_MS); });
+    w.on('error', (err) => { console.error(`watch ${path.relative(APP, PILOT)}/ stopped: ${err.message}`); w.close(); setTimeout(startWatch, 1000).unref(); });
+  } catch (err) { console.error(`cannot watch ${path.relative(APP, PILOT)}/: ${err.message}`); setTimeout(startWatch, 1000).unref(); }
+}
+startWatch();
+
+// GET /events: Server-Sent Events (D7). First a `hello` with the current revs, then `change` {file, rev[, error]}
+// per changed file and `status` {extracting} when background extraction starts or ends. A comment every 15 s keeps
+// proxies and the connection alive; EventSource reconnects by itself (retry 1000 ms).
+function handleEvents(req, res) {
+  res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
+  const revs = {};
+  for (const n of known.keys()) revs[n] = fileRev(n).rev;
+  res.write(`retry: 1000\nevent: hello\ndata: ${JSON.stringify({ revs, extracting: extracting > 0 })}\n\n`);
+  clients.add(res);
+  const ping = setInterval(() => res.write(': ping\n\n'), 15000);
+  req.on('close', () => { clearInterval(ping); clients.delete(res); });
+}
+
+// GET /state[?only=transcript.jsonl,state.json,modules.json,roles.json]: everything, or only the parts that belong to
+// the named files (the page reloads only what changed). extracting and fileErrors are always included.
+function statePayload(only) {
+  const want = (f) => !only || only.includes(f);
+  const out = { extracting: extracting > 0 };
+  if (want('transcript.jsonl')) { const lines = readTranscript(); out.transcript = lines.slice(-TAIL); out.total = lines.length; }
+  if (want('modules.json') || want('roles.json')) out.models = modelsSummary();
+  let m = null, st = null;
+  if (want('modules.json')) { m = readModules(); Object.assign(out, { panes: visiblePanes(m), pending: m.pending, answers: m.answers, modulesRev: m.rev }); }
+  if (want('state.json')) { st = readState(); Object.assign(out, { items: st.items, stateRev: st.rev, stateError: st.error || null }); }
+  // a broken hand-editable file: the page says "file X is not valid JSON, showing last good version" until fixed
+  const fileErrors = {};
+  for (const [f, e] of [['state.json', (st || readState()).error], ['modules.json', (m || readModules()).error], ['roles.json', readJsonGood(ROLES, {}).error]]) if (e) fileErrors[f] = e;
+  out.fileErrors = fileErrors;
+  return out;
 }
 
 // ---- HTTP ----
@@ -573,6 +703,7 @@ async function runCommand(input) {
         saved.active = { ...saved.active };
         delete saved.active[role];
         atomicWrite(ROLES, JSON.stringify(saved, null, 2) + '\n');
+        lastGood['roles.json'] = saved;
       });
       delete lastUsed[role];
       const first = activeName(role);
@@ -586,6 +717,7 @@ async function runCommand(input) {
       saved.rev = (saved.rev || 0) + 1;
       saved.active = { ...saved.active, [role]: name };
       atomicWrite(ROLES, JSON.stringify(saved, null, 2) + '\n');
+      lastGood['roles.json'] = saved;
     });
     delete lastUsed[role];
     await appendLine('system', `model for ${role} switched to ${name} (pinned)`, null);
@@ -615,19 +747,17 @@ async function runCommand(input) {
 
 const server = http.createServer(async (req, res) => {
   try {
-    const { pathname } = new URL(req.url, `http://${HOST}`);
+    const { pathname, searchParams } = new URL(req.url, `http://${HOST}`);
     if (req.method === 'GET' && pathname === '/state') {
-      const lines = readTranscript();
-      const m = readModules();
-      const st = readState();
-      return sendJson(res, 200, { transcript: lines.slice(-TAIL), total: lines.length, models: modelsSummary(),
-        panes: visiblePanes(m), pending: m.pending, answers: m.answers,
-        items: st.items, stateRev: st.rev, stateError: st.error || null, extracting: extracting > 0 });
+      const only = searchParams.has('only') ? searchParams.get('only').split(',').filter(Boolean) : null;
+      return sendJson(res, 200, statePayload(only));
     }
+    if (req.method === 'GET' && pathname === '/events') return handleEvents(req, res);
     if (req.method === 'POST' && pathname === '/answer') {
       let body;
       try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'expected JSON {module, answer} or {itemId, decision}' }); }
-      const out = body && body.itemId !== undefined ? await decide(body.itemId, body.decision) : await answer(body.module, body.answer);
+      const rev = body && body.rev !== undefined && body.rev !== null ? body.rev : undefined;   // optional: the rev the page last saw
+      const out = body && body.itemId !== undefined ? await decide(body.itemId, body.decision, rev) : await answer(body && body.module, body && body.answer, rev);
       return sendJson(res, out.code, out.body);
     }
     if (req.method === 'POST' && pathname === '/command') {

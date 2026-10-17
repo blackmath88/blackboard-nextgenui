@@ -6,7 +6,7 @@
   "try": [
     "The reasoning map is open (consented earlier): dec-2 is a dashed proposal by \"model · morrow\" (outlined = highlighted), dec-1 is confirmed (mint).",
     "Send: Decision: we send the letter by registered mail. Task: draft the letter tonight.   -> about 2 s later a dashed dec-4 appears and the kanban question (3 tasks) asks.",
-    "With the input empty: c confirms the outlined proposal (the newest), r rejects the next one; arrows move the outline. y adds the kanban (task-1 there was added by hand: solid, \"you\").",
-    "Rejected items hide behind \"rejected: n (show)\" in the pane bar. Hand-edit .pilot-demo/state.json (author \"user\") and send /panes to see it solid."
+    "Tab (or ↓ in the empty input) focuses a proposal: c confirms it, r rejects (since pilot-v0.5 only on a focused card, never from the chat input; Esc back). y in the empty input adds the kanban (task-1 there was added by hand: solid, \"you\").",
+    "Rejected items hide behind \"rejected: n (show)\" in the pane bar. Hand-edit .pilot-demo/state.json (author \"user\") to see it solid (since pilot-v0.5 it appears by itself)."
   ]
 }

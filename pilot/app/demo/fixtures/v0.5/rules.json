@@ -1,0 +1,14 @@
+{
+  "rev": 1,
+  "rules": [
+    { "module": "index", "metric": "messages", "threshold": 16, "ask": "{n} messages. Scrolling back gets slow. Add an index pane?" },
+    { "module": "map", "metric": "decisions", "threshold": 2, "ask": "{n} decisions so far. Add a reasoning map?" },
+    { "module": "kanban", "metric": "tasks", "threshold": 3, "ask": "{n} tasks have come up. Track them on a board?" }
+  ],
+  "afterNo": "ask again when the count has doubled",
+  "_notes": [
+    "Edit by hand; the controller reads this file on every turn.",
+    "decisions and tasks count proposed and confirmed items, not rejected ones.",
+    "Demo fixture: map already consented at 2 decisions; kanban threshold 3 with 2 tasks, so one more task asks."
+  ]
+}

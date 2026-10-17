@@ -1,9 +1,9 @@
-# CLI Pilot v1 (steps P0 to P3, iteration pilot-v0.4)
+# CLI Pilot v1 (steps P0 to P4, iteration pilot-v0.5)
 
-**Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.4` (proposals; v0.3: pins and
-fallback), open the printed URL, follow the "try this" lines. A tagged iteration without touching your checkout:
-`bash pilot/app/scripts/try.sh pilot-v0.4`.
-**pilot-v0.4 extraction is untested with a real model:** it runs against the fake extractor in `dev/fake-model.js`.
+**Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.5` (live files: two tabs, hand edits;
+v0.4: proposals; v0.3: pins and fallback), open the printed URL, follow the "try this" lines. A tagged iteration
+without touching your checkout: `bash pilot/app/scripts/try.sh pilot-v0.5`.
+**Extraction (since pilot-v0.4) is untested with a real model:** it runs against the fake extractor in `dev/fake-model.js`.
 What changed per iteration: `CHANGELOG.md`; checks: `CHECKS.md`; open questions: `QUESTIONS.md`.
 
 A local, terminal-looking chat page served by a small Node server. The server proxies
@@ -64,10 +64,27 @@ ignored) and near-duplicates of existing non-rejected items, keeps at most `maxI
 Decisions and sources show in the reasoning map pane, tasks on the kanban (todo/doing/done); both panes grow
 only through the controller and your answer, like the index. Dashed lavender = proposed by a model (with the
 model name), mint = confirmed, rose = rejected (hidden behind "rejected: n (show)" in the pane bar), solid =
-added by you. `c` confirms, `r` rejects: on a focused card (Tab, click, arrow keys), or from the chat input
-while it is empty, on the outlined proposal (the newest; arrows move the outline). Buttons too. You can add
-items by hand-editing `state.json` (`author: "user"`); a broken `state.json` is reported and never overwritten.
+added by you. `c` confirms, `r` rejects, **only on a focused proposal card** (since pilot-v0.5): Tab, a click, or
+↓/↑ in the empty chat input (lands on the newest proposal) moves focus into the pane; the focused card is outlined;
+arrows move between cards; Escape returns to the chat input. In the chat input `c` and `r` are always text. Buttons
+too. You can add items by hand-editing `state.json` (`author: "user"`); a broken `state.json` is reported and never
+overwritten.
 `decidedBy` is an extension of the schema, see `schemas/state.schema.json` (pilot/app copy).
+
+**Live files (pilot-v0.5).** The server watches the data folder (`fs.watch`, also for `PILOT_DIR`; 150 ms debounce;
+any event re-stats every file, because the file name in a watch event is only a hint) and pushes `{file, rev}` over
+Server-Sent Events (`GET /events`) for every change: its own writes and your hand edits. The page reloads only the
+part of `/state` that belongs to that file and re-renders only what changed, so a hand edit of `state.json` shows
+within about 0.2 s and two tabs stay in sync. `rev`: JSON files carry a `rev` field the server bumps on every write
+(`state.json`, `modules.json`, `roles.json`); for JSONL files (`transcript.jsonl`, `metrics.jsonl`) the rev in the
+event is the number of non-empty lines. Writes from the page (`/answer`: consent and confirm/reject) send the rev the
+page last saw; a stale one is rejected with 409 `{stale: true}`, the page reloads and shows a short notice (one person:
+otherwise the last valid write wins). A hand edit that keeps `rev` is pushed and shown but is not a conflict. A hand
+edit that is not valid JSON never crashes the server: `state.json`, `modules.json` and `roles.json` are read as their
+last good version (pins included), the page says "file X is not valid JSON, showing last good version" until you fix
+it, and the server refuses to write that file meanwhile. Without SSE (no EventSource, or the connection is down) the
+page falls back to refreshing after each action and polling during an extraction; EventSource reconnects by itself
+and the page then reloads everything.
 
 The status bar shows the active model per role; `frontier→morrow` means the configured candidate
 failed and the next one answered. Every model attempt is logged to `.pilot/metrics.jsonl`.
@@ -108,12 +125,12 @@ node -e 'const f=".pilot/rules.json",fs=require("fs"),r=JSON.parse(fs.readFileSy
 ## Demos and checks
 
 `npm run demo -- <version>` (`scripts/demo.js`) wipes and seeds a throwaway `.pilot-demo/` from
-`demo/fixtures/<version>/`, starts the fakes and the server on demo ports (v0.3: 4750, 5751, 5752; v0.4: 4754, 5754, 5755), prints the URL
+`demo/fixtures/<version>/`, starts the fakes and the server on demo ports (v0.3: 4750, 5751, 5752; v0.4: 4754, 5754, 5755; v0.5: 4758, 5758, 5759), prints the URL
 and what to try. Ctrl+C stops everything. An unknown version lists the available ones. It never touches `.pilot/`.
 
 `npm run verify` (`scripts/verify-all.sh`) runs every `dev/verify-*.sh` and the browser checks and prints a summary.
 It refuses to start while `pilot/app/.pilot/` exists, because the P0–P2 checks wipe it.
-`dev/verify-v0.3.sh` and `dev/verify-v0.4.sh` use their own ports and dirs and are safe next to a running demo.
+`dev/verify-v0.3.sh`, `verify-v0.4.sh` and `verify-v0.5.sh` use their own ports and dirs and are safe next to a running demo.
 `node dev/contrast-check.js` checks the palette (WCAG AA, both themes).
 
 The older checks (each starts and stops everything itself and **wipes `.pilot/` first**;
@@ -126,6 +143,7 @@ bash pilot/app/dev/verify-p2.sh
 node pilot/app/dev/browser-check.js all     # p1 + p2, headless Chrome; needs Node 22+ and Google Chrome
 bash pilot/app/dev/verify-v0.3.sh           # own ports/dirs; includes browser-check.js v03 and contrast-check.js
 bash pilot/app/dev/verify-v0.4.sh           # own ports/dirs; proposals; includes browser-check.js v04
+bash pilot/app/dev/verify-v0.5.sh           # own ports/dirs; live files, stale rev, c/r; browser-check.js v05, dev/sse-probe.js
 ```
 
 To start over by hand, stop the server and delete `pilot/app/.pilot/`.
@@ -135,7 +153,8 @@ To start over by hand, stop the server and delete `pilot/app/.pilot/`.
 | Method | Path | Does |
 |---|---|---|
 | GET | `/` | the page (only files under `public/` are served) |
-| GET | `/state` | `{transcript: last 500 lines, total, models, panes, pending, answers, items, stateRev, stateError, extracting}` |
+| GET | `/state` | `{transcript: last 500 lines, total, models, panes, pending, answers, modulesRev, items, stateRev, stateError, extracting, fileErrors}`; `?only=state.json,modules.json,…` returns only the parts of those files (plus `extracting`, `fileErrors`) |
+| GET | `/events` | Server-Sent Events: `hello {revs, extracting}`, then `change {file, rev[, error]}` per changed file and `status {extracting}` |
 | POST | `/chat` | `{text}`: appends the user line, streams the reply as `text/plain`, appends the assistant line |
 | POST | `/command` | `{text: "/model chat morrow"}` → `{ok, lines}` (`/state.models.<role>` has `active`, `pinned`, `last`, `candidates`, `local`) |
-| POST | `/answer` | `{module: "index", answer: "y"}` (y/n/a/x or yes/no/always/never), or `{itemId: "dec-3", decision: "c"}` (c/r or confirm/reject; proposed items only, records `decidedAt`, `decidedBy: "user"`) |
+| POST | `/answer` | `{module: "index", answer: "y"}` (y/n/a/x or yes/no/always/never), or `{itemId: "dec-3", decision: "c"}` (c/r or confirm/reject; proposed items only, records `decidedAt`, `decidedBy: "user"`). Optional `rev` (of `modules.json` / `state.json`): stale → 409 `{stale: true, file, rev}`; a broken file → 409 |

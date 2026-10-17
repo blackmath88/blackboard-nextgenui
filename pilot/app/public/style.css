@@ -112,6 +112,9 @@ body { margin: 0; background: var(--base); color: var(--text); font: 400 15px/1.
 .key { background: transparent; border: 1px solid var(--lavender); color: var(--accent-fg); padding: 1px 10px; cursor: pointer; font: 500 13px var(--mono); }
 .key:hover { background: var(--lavender); color: var(--onfill); }
 .key kbd { font: inherit; font-weight: 600; }
+/* pilot-v0.5: notice above the log (broken hand-edited file, stale write); text colour only, so contrast stays AA */
+.notice { margin: 0; padding: 4px 10px; color: var(--text); border-left: 2px solid var(--rose); white-space: pre-line; font-size: 13px; }
+.notice[hidden] { display: none; }
 .ln.flash { outline: 1px solid var(--focus); outline-offset: 2px; }
 /* Items in the map and kanban panes (pilot-v0.4). Status shows as the border (pastels are borders/fills only,
    never text, so light mode keeps contrast): proposed by a model = dashed lavender, confirmed = solid mint,
@@ -122,7 +125,8 @@ body { margin: 0; background: var(--base); color: var(--text); font: 400 15px/1.
 .item.confirmed { border-color: var(--mint); }
 .item.rejected { border-color: var(--rose); color: var(--muted); }
 .item.by-user { border-style: solid; }
-.item.selected { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* pilot-v0.5: only the focused proposal is outlined; c/r act on it and nowhere else */
+.item.selected, .item:focus { outline: 2px solid var(--focus); outline-offset: 1px; }
 .item .text { display: block; overflow-wrap: anywhere; }
 .item .text a { color: var(--text); text-decoration-color: var(--lavender); }
 .item .meta { display: block; color: var(--muted); font-size: 11.5px; }

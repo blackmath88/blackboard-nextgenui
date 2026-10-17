@@ -1,0 +1,16 @@
+{
+  "rev": 5,
+  "items": [
+    { "id": "dec-1", "kind": "decision", "text": "dogfood the pilot on the insurance claim", "status": "confirmed", "author": "model", "model": "morrow",
+      "quote": "Decision: dogfood the pilot on the insurance claim.", "fromMessage": "m-demo402", "createdAt": "2026-10-17T09:00:42.000Z",
+      "decidedAt": "2026-10-17T09:06:20.000Z", "decidedBy": "user" },
+    { "id": "dec-2", "kind": "decision", "text": "the claim stays on local models only", "status": "proposed", "author": "model", "model": "morrow",
+      "quote": "Decision: the claim stays on local models only.", "fromMessage": "m-demo403", "createdAt": "2026-10-17T09:02:32.000Z" },
+    { "id": "task-1", "kind": "task", "text": "scan the hospital invoice", "status": "confirmed", "author": "user", "createdAt": "2026-10-17T09:03:00.000Z", "column": "done" },
+    { "id": "task-2", "kind": "task", "text": "call the insurer about the deadline", "status": "proposed", "author": "model", "model": "morrow",
+      "quote": "Task: call the insurer about the deadline.", "fromMessage": "m-demo404", "createdAt": "2026-10-17T09:02:32.000Z", "column": "todo" },
+    { "id": "dec-3", "kind": "decision", "text": "use a paid cloud model for the letter", "status": "rejected", "author": "model", "model": "morrow",
+      "quote": "Decision: use a paid cloud model for the letter.", "fromMessage": "m-demo408", "createdAt": "2026-10-17T09:07:42.000Z",
+      "decidedAt": "2026-10-17T09:08:30.000Z", "decidedBy": "user" }
+  ]
+}

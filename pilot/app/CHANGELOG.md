@@ -4,6 +4,59 @@ P0 to P2 (skeleton, model roles, growth controller with consent and the index pa
 baseline, merged before the numbered iterations started; see `CHECKS.md` (# P0, # P1, # P2). Iterations are
 tagged `pilot-v0.N` by the coordinator; each one is runnable with `npm run demo -- v0.N`.
 
+## pilot-v0.5
+
+Live files (P4), and `c`/`r` only on a focused proposal. Still untested with a real model (fakes only).
+
+**Adds**
+- **Watcher:** `fs.watch` on the data folder (works for `PILOT_DIR`), 150 ms debounce. Any watch event re-stats every
+  file in the folder (mtime, size, inode) and pushes one event per changed file, because macOS coalesces events and
+  editors save by rename. The server's own temp files and other dotfiles are ignored. Watch errors are logged and the
+  watch restarts; nothing in the watch path can crash the server.
+- **`GET /events` (SSE, D7):** `hello {revs, extracting}`, then `change {file, rev[, error]}` for every change (own
+  writes and hand edits) and `status {extracting}` when background extraction starts or ends (an extraction that
+  writes nothing changes only `metrics.jsonl`). `retry: 1000`, a comment every 15 s.
+- **rev:** JSON files carry `rev`, bumped on every server write (`state.json`, `modules.json`, `roles.json`;
+  `rules.json` is only seeded). JSONL files: rev = number of non-empty lines.
+- **Stale writes:** `/answer` takes an optional `rev` (consent: `modules.json`, confirm/reject: `state.json`). If it is
+  stale the server answers 409 `{stale: true, file, rev}` and writes nothing. The page then reloads state and shows a
+  short notice. A request without `rev` is accepted (curl, older checks).
+- **Last good version:** a hand edit of `state.json`, `modules.json` or `roles.json` that is not valid JSON never
+  crashes the server. `/state` serves the last good version with `fileErrors`, and the page says "file X is not valid
+  JSON, showing last good version" until the file is fixed. The server writes none of these files while they are
+  broken: the controller skips (`controller_error`), answers and decisions get 409. A broken `roles.json` keeps its
+  last good pins.
+- **Page:**
+  - EventSource on `/events`. Reloads only the changed part (`GET /state?only=<files>`) and re-renders only areas whose
+    content changed.
+  - Per-part request generations, so an older response never overwrites a newer one.
+  - File events are held back while this tab streams a reply.
+  - Full reload after a reconnect.
+  - Fallback without SSE: refresh after each action and polling during an extraction, as in v0.4.
+  - Meta shows `ready · live` when connected.
+- **`c`/`r` only on a focused proposal card:**
+  - They never act from the chat input, empty or not.
+  - ↓/↑ in the empty input moves focus to the newest proposal; Tab and click work too.
+  - Only the focused card is outlined. After a decision, focus stays in the pane; Escape returns to the input.
+  - y/n/a/x keep the v0.3 rule (empty input). Buttons unchanged.
+- **Demo `v0.5`:** two tabs, a printed hand-edit one-liner and a break/repair one-liner. `demo.js` fills `{url}` and
+  `{dir}` in try lines. The v0.4 demo's try lines now describe the new keys.
+- **Dev:** `dev/sse-probe.js` (SSE client for verify), `browser-check.js v05` (second tab via CDP).
+
+**Why**
+- P4 of the build plan: hand edits appear by themselves, two tabs stay honest, and a write based on an old view is
+  refused instead of silently winning.
+- `c`/`r`: in v0.4 a message starting with c or r decided a proposal on the first keystroke. Models only propose; the
+  person decides on purpose.
+
+**Deliberately does not**
+- No conflict detection for hand edits that keep `rev` (they are pushed and shown, but a page write based on the
+  older view still goes through). No merge: one person, last valid write wins.
+- No View Transition on live re-renders (pane add/remove still uses one; a content refresh is instant).
+- No push for `/chat` streaming to other tabs: they see the user line, then the finished reply.
+- No undo for decisions. y/n/a/x still answer from the empty input, also for a question that arrived by push (see
+  QUESTIONS.md).
+
 ## pilot-v0.4
 
 Proposals (P3). **Untested with a real model:** Morrow was not reachable, so extraction ran only against the fake

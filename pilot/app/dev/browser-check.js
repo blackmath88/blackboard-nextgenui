@@ -3,9 +3,10 @@
 // p1/p2: start their own fake models and server (PILOT_CONFIG=pilot.config.dev.json, ports 4747/5701/5702)
 // and WIPE .pilot/ first. v03: own ports (4765/5766/5767, Chrome 9343) and its own dir .pilot-verify-v03b/,
 // so it never touches .pilot/ or a running demo. v04 (pilot-v0.4 proposals): ports 4775/5776/5777, Chrome 9353,
-// dir .pilot-verify-v04b/.
+// dir .pilot-verify-v04b/. v05 (pilot-v0.5 live files, c/r only on a focused card): ports 4785/5786/5787,
+// Chrome 9363, dir .pilot-verify-v05b/; opens a second tab.
 // Needs Node 22+ (global WebSocket) and Google Chrome. No dependencies.
-// Usage: node dev/browser-check.js [p1|p2|v03|v04|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
+// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
 'use strict';
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -40,6 +41,15 @@ async function openBrowser() {
     try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'); } catch { /* not up yet */ }
     if (!target) await sleep(100);
   }
+  const page = await connectTab(target);
+  // pilot-v0.5: a second tab in the same browser (two tabs stay in sync)
+  page.newTab = async () => connectTab(await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: 'PUT' })).json());
+  const closeFirst = page.close;
+  page.close = () => { closeFirst(); chrome.kill(); setTimeout(() => fs.rmSync(dir, { recursive: true, force: true }), 300); };
+  return page;
+}
+
+async function connectTab(target) {
   const ws = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((r) => { ws.onopen = r; });
   let id = 0; const pending = {}; const net = []; const errors = [];
@@ -63,7 +73,7 @@ async function openBrowser() {
       return r.result.result.value;
     },
     async key(k) {
-      const ARROWS = { ArrowUp: 38, ArrowDown: 40, Tab: 9 };
+      const ARROWS = { ArrowUp: 38, ArrowDown: 40, Tab: 9, Escape: 27 };
       if (ARROWS[k]) {
         await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: k, code: k, windowsVirtualKeyCode: ARROWS[k] });
         await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: ARROWS[k] });
@@ -77,7 +87,7 @@ async function openBrowser() {
     async type(text) { await page.eval(`document.getElementById('input').focus()`); await send('Input.insertText', { text }); },
     async submit(text, wait = 1800) { await page.type(text); await page.key('Enter'); await sleep(wait); },
     status() { return page.eval(`document.getElementById('models').textContent`); },
-    close() { ws.close(); chrome.kill(); setTimeout(() => fs.rmSync(dir, { recursive: true, force: true }), 300); },
+    close() { ws.close(); },
   };
   return page;
 }
@@ -258,7 +268,8 @@ async function v04(page) {
 
   check('map pane shown (consented), no kanban pane yet (no answer)', await page.eval(`!!document.getElementById('pane-map') && !document.getElementById('pane-kanban')`));
   let s2 = await style('dec-2');
-  check('proposal dec-2: dashed lavender border, "model · morrow", highlighted', s2 && s2.style === 'dashed' && s2.color === LAV && /dec-2 · model · morrow · proposed/.test(s2.meta) && s2.selected, JSON.stringify(s2));
+  // ADAPTED in pilot-v0.5: was "... highlighted"; only a focused card is outlined now, so no outline before focus.
+  check('proposal dec-2: dashed lavender border, "model · morrow", not outlined before it has focus', s2 && s2.style === 'dashed' && s2.color === LAV && /dec-2 · model · morrow · proposed/.test(s2.meta) && !s2.selected, JSON.stringify(s2));
   const s1 = await style('dec-1');
   check('confirmed dec-1: solid mint border', s1 && s1.style === 'solid' && s1.color === MINT, JSON.stringify(s1));
   check('rejected dec-3 hidden; pane bar toggle "rejected: 1 (show)"', !(await style('dec-3')) && await page.eval(`document.querySelector('#pane-map .bar .toggle').textContent === 'rejected: 1 (show)'`));
@@ -274,27 +285,45 @@ async function v04(page) {
   check('non-empty input: c and r stay text, nothing decided', (await page.eval(`document.getElementById('input').value`)) === 'crcr' && answers() === 0 && item('dec-2').status === 'proposed');
   await page.eval(`document.getElementById('input').value = ''`);
   await page.eval(`document.getElementById('input').focus()`);
+  // ADAPTED in pilot-v0.5: was "empty input: c confirms the highlighted proposal". c/r never act from the input now;
+  // ArrowDown moves focus to the newest proposal, which is then outlined, and c there confirms it.
+  await page.key('c'); await sleep(400);
+  check('empty input: c is text and decides nothing', (await page.eval(`document.getElementById('input').value`)) === 'c' && answers() === 0 && item('dec-2').status === 'proposed');
+  await page.eval(`document.getElementById('input').value = ''`);
+  await page.key('ArrowDown'); await sleep(100);
+  check('ArrowDown from the empty input focuses the proposal dec-2, which is then outlined', await page.eval(`document.activeElement.dataset.id === 'dec-2'`) && !!(await style('dec-2')).selected);
   await page.key('c'); await sleep(700);
   const d2 = item('dec-2');
-  check('empty input: c confirms the highlighted proposal (state.json: confirmed, decidedAt, decidedBy user)', d2.status === 'confirmed' && !!d2.decidedAt && d2.decidedBy === 'user', JSON.stringify(d2));
+  check('c on the focused card confirms it (state.json: confirmed, decidedAt, decidedBy user)', d2.status === 'confirmed' && !!d2.decidedAt && d2.decidedBy === 'user', JSON.stringify(d2));
   s2 = await style('dec-2');
-  check('confirmed card turns solid mint, focus back in the input', s2 && s2.style === 'solid' && s2.color === MINT && await page.eval(`document.activeElement.id === 'input'`), JSON.stringify(s2));
+  // ADAPTED in pilot-v0.5: was "focus back in the input"; focus now stays in the pane and Escape returns to the input.
+  check('confirmed card turns solid mint, focus stays on the card', s2 && s2.style === 'solid' && s2.color === MINT && await page.eval(`document.activeElement.dataset.id === 'dec-2'`), JSON.stringify(s2));
+  await page.key('Escape'); await sleep(100);
+  check('Escape on a card returns focus to the chat input', await page.eval(`document.activeElement.id === 'input'`));
 
   const t0 = Date.now();
   await page.submit('Decision: ship the board today. Task: test the keys. Task: write the notes.', 100);
   const appeared = await waitFor(`!!${card('dec-4')} && !!document.querySelector('.ln.controller.pending')`, 6000);
   check('after one message a dashed dec-4 appears and the kanban question asks, without a reload', appeared && (await style('dec-4') || {}).style === 'dashed', `${Date.now() - t0} ms`);
-  check('page loaded once (pickup by polling /state, no navigation)', page.net.filter((n) => n.url === URL).length === 1);
+  // ADAPTED in pilot-v0.5: pickup is by SSE now (polling only without SSE); the assertion itself is unchanged.
+  check('page loaded once (pickup without navigation)', page.net.filter((n) => n.url === URL).length === 1);
   check('kanban question counts proposed + confirmed tasks (3)', await page.eval(`/^3 tasks/.test(document.querySelector('.ln.controller.pending').textContent)`));
   await page.eval(`document.getElementById('input').focus()`);
   await page.key('y'); await sleep(900);
   check('y adds the kanban pane; tasks in columns (task-1 in done)', await page.eval(`!!document.querySelector('#pane-kanban .col.done .item[data-id="task-1"]') && !!document.querySelector('#pane-kanban .col.todo .item[data-id="task-2"]')`));
   const u = await style('task-1');
   check('hand-added task-1 (author user) is solid and says "you"', u && u.style === 'solid' && /task-1 · you/.test(u.meta), JSON.stringify(u));
+  // ADAPTED in pilot-v0.5: was "highlight = newest proposal (task-3)" and "empty input: r rejects it". The newest
+  // proposal is now where ArrowDown from the empty input lands; r acts on it there.
+  await page.eval(`document.getElementById('input').focus()`);
+  await page.key('r'); await sleep(300);
+  check('empty input: r is text and decides nothing', (await page.eval(`document.getElementById('input').value`)) === 'r' && item('task-3').status === 'proposed');
+  await page.eval(`document.getElementById('input').value = ''`);
+  await page.key('ArrowDown'); await sleep(100);
   const newest = await page.eval(`(document.querySelector('.item.selected') || {}).dataset?.id || null`);
-  check('highlight = newest proposal (task-3)', newest === 'task-3', newest);
+  check('ArrowDown from the empty input focuses and outlines the newest proposal (task-3)', newest === 'task-3' && await page.eval(`document.activeElement.dataset.id === 'task-3'`), newest);
   await page.key('r'); await sleep(700);
-  check('empty input: r rejects it (rejected, decidedBy user) and it is hidden', item('task-3').status === 'rejected' && item('task-3').decidedBy === 'user' && !(await style('task-3')));
+  check('r on the focused card rejects it (rejected, decidedBy user) and it is hidden', item('task-3').status === 'rejected' && item('task-3').decidedBy === 'user' && !(await style('task-3')));
 
   await page.eval(`${card('dec-4')}.focus()`);
   await page.key('ArrowDown'); await sleep(100);
@@ -313,12 +342,130 @@ async function v04(page) {
   const st = JSON.parse(fs.readFileSync(file('state.json'), 'utf8'));
   st.items.push({ id: 'task-9', kind: 'task', text: 'added by hand', status: 'confirmed', author: 'user', createdAt: new Date().toISOString(), column: 'doing' });
   fs.writeFileSync(file('state.json'), JSON.stringify(st, null, 2));
-  await page.submit('/panes', 600);
+  // ADAPTED in pilot-v0.5: was "after the next state load" (it sent /panes first); now it shows by itself (SSE).
+  await sleep(1000);
   const h = await style('task-9');
-  check('hand edit of state.json shows after the next state load: solid, "you", in doing', h && h.style === 'solid' && /you/.test(h.meta) && await page.eval(`!!document.querySelector('#pane-kanban .col.doing .item[data-id="task-9"]')`), JSON.stringify(h));
+  check('hand edit of state.json shows without any action: solid, "you", in doing', h && h.style === 'solid' && /you/.test(h.meta) && await page.eval(`!!document.querySelector('#pane-kanban .col.doing .item[data-id="task-9"]')`), JSON.stringify(h));
 }
 
-const SCENARIOS = { p1, p2, v03, v04 };
+// pilot-v0.5: live files. Two tabs stay in sync; a hand edit shows within 1 s (measured hand edit -> DOM); a stale
+// write is rejected and the page reloads with a notice; a broken file shows "not valid JSON, showing last good
+// version"; reconnect after a server restart; fallback without EventSource; c/r only on a focused card.
+const timings = {};
+async function v05(page) {
+  const at = (m) => new Date(Date.UTC(2026, 9, 17, 9, m)).toISOString();
+  const file = (f) => path.join(APP, ENV.dir, f);
+  const prop = (id, text) => ({ id, kind: 'decision', text, status: 'proposed', author: 'model', model: 'morrow', quote: `Decision: ${text}.`, fromMessage: 'm-x1', createdAt: at(1) });
+  fs.writeFileSync(file('state.json'), JSON.stringify({ rev: 1, items: [
+    { id: 'dec-1', kind: 'decision', text: 'keep the claim local', status: 'confirmed', author: 'model', model: 'morrow', quote: 'Decision: keep the claim local.', fromMessage: 'm-x1', createdAt: at(1), decidedAt: at(2), decidedBy: 'user' },
+    prop('dec-2', 'write the letter in German'), prop('dec-5', 'send it by registered mail'), prop('dec-6', 'ask the insurer first'),
+  ] }, null, 2));
+  fs.writeFileSync(file('modules.json'), JSON.stringify({ rev: 1, panes: [{ module: 'map', addedAt: at(5), atCount: 2 }], answers: { map: { answer: 'yes', at: at(5), count: 2 } }, pending: null }, null, 2));
+  editJson('rules.json', (r) => { r.rules.forEach((x) => { x.threshold = 50; }); });
+  const items = () => JSON.parse(fs.readFileSync(file('state.json'), 'utf8')).items;
+  const item = (id) => items().find((i) => i.id === id);
+  const editState = (fn) => { const j = JSON.parse(fs.readFileSync(file('state.json'), 'utf8')); fn(j); fs.writeFileSync(file('state.json'), JSON.stringify(j, null, 2)); };
+  const waitFor = async (pg, expr, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pg.eval(expr)) return Date.now() - t0; await sleep(15); } return null; };
+  const cardText = (id) => `(document.querySelector('.item[data-id="${id}"] .text') || {}).textContent`;
+  const tagOf = (id) => `(document.querySelector('.item[data-id="${id}"] .tag') || {}).textContent`;
+  const notice = `(document.getElementById('notice').hidden ? '' : document.getElementById('notice').textContent)`;
+
+  const b = await page.newTab();
+  await page.goto(URL); await b.goto(URL);
+  const liveA = await waitFor(page, `document.getElementById('meta').textContent.includes('live')`);
+  const liveB = await waitFor(b, `document.getElementById('meta').textContent.includes('live')`);
+  check('both tabs connect to /events (status bar meta says "live")', liveA !== null && liveB !== null);
+
+  // c/r never act from the chat input (QUESTIONS.md 2026-10-17, closed in v0.5)
+  await page.eval(`document.getElementById('input').focus()`);
+  for (const k of ['c', 'r']) await page.key(k);
+  await sleep(300);
+  check('c and r typed into the empty input are text and decide nothing', (await page.eval(`document.getElementById('input').value`)) === 'cr' && items().filter((i) => i.status === 'proposed').length === 3);
+  check('placeholder no longer offers c/r from the input', await page.eval(`(() => { const i = document.getElementById('input'); const v = i.value; i.value = ''; const p = i.placeholder; i.value = v; return !p.includes('c/r confirm') && p.includes('Tab'); })()`));
+  await page.eval(`document.getElementById('input').value = ''`);
+
+  // two tabs: confirm in A (Tab presses into the map), watch B
+  let tabs = 0;
+  while (tabs < 20 && !(await page.eval(`document.activeElement.dataset && document.activeElement.dataset.id === 'dec-2'`))) { await page.key('Tab'); tabs++; }
+  check('Tab from the input reaches dec-2; the focused proposal is outlined', tabs < 20 && await page.eval(`document.querySelector('.item[data-id="dec-2"]').classList.contains('selected')`), `${tabs} Tab presses`);
+  const t0 = Date.now();
+  await page.key('c');
+  const synced = await waitFor(b, `${tagOf('dec-2')} === 'confirmed'`);
+  timings.tabSyncMs = synced === null ? null : Date.now() - t0;
+  check('confirm in tab A shows in tab B within 1 s, without a reload', synced !== null && timings.tabSyncMs < 1000 && b.net.filter((n) => n.url === URL).length === 1, `${timings.tabSyncMs} ms after the keypress`);
+
+  // hand edit -> DOM, measured three times in tab B
+  const lat = [];
+  for (let i = 1; i <= 3; i++) {
+    const text = `hand edited ${i}`;
+    const h0 = Date.now();
+    editState((j) => { j.items.find((x) => x.id === 'dec-1').text = text; });
+    const ms = await waitFor(b, `${cardText('dec-1')} === ${JSON.stringify(text)}`);
+    lat.push(ms === null ? null : Date.now() - h0);
+    await sleep(250);
+  }
+  timings.handEditToDomMs = lat;
+  check('hand edit of state.json appears in the page within 1 s (3 runs, hand edit -> DOM)', lat.every((x) => x !== null && x < 1000), `${lat.join(', ')} ms`);
+  check('hand edit appears in tab A too', await page.eval(`${cardText('dec-1')} === 'hand edited 3'`));
+
+  // stale rev: tab B stops listening, the file changes (rev + 1), B confirms dec-5 with its old rev -> 409, reload, notice
+  await b.eval(`es.close(); live = false; true`);
+  editState((j) => { j.rev += 1; j.items.find((x) => x.id === 'dec-1').text = 'changed behind B'; });
+  await sleep(400);
+  check('tab B without SSE still shows the old text (setup)', await b.eval(`${cardText('dec-1')} === 'hand edited 3'`));
+  await b.eval(`document.querySelector('.item[data-id="dec-5"]').focus()`);
+  await b.key('c');
+  const reloaded = await waitFor(b, `${cardText('dec-1')} === 'changed behind B'`);
+  const n1 = await b.eval(notice);
+  check('stale write: rejected (dec-5 still proposed), tab B reloads state and shows a short notice', item('dec-5').status === 'proposed' && reloaded !== null && /changed since this page last saw it/.test(n1), n1);
+  check('the stale write is not an error line in the chat', await b.eval(`![...document.querySelectorAll('.ln.out.err')].some(l => /changed since/.test(l.textContent))`));
+  await b.eval(`document.querySelector('.item[data-id="dec-5"]').focus()`);
+  await b.key('c');
+  await sleep(600);
+  check('after the reload the same keypress goes through (dec-5 confirmed)', item('dec-5').status === 'confirmed');
+
+  // broken hand edits: the last good version stays visible with a notice, until the file is fixed
+  const good = fs.readFileSync(file('state.json'), 'utf8');
+  fs.writeFileSync(file('state.json'), good + 'oops');
+  const brokenMs = await waitFor(page, `${notice}.includes('file state.json is not valid JSON, showing last good version')`);
+  check('broken state.json: notice "file state.json is not valid JSON, showing last good version" within 1 s; cards still shown', brokenMs !== null && brokenMs < 1000 && await page.eval(`${tagOf('dec-5')} === 'confirmed' && !!document.querySelector('.item[data-id="dec-6"]')`), `${brokenMs} ms`);
+  await page.eval(`document.querySelector('.item[data-id="dec-6"] .key[data-decision="confirm"]').click()`); await sleep(500);
+  check('confirm while state.json is broken: error line, file untouched', fs.readFileSync(file('state.json'), 'utf8') === good + 'oops' && await page.eval(`[...document.querySelectorAll('.ln.out.err')].some(l => /not valid JSON/.test(l.textContent))`));
+  fs.writeFileSync(file('state.json'), good);
+  const fixedMs = await waitFor(page, `${notice} === ''`);
+  check('fixing state.json removes the notice', fixedMs !== null, `${fixedMs} ms`);
+  const mods = fs.readFileSync(file('modules.json'), 'utf8');
+  fs.writeFileSync(file('modules.json'), '{"rev": 1, "panes": [');
+  const mMs = await waitFor(page, `${notice}.includes('file modules.json is not valid JSON, showing last good version')`);
+  check('broken modules.json: notice, the map pane stays (last good version)', mMs !== null && await page.eval(`!!document.getElementById('pane-map')`), `${mMs} ms`);
+  fs.writeFileSync(file('modules.json'), mods);
+  check('fixing modules.json removes the notice', (await waitFor(page, `${notice} === ''`)) !== null);
+
+  // reconnect: restart the server, edit while it is down; tab A reconnects by itself and catches up
+  await stop('server');
+  editState((j) => { j.items.find((x) => x.id === 'dec-1').text = 'edited while the server was down'; });
+  await startServer();
+  const back = await waitFor(page, `${cardText('dec-1')} === 'edited while the server was down' && document.getElementById('meta').textContent.includes('live')`, 5000);
+  check('after a server restart tab A reconnects and shows an edit made while it was down', back !== null, `${back} ms after the restart`);
+
+  // fallback: a tab without EventSource refreshes after its own actions and polls during an extraction
+  const c = await page.newTab();
+  await c.send('Page.addScriptToEvaluateOnNewDocument', { source: 'delete window.EventSource; window.EventSource = undefined;' });
+  await c.goto(URL);
+  check('tab without EventSource: no /events request, meta "ready"', !c.net.some((n) => n.url.endsWith('/events')) && (await c.eval(`document.getElementById('meta').textContent`)) === 'ready');
+  await c.eval(`document.querySelector('.item[data-id="dec-6"] .key[data-decision="reject"]').click()`);
+  const fb = await waitFor(c, `!document.querySelector('.item[data-id="dec-6"]')`);
+  check('tab without SSE: reject button -> the card updates (refresh after the action)', fb !== null && item('dec-6').status === 'rejected');
+  await c.submit('Decision: keep the fallback simple.', 100);
+  const fbx = await waitFor(c, `!!document.querySelector('.item[data-id="dec-7"]')`, 6000);
+  check('tab without SSE: a proposal from the background extraction appears without a reload (polling)', fbx !== null && c.net.filter((n) => n.url === URL).length === 1);
+  check('tab B (and A) got dec-7 by SSE as well', (await waitFor(page, `!!document.querySelector('.item[data-id="dec-7"]')`)) !== null);
+  check('no uncaught page errors in tabs B and C', b.errors.length === 0 && c.errors.length === 0, [...b.errors, ...c.errors].join(' | '));
+  b.close(); c.close();
+  console.log(`TIMING tab sync ${timings.tabSyncMs} ms; hand edit -> DOM ${lat.join(', ')} ms`);
+}
+
+const SCENARIOS = { p1, p2, v03, v04, v05 };
 const ENVS = {
   v03: () => {
     const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
@@ -339,6 +486,16 @@ const ENVS = {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v04b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4775/', fakes: [5776, 5777], dir: '.pilot-verify-v04b', config: file, cdp: 9353 };
+  },
+  v05: () => {
+    const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
+    c.port = 4785;
+    c.roles.chat.candidates[0].baseUrl = 'http://127.0.0.1:5786/v1';
+    c.roles.chat.candidates[1].baseUrl = 'http://127.0.0.1:5787/v1';
+    c.roles.extract.candidates[0].baseUrl = 'http://127.0.0.1:5787/v1';
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v05b-')), 'config.json');
+    fs.writeFileSync(file, JSON.stringify(c));
+    return { url: 'http://127.0.0.1:4785/', fakes: [5786, 5787], dir: '.pilot-verify-v05b', config: file, cdp: 9363 };
   },
 };
 

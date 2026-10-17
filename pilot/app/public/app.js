@@ -1,19 +1,26 @@
 // CLI Pilot page. Talks only to its own server (same origin): GET /state, POST /chat, /command, /answer.
 // pilot-v0.4: map and kanban panes show items from state.json; proposals can be confirmed (c) or rejected (r).
+// pilot-v0.5: live files. GET /events (SSE) says which file changed; the page reloads only that part of /state.
+// Writes carry the rev the page last saw; a stale one comes back 409 {stale} and the page reloads with a notice.
+// c/r act only on a focused proposal card (Tab or arrows into a pane; Escape back to the input).
 'use strict';
 const $ = (id) => document.getElementById(id);
 const bench = $('bench'), log = $('log'), form = $('form'), input = $('input');
-const meta = $('meta'), count = $('count'), models = $('models');
+const meta = $('meta'), count = $('count'), models = $('models'), notice = $('notice');
 const PLACEHOLDER = input.placeholder;
 const KEYS = { y: 'yes', n: 'no', a: 'always', x: 'never' };
 const WHO = { user: 'you', assistant: 'pilot', system: 'sys', controller: 'ctl', out: '' };
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-let state = { transcript: [], panes: [], pending: null, answers: {}, items: [], extracting: false };
+let state = { transcript: [], panes: [], pending: null, answers: {}, items: [], extracting: false, fileErrors: {} };
 let shownPanes = '';
-let selected = null;        // id of the highlighted proposal (c / r in the empty input act on it)
-let seen = null;            // proposal ids already shown; a new one takes the highlight
+let selected = null;        // the proposal ArrowDown/ArrowUp from the empty input moves focus to (the newest by default)
+let seen = null;            // proposal ids already shown; a new one becomes the arrow target
 let showRejected = false;   // rejected items are hidden behind a toggle in the pane bar
-let pollTimer = null;       // while an extraction runs, /state is polled until it is done (live files come in v0.5)
+let pollTimer = null;       // fallback without SSE: while an extraction runs, /state is polled until it is done
+let es = null, live = false; // EventSource on /events; live = connected (else: refresh after each action + poll)
+let streaming = false;      // this tab is streaming a reply: file events wait (a re-render would drop the live line)
+const deferred = new Set(); // files changed while streaming
+let flash = null, flashTimer = null;   // short notice after a stale write
 $('brand').insertAdjacentHTML('afterbegin', Pixel.sprite('teletype', 18, 'pilot') + ' ');
 
 function addLine(role, text, model, id, kind) {
@@ -67,6 +74,9 @@ function renderLog() {
     if (l.role === 'controller') addController(l, lastCtl[l.module] === i);
     else addLine(l.role, l.text, l.model, l.id, l.kind);
   });
+  updateCount();
+}
+function updateCount() {
   const proposed = (state.items || []).filter((i) => i.status === 'proposed').length;
   count.textContent = `${state.transcript.length} lines${proposed ? ` · ${proposed} proposed` : ''}`;
 }
@@ -74,8 +84,22 @@ function renderLog() {
 function updatePlaceholder() {
   const parts = [];
   if (state.pending) parts.push('y/n/a/x answer the question');
-  if (selected) parts.push('c/r confirm/reject the outlined proposal');
+  if (selected) parts.push('↓ or Tab to the proposals (c/r there, Esc back)');
   input.placeholder = parts.length ? `Empty input: ${parts.join(' · ')}` : PLACEHOLDER;
+}
+
+// Notice above the log: a broken hand-edited file (until it is fixed) and, for a few seconds, a stale-write message.
+function renderNotice() {
+  const lines = Object.keys(state.fileErrors || {}).map((f) => `file ${f} is not valid JSON, showing last good version`);
+  if (flash) lines.push(flash);
+  notice.textContent = lines.join('\n');
+  notice.title = Object.values(state.fileErrors || {}).join('\n');
+  notice.hidden = !lines.length;
+}
+function showFlash(text) {
+  flash = text; renderNotice();
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { flash = null; renderNotice(); }, 5000);
 }
 
 // ---- panes: CSS grid templates for 1 to 4 panes, swapped with a View Transition ----
@@ -123,8 +147,9 @@ function itemCard(it) {
     }
     el.append(keys);
   }
-  el.addEventListener('focus', () => select(it.id));
-  el.addEventListener('click', () => { select(it.id); el.focus(); });
+  el.addEventListener('focus', () => { if (status === 'proposed') select(it.id); el.classList.toggle('selected', status === 'proposed'); });
+  el.addEventListener('blur', () => el.classList.remove('selected'));
+  el.addEventListener('click', () => el.focus());
   return el;
 }
 
@@ -179,7 +204,8 @@ function renderKanban(body) {
   rejectedToggle(body, PANES.kanban.kinds);
 }
 
-// Selection: the highlighted proposal. Defaults to the newest proposal shown in a pane.
+// Arrow target: the proposal ArrowDown/ArrowUp from the empty input moves focus to. Defaults to the newest proposal
+// shown in a pane. Only the focused card is outlined (.selected), and only a focused card takes c/r.
 function visibleProposals() { return [...bench.querySelectorAll('.item[data-proposed]')]; }
 function select(id) { selected = id; markSelected(); }
 function markSelected() {
@@ -190,15 +216,23 @@ function markSelected() {
   seen = new Set([...(seen || []), ...cards.map((c) => c.dataset.id)]);
   if (fresh.length) selected = newestOf(fresh).dataset.id;
   else if (!cards.some((c) => c.dataset.id === selected)) { const n = newestOf(cards); selected = n ? n.dataset.id : null; }
-  bench.querySelectorAll('.item').forEach((c) => c.classList.toggle('selected', c.dataset.id === selected && !!c.dataset.proposed));
+  bench.querySelectorAll('.item').forEach((c) => c.classList.toggle('selected', c === document.activeElement && !!c.dataset.proposed));
   updatePlaceholder();
 }
 
+// A failed write: a stale rev (409 {stale}) reloads state and shows a short notice; anything else is an error line.
+async function writeFailed(res) {
+  const body = await res.json().catch(() => ({}));
+  if (body.stale) { showFlash(body.error || `${body.file} changed meanwhile; reloaded, try again`); return; }
+  addLine('out', body.error || `HTTP ${res.status}`).p.classList.add('err');
+}
+
 async function sendDecision(id, word, fromCard) {
-  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ itemId: id, decision: word }) });
-  if (!res.ok) addLine('out', (await res.json().catch(() => ({}))).error || `HTTP ${res.status}`).p.classList.add('err');
-  if (selected === id) selected = null;
+  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ itemId: id, decision: word, rev: state.stateRev }) });
+  if (!res.ok) await writeFailed(res);
+  else if (selected === id) selected = null;
   await loadState();
+  // focus stays in the pane: the next proposal, else the card just decided (Escape returns to the input)
   const next = fromCard && (visibleProposals().find((c) => c.dataset.id === selected) || bench.querySelector(`.item[data-id="${CSS.escape(id)}"]`));
   (next || input).focus();
 }
@@ -282,27 +316,71 @@ function applyTheme(t) {
 }
 try { applyTheme(localStorage.getItem('pilot-theme')); } catch { /* storage blocked: auto */ }
 
-const signature = (s) => [s.total, s.stateRev, s.pending, (s.panes || []).join(','), JSON.stringify(s.models)].join('|');
-async function loadState(poll) {
-  const next = await (await fetch('/state')).json();
-  const changed = !poll || signature(next) !== signature(state);
-  state = next;
-  if (changed) {                                 // a poll that found nothing new leaves the page alone (scroll, focus)
-    renderLog();
-    renderPanes();
-    renderModels(state.models);
-    updatePlaceholder();
+// /state parts per file (GET /state?only=<files>). Every request gets a generation; a part is applied only if its
+// response is newer than the one that last set it, so an older full load can never overwrite a newer partial one.
+const PARTS = { 'transcript.jsonl': ['transcript', 'total'], 'modules.json': ['panes', 'pending', 'answers', 'modulesRev', 'models'],
+  'roles.json': ['models'], 'state.json': ['items', 'stateRev', 'stateError'] };
+let reqGen = 0;
+const appliedGen = {};
+const sigs = {};
+const sigOf = {
+  log: (s) => [s.total, (s.transcript[s.transcript.length - 1] || {}).id, s.pending, JSON.stringify(s.answers)].join('|'),
+  panes: (s) => [(s.panes || []).join(','), s.stateRev, JSON.stringify(s.items)].join('|'),   // items too: hand edits keep rev
+  models: (s) => JSON.stringify(s.models),
+};
+async function loadState(files) {
+  const gen = ++reqGen;
+  const list = files ? files.filter((f) => PARTS[f]) : Object.keys(PARTS);
+  if (files && !list.length) return;
+  const next = await (await fetch(files ? `/state?only=${encodeURIComponent(list.join(','))}` : '/state')).json();
+  for (const f of list) {
+    if (gen <= (appliedGen[f] || 0)) continue;
+    appliedGen[f] = gen;
+    for (const k of PARTS[f]) if (k in next) state[k] = next[k];
   }
-  meta.textContent = state.extracting ? 'extracting proposals…' : state.stateError ? 'state.json has an error, see /state'
-    : state.total > state.transcript.length ? `showing last ${state.transcript.length} of ${state.total}` : 'ready';
+  if (gen > (appliedGen.flags || 0)) { appliedGen.flags = gen; state.extracting = next.extracting; state.fileErrors = next.fileErrors || {}; }
+  // re-render only the areas whose content changed (keeps scroll and focus when nothing did)
+  const dirty = (area) => { const v = sigOf[area](state); if (sigs[area] === v) return false; sigs[area] = v; return true; };
+  if (dirty('log')) renderLog();
+  if (dirty('panes')) renderPanes();
+  if (dirty('models')) renderModels(state.models);
+  updateCount();
+  updatePlaceholder();
+  renderNotice();
+  meta.textContent = state.extracting ? 'extracting proposals…'
+    : state.total > state.transcript.length ? `showing last ${state.transcript.length} of ${state.total}` : live ? 'ready · live' : 'ready';
   document.body.dataset.loaded = '1';
   clearTimeout(pollTimer);
-  if (state.extracting) pollTimer = setTimeout(() => loadState(true).catch(() => {}), 300);
+  if (state.extracting && !live) pollTimer = setTimeout(() => loadState().catch(() => {}), 300);   // fallback only
+}
+
+// Live files: the server pushes `change` {file, rev} for every file change in the pilot dir (own writes and hand
+// edits) and `status` {extracting}. EventSource reconnects by itself; after a reconnect the page reloads everything.
+// Without SSE (no EventSource, never connected, or dropped) the page refreshes after each action, as before.
+function onFiles(files) {
+  if (streaming) { files.forEach((f) => deferred.add(f)); return; }
+  loadState(files).catch(() => {});
+}
+function connectEvents() {
+  if (typeof EventSource !== 'function') return;
+  es = new EventSource('/events');
+  let wasLive = false;
+  es.addEventListener('hello', () => {
+    const again = wasLive; live = true; wasLive = true;
+    if (again || document.body.dataset.loaded) onFiles(Object.keys(PARTS));   // catch up on what was missed
+  });
+  es.addEventListener('change', (e) => { try { onFiles([JSON.parse(e.data).file]); } catch { /* ignore a bad event */ } });
+  es.addEventListener('status', (e) => {
+    try { state.extracting = JSON.parse(e.data).extracting; } catch { return; }
+    if (!state.extracting) onFiles(['state.json', 'modules.json', 'transcript.jsonl']);
+    else meta.textContent = 'extracting proposals…';
+  });
+  es.onerror = () => { live = false; if (!streaming) meta.textContent = 'reconnecting…'; };   // EventSource retries
 }
 
 async function sendAnswer(module, word) {
-  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ module, answer: word }) });
-  if (!res.ok) addLine('out', (await res.json().catch(() => ({}))).error || `HTTP ${res.status}`).p.classList.add('err');
+  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ module, answer: word, rev: state.modulesRev }) });
+  if (!res.ok) await writeFailed(res);
   await loadState();
   input.focus();
 }
@@ -332,31 +410,28 @@ input.addEventListener('keydown', (e) => {
   sendAnswer(state.pending, KEYS[e.key]);
 });
 
-// Proposal keys: c confirms, r rejects. On a focused card they act on that card; in the chat input only while it
-// is empty (the consent rule), on the highlighted proposal. Arrow keys move between cards, or the highlight from
-// the empty input. Same guards as the consent keys.
+// Proposal keys (pilot-v0.5): c confirms, r rejects, only on a focused proposal card, never from the chat input
+// (empty or not). From the empty input, ArrowDown/ArrowUp move focus to the newest proposal (Tab works too); on a
+// card, arrows move between cards and Escape returns to the input. Same guards as the consent keys.
 document.addEventListener('keydown', (e) => {
   if (e.isComposing || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
   const card = e.target && e.target.closest ? e.target.closest('.item') : null;
   const emptyInput = e.target === input && input.value === '';
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-    const step = e.key === 'ArrowDown' ? 1 : -1;
     if (card) {
       const all = [...bench.querySelectorAll('.item')];
-      const to = all[all.indexOf(card) + step];
+      const to = all[all.indexOf(card) + (e.key === 'ArrowDown' ? 1 : -1)];
       if (to) { e.preventDefault(); to.focus(); }
     } else if (emptyInput && selected) {
-      const all = visibleProposals();
-      const to = all[all.findIndex((c) => c.dataset.id === selected) + step];
-      if (to) { e.preventDefault(); select(to.dataset.id); to.scrollIntoView({ block: 'nearest' }); }
+      const to = visibleProposals().find((c) => c.dataset.id === selected);
+      if (to) { e.preventDefault(); to.focus(); to.scrollIntoView({ block: 'nearest' }); }
     }
     return;
   }
-  if (e.key !== 'c' && e.key !== 'r') return;
-  const id = card ? (card.dataset.proposed ? card.dataset.id : null) : emptyInput ? selected : null;
-  if (!id) return;
+  if (e.key === 'Escape' && card) { e.preventDefault(); input.focus(); return; }
+  if ((e.key !== 'c' && e.key !== 'r') || !card || !card.dataset.proposed) return;
   e.preventDefault();
-  sendDecision(id, e.key === 'c' ? 'confirm' : 'reject', card);
+  sendDecision(card.dataset.id, e.key === 'c' ? 'confirm' : 'reject', card);
 });
 
 form.addEventListener('submit', async (e) => {
@@ -369,6 +444,7 @@ form.addEventListener('submit', async (e) => {
     return;
   }
   input.disabled = true;
+  streaming = true;
   addLine('user', text);
   const { p, body } = addLine('assistant', '');
   p.classList.add('streaming');
@@ -384,15 +460,18 @@ form.addEventListener('submit', async (e) => {
       body.textContent += dec.decode(value, { stream: true });
       log.scrollTop = log.scrollHeight;
     }
+    streaming = false; deferred.clear();
     await loadState();                           // re-read the file truth (model names, controller questions)
   } catch (err) {
     p.classList.remove('streaming');
     addLine('system', `error: ${err.message}`);
     meta.textContent = 'error';
   } finally {
+    if (streaming) { streaming = false; if (deferred.size) onFiles([...deferred]); deferred.clear(); }
     input.disabled = false;
     input.focus();
   }
 });
 
 loadState().catch((err) => { meta.textContent = 'offline'; addLine('system', `cannot load state: ${err.message}`); });
+connectEvents();

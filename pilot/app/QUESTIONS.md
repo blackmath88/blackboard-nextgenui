@@ -36,8 +36,18 @@ input decides a proposal on its first keystroke (there is no undo; the decision 
 - Blocks: nothing; it is a usability risk during dogfooding.
 - Options: keep; act from the input only right after a new proposal arrived; require focus in a pane (Tab) for
   keys; or add an undo for decisions.
+- **Closed (pilot-v0.5): require focus in a pane.** `c`/`r` act only on a focused proposal card (Tab, click, or ↓/↑
+  from the empty input; Escape back). In the chat input they are always text. Buttons unchanged; no undo added.
 
 ## 2026-10-17 Which name goes into `item.model`?
 Chosen: the candidate name (e.g. `morrow`), the same value the transcript stores in `model`; `metrics.jsonl`
 `extract` events carry both candidate and model id.
 - Blocks: nothing. Options: keep; or store the model id (`qwen3:14b`) instead or in addition.
+
+## 2026-10-17 y/n/a/x and a question that arrives by push
+Since pilot-v0.5 a consent question can appear by push (another tab, a background extraction crossing a threshold),
+while someone is about to type a message starting with y, n, a or x into the empty input. That is the same accident
+class as the old `c`/`r` (one keystroke answers). The brief keeps the v0.3 rule (empty input), so nothing changed.
+- Blocks: nothing; it is a usability risk during dogfooding.
+- Options: keep; ignore y/n/a/x for ~1 s after a question appeared; require focus on the question (Tab), like c/r.
+

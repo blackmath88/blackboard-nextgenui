@@ -25,3 +25,13 @@ date, old plan, new plan and why.
 - Old plan: v0.5 = live files only.
 - New plan: v0.5 = live files + `c`/`r` act only when keyboard focus is on a proposal (Tab/arrow into a pane), never from the chat input.
 - Why: coordinator testing of v0.4 confirmed that a message starting with "c" or "r" typed into the empty input decides a proposal at once. That breaks "models only propose, the person decides on purpose". It is small, so it rides along with v0.5 rather than taking its own tag.
+
+## 2026-10-17 (v0.5) The v0.4 poll is fallback-only
+- Old plan: v0.4 polled `/state` every 300 ms while `extracting` was true, "removed or replaced when v0.5 pushes file
+  changes".
+- New plan: with SSE connected the page does not poll. The server pushes `status {extracting}` and the file events.
+  The poll runs only when SSE is unavailable (no EventSource, never connected, or dropped), next to the
+  refresh-after-action.
+- Why: the brief asks for a fallback to the refresh-after-action when SSE is unavailable. Without the poll, proposals
+  from a background extraction would not appear in such a tab until the next action.
+

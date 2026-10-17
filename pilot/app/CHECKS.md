@@ -406,3 +406,93 @@ Run by the coordinator, not the builder. Still untested with a real model (Morro
 - Browser, demo v0.4: sent "Decision: … Task: …"; about 2 s later dec-4 appeared dashed with "model · morrow" and the kanban question asked. `c` confirmed dec-4 (`decidedBy: user`, `decidedAt` set, mint); `y` added the kanban with task-2/task-3 dashed and the hand-added task-1 solid, "you". No text on the page fell below 4.5:1 (computed in the page, opacity included).
 - Own fake runs (separate dir and ports): `--extract=badquote` kept 2 of 3 and logged `extract_drop reason: quote`; `malformed` wrote no state and logged `extract_error malformed`; `many` (5 items) wrote nothing and logged `extract_error schema`.
 - Known risk carried into v0.5: `c`/`r` from the empty chat input decide a proposal on the first keystroke of a message starting with c or r (see QUESTIONS.md). Fixed in v0.5.
+
+# pilot-v0.5
+
+Live files (P4), and `c`/`r` only on a focused proposal. Everything runs against `dev/fake-model.js`; no real
+endpoint was contacted.
+
+**Reproduce:** `bash pilot/app/dev/verify-v0.5.sh`. It has 39 checks; one of them runs the 22 browser checks of
+`browser-check.js v05`, plus that script's 2 global checks. It ends with `ALL v0.5 CHECKS PASSED` and exits non-zero
+on failure.
+- Own ports: server 4780, fakes 5781/5782; browser part 4785/5786/5787 and Chrome 9363; demo part 4958/5958/5959.
+- Own throwaway dirs: `.pilot-verify-v05/`, `.pilot-verify-v05b/`, `.pilot-demo-verify05/`.
+- The whole run uses `PILOT_DIR`, so the watcher is checked on a non-default dir.
+
+**Everything:** `cd pilot/app && npm run verify` (p0, p1, p2, v0.3, v0.4, v0.5, browser p1 + p2; v03/v04/v05
+browser checks run inside their verify scripts).
+Last run (Node v25.9.0, Chrome, macOS): all passed. `npm run demo -- v0.3`, `-- v0.4` and `-- v0.5` each served
+`/state` within 1 s, and SIGINT to the process group left no process behind.
+
+## P4 "done when" (04-build-plan.md)
+
+| Done when | How (section of `verify-v0.5.sh`) | Measured |
+|---|---|---|
+| A hand edit of `state.json` appears in the page within a second. | 2: `dev/sse-probe.js latency` flips an item's status 10 times with a plain `writeFileSync`. Each run times hand edit → SSE `change` event for `state.json`, and hand edit → `GET /state` showing the new status. 7 (browser): hand edit → the text in the DOM of tab B, 3 runs. | Event: median 165 ms, max 166 ms (150 ms of it is the debounce). `/state` shows it at max 169 ms. **Hand edit → DOM: 164–207 ms** (4 runs of `browser-check.js v05`, 3 edits each). |
+| Two open tabs stay in sync. | 7: two tabs in one headless Chrome. In tab A, Tab presses reach dec-2 and `c` confirms it. Tab B shows it confirmed without a reload. Hand edits show in both. | Tab A keypress → tab B DOM: 177–179 ms. |
+| A write with a stale `rev` is rejected and the page reloads state. | 5 (HTTP): decide with rev − 1 → 409 `{stale: true, file: "state.json", rev}`, file byte-identical. Current rev → 200; no rev → 200; consent with a stale `modules.json` rev → 409 stale, still pending. 7 (browser): tab B closes its EventSource; the file changes behind it (rev + 1); `c` on dec-5 → rejected, tab B reloads (shows the hidden change) and shows the notice "state.json changed since this page last saw it (rev 2, now 3); reloaded, try again" (not an error line); the same key again goes through. | |
+
+## Other checks
+
+| # | Check | How |
+|---|---|---|
+| 1 | `GET /events` sends `hello` with the revs of the files in the dir, then `change {file, rev}` for own writes. `transcript.jsonl` rev = its line count; `state.json` rev = the file's `rev` after the extraction write; `modules.json` when the controller asks; `metrics.jsonl` with a line count; `status` extracting true → false; temp files never pushed. | section 1 |
+| 2 | Debounce: 5 hand writes within ~50 ms → exactly one `state.json` event; a second SSE client gets the same event. | section 3 |
+| 3 | Server writes bump rev: decide (`state.json`), consent (`modules.json`), `/model` (`roles.json`). `/state` reports `stateRev` and `modulesRev`. | sections 4, 5 |
+| 4 | An already-decided item stays a plain 409 (no `stale`), so the page shows it as an error line, not as a reload notice. | section 5 |
+| 5 | **Invalid JSON never crashes the server:** broken `state.json` → `/state` answers with the last good items, `stateError` and `fileErrors`; SSE event with `rev: null` and the error; deciding → 409; a chat turn with extraction leaves the file alone; fixing it clears the error. Broken `modules.json` → last good panes, a turn does not overwrite it (`controller_error`), answering → 409. Broken `roles.json` → the pin is kept and the next reply still comes from the pinned morrow. Same server PID throughout, no uncaught error in its log. | section 6 |
+| 6 | **Page** (`browser-check.js v05`): both tabs live; `c`/`r` typed in the empty input are text; placeholder offers Tab, not c/r; notice "file state.json is not valid JSON, showing last good version" within 1 s (179 ms) with the cards still shown; confirm while broken → error line, file untouched; fix → notice gone; same for `modules.json` (map pane stays); **reconnect:** server stopped, file edited, server started → tab A shows the edit by itself (~0.9 s after the restart); **fallback:** a tab without `EventSource` makes no `/events` request, says `ready`, updates after its own reject button, and shows a proposal from a background extraction without a reload (polling); no page errors in any tab. | section 7 |
+| 7 | Contrast still passes (the notice uses `--text` on the panel). | section 7 |
+| 8 | **Demo:** `npm run demo -- v0.5` serves `/state` in ~1 s with the map pane and dec-2 proposed; the try lines say two tabs; the printed flip one-liner, run **literally from the demo output**, causes an SSE event and dec-2 confirmed; the printed break one-liner sets `fileErrors`, run again repairs it; Ctrl+C leaves no process. | section 8 |
+| 9 | Old checks unchanged except the adapted assertions below, and passing: p0, p1, p2, v0.3, v0.4, browser p1/p2/v03/v04. | `npm run verify` |
+
+## Adapted assertions (c/r fix)
+
+In `dev/browser-check.js v04`, each marked `ADAPTED in pilot-v0.5` in the code:
+1. "proposal dec-2 … highlighted" → "… not outlined before it has focus". Only the focused card is outlined now.
+2. "empty input: c confirms the highlighted proposal" → three checks:
+   - "empty input: c is text and decides nothing"
+   - "ArrowDown from the empty input focuses the proposal dec-2, which is then outlined"
+   - "c on the focused card confirms it"
+3. "confirmed card turns solid mint, focus back in the input" → "… focus stays on the card", plus a new "Escape on a
+   card returns focus to the chat input".
+4. "page loaded once (pickup by polling /state, no navigation)" → "page loaded once (pickup without navigation)".
+   Only the wording changed; pickup is by SSE now.
+5. "highlight = newest proposal (task-3)" and "empty input: r rejects it" → three checks:
+   - "empty input: r is text and decides nothing"
+   - "ArrowDown from the empty input focuses and outlines the newest proposal (task-3)"
+   - "r on the focused card rejects it"
+6. "hand edit of state.json shows after the next state load" (it sent `/panes` first) → "shows without any action".
+
+The v0.4 shell checks needed no change: requests without `rev` are still accepted.
+
+## Decisions
+
+- **Change detection by stat, not by watch filename:** any `fs.watch` event (debounced 150 ms) re-stats every
+  non-dot, non-`.tmp` file in the dir and pushes those whose mtime, size or inode changed. It also pushes for a deleted
+  file (rev 0).
+- **rev for JSONL = non-empty line count.** A hand edit that keeps the count keeps the rev. It is still pushed (the
+  event fires on any change), and the page compares content, not rev.
+- **Which writes carry rev:** `/answer` (consent → `modules.json` rev, confirm/reject → `state.json` rev), as the
+  brief lists. `/chat` and `/command` only append or change server-owned files and carry none. `rev` is optional, so
+  curl and the older checks work unchanged.
+- **Stale vs. other 409s:** only `{stale: true}` triggers reload + notice (5 s); "already decided" or "file broken"
+  stay error lines.
+- **Last good version** is used for display and counts only, never written back. A broken file is never overwritten.
+  `roles.json` was added to `state.json` and `modules.json` here, because losing a pin silently could send a private
+  chat to the cloud.
+- **Outline = focus.** The arrow target (newest proposal) is not outlined until it has focus, so nothing on screen
+  suggests that a key in the input would act on it.
+- **Page reload granularity:** one `/state?only=<files>` request per event batch. Areas are re-rendered only when
+  their content signature changed, so scroll and focus survive unrelated events. A focused card keeps focus across
+  re-renders.
+
+## Deviations
+
+1. 02-architecture says "re-renders the affected pane with a View Transition". Live content refreshes are instant;
+   View Transitions stay for adding and removing panes (as in P2). A transition on every hand edit or tab-sync event
+   would flicker and delay the 1 s target.
+2. The v0.4 demo's try lines were reworded for the new keys (`demo/fixtures/v0.4/demo.json`); the fixture data is
+   unchanged.
+3. `/state` gained `?only=`, `modulesRev` and `fileErrors`; without `only` it returns what it did before plus those
+   fields.

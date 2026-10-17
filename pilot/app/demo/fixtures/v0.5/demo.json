@@ -1,0 +1,12 @@
+{
+  "fakes": [
+    { "name": "frontier", "port": 5758 },
+    { "name": "morrow", "port": 5759 }
+  ],
+  "try": [
+    "Open {url} in TWO tabs side by side. In one: press Tab (or ↓ in the empty input) to reach a dashed proposal, then c confirms it (r rejects, Esc back to the input). The other tab follows within a second. Typing c or r in the chat input is just text.",
+    "Hand edit, in another terminal (flips dec-2 between proposed and confirmed; both tabs follow within a second): node -e 'const f=\"{dir}/state.json\",fs=require(\"fs\"),s=JSON.parse(fs.readFileSync(f)),d=s.items.find(i=>i.id===\"dec-2\");d.status=d.status===\"proposed\"?\"confirmed\":\"proposed\";fs.writeFileSync(f,JSON.stringify(s,null,2))'",
+    "Break the file (run once to break, again to repair): node -e 'const f=\"{dir}/state.json\",fs=require(\"fs\"),t=fs.readFileSync(f,\"utf8\");fs.writeFileSync(f,t.endsWith(\"oops\")?t.slice(0,-4):t+\"oops\")'   -> \"file state.json is not valid JSON, showing last good version\".",
+    "Send: Decision: we send the letter by registered mail. Task: draft the letter tonight.   -> dec-4 appears in both tabs without a reload; the kanban question asks."
+  ]
+}

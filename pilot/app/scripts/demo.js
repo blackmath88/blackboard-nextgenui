@@ -5,7 +5,8 @@
 // fixture's pilot.config.json), prints the URL and "try this" lines. Ctrl+C stops everything.
 // Never touches .pilot/. Env (for scripts): DEMO_PORT_SHIFT=<n> adds n to every port;
 // PILOT_DEMO_DIR=.pilot-demo-<x> uses another throwaway dir (must start with .pilot-demo).
-// Fixture layout: demo.json {fakes: [{name, port, args?, toggleKey?}], try: [lines]}, pilot.config.json,
+// Fixture layout: demo.json {fakes: [{name, port, args?, toggleKey?}], try: [lines; {url} and {dir} are filled in]},
+// pilot.config.json,
 // and data files copied verbatim into the demo dir (transcript.jsonl, rules.json, modules.json, roles.json, ...).
 'use strict';
 const { spawn } = require('child_process');
@@ -92,7 +93,8 @@ launch('server', ['server.js'], { PILOT_DIR: dirName, PILOT_CONFIG: path.relativ
     await new Promise((r) => setTimeout(r, 100));
   }
   console.log(`\n  CLI Pilot demo ${version}: open ${URL}\n\n  try this:`);
-  for (const l of demo.try || []) console.log(`   - ${l}`);
+  // {url} and {dir} in a try line become this demo's URL and its absolute data dir (one-liners stay copy-pasteable)
+  for (const l of demo.try || []) console.log(`   - ${l.replaceAll('{url}', URL).replaceAll('{dir}', DIR)}`);
   console.log('\n  Ctrl+C stops the demo (server and fakes).\n');
 })();
 
