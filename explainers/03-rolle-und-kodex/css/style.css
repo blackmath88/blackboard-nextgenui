@@ -147,3 +147,7 @@ p { margin: 0 0 12px; }
   .arch .cell::before { content: attr(data-lane); display: block; font: 500 12px var(--sans); color: var(--rubric); }
 }
 @media (max-width: 560px) { .kodex { grid-template-columns: minmax(0, 1fr); } .kodex .page { border-right: 0; border-bottom: 1px solid var(--rule); } }
+
+/* Link back to the collection overview */
+.home { display: inline-block; margin: 0 0 20px; font: italic 400 18px var(--serif); color: var(--muted); text-decoration: none; }
+.home:hover { color: var(--rubric); }

@@ -122,3 +122,7 @@ p { margin: 0 0 10px; }
   .bench.n1, .bench.n2, .bench.n3, .bench.n4, .two { grid-template-columns: minmax(0, 1fr); }
   .term { height: 460px; }
 }
+
+/* Link back to the collection overview */
+.home { display: inline-block; margin: 0 0 14px; font: 400 22px/1 var(--px); color: var(--muted); text-decoration: none; }
+.home:hover { color: var(--amber); }

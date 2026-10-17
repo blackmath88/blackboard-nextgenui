@@ -176,3 +176,7 @@ table.map th { font-weight: 600; color: var(--ink); }
   .grid, .intro, .open .cols { grid-template-columns: minmax(0, 1fr); }
   .intro { gap: 8px; }
 }
+
+/* Link back to the collection overview */
+.home { display: inline-block; margin: 0 0 18px; font: 500 14px var(--sans); color: var(--muted); text-decoration: none; }
+.home:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
