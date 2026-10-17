@@ -78,6 +78,10 @@ const PAIRS = [
   ['controller label', '--ctl-fg', '--ctl-bg', '--panel'],
   ['confirmed tag (answered yes/always)', '--ok-fg', '--ok-bg', '--panel'],
   ['rejected/blocked tag and label (no/never, blocked, stall, error)', '--bad-fg', '--bad-bg', '--panel'],
+  // pilot-v0.6: author chips in the pane bar byline (rule = controller, answer = you) sit on the bar, not the panel
+  ['you author chip on pane bar', '--you-fg', '--you-bg', '--base'],
+  ['model author chip on pane bar', '--pilot-fg', '--pilot-bg', '--base'],
+  ['controller author chip on pane bar', '--ctl-fg', '--ctl-bg', '--base'],
   ['status bar text on lavender fill', '--onfill', '--lavender'],
   ['hovered key button text on lavender fill', '--onfill', '--lavender'],
 ];

@@ -51,3 +51,18 @@ class as the old `c`/`r` (one keystroke answers). The brief keeps the v0.3 rule 
 - Blocks: nothing; it is a usability risk during dogfooding.
 - Options: keep; ignore y/n/a/x for ~1 s after a question appeared; require focus on the question (Tab), like c/r.
 
+## 2026-10-17 (v0.6) How strict should the P5 thresholds be read?
+`/stats` reads the build plan's proposed thresholds literally and adds only what was needed to make each measurable
+(definitions in CHECKS.md # pilot-v0.6):
+- Quiet: asks ≤ ceil(hours of work), and only after 1 h of work.
+- Usefulness: a work session ends at a gap of more than 30 min.
+- Signal: no minimum sample, so 1 confirmed of 1 already passes.
+- Blocks: nothing. It matters on day 7 of the dogfood week.
+- Options: keep; add a minimum sample for Signal (e.g. 10 decided); make "no more than once per hour" mean "never two
+  asks within one hour of work" (stricter than the rate); move the thresholds into `rules.json` so they can be tuned
+  by hand.
+
+## 2026-10-17 (v0.6) Hand edits of transcript lines
+Authorship of hand edits covers `state.json` items and `modules.json` answers. A hand-edited `transcript.jsonl` line
+still shows its `role` as author (no ledger for lines).
+- Blocks: nothing. Options: keep; or log a hash per appended line and mark lines that differ as "you (file edit)".

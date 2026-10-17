@@ -1,0 +1,12 @@
+{
+  "fakes": [
+    { "name": "frontier", "port": 5764 },
+    { "name": "morrow", "port": 5765 }
+  ],
+  "try": [
+    "Open {url}. Every line says who wrote it (you / model + name / controller / system); every card says its author and who decided it; every pane bar says which rule grew it and which answer allowed it. dec-8 says \"confirmed by you (file edit)\", task-7 \"you (file edit)\", task-1/task-2 \"edited by you (file edit): column\". (Three days of history are synthetic fixture data.)",
+    "Type /stats: the five P5 measures, 3 PASS and 2 NOT YET, labelled as fixture data. Same from the shell: cd {app} && npm run stats -- {rel}",
+    "Click three entries in the index pane, then /stats again -> usefulness PASS (index jumps are logged by the page).",
+    "Hand edit, in another terminal (flips dec-7 between proposed and confirmed; the card follows within a second and says \"confirmed by you (file edit)\"): node -e 'const f=\"{dir}/state.json\",fs=require(\"fs\"),s=JSON.parse(fs.readFileSync(f)),d=s.items.find(i=>i.id===\"dec-7\");d.status=d.status===\"proposed\"?\"confirmed\":\"proposed\";fs.writeFileSync(f,JSON.stringify(s,null,2))'"
+  ]
+}

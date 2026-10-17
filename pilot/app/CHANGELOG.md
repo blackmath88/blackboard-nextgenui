@@ -4,6 +4,66 @@ P0 to P2 (skeleton, model roles, growth controller with consent and the index pa
 baseline, merged before the numbered iterations started; see `CHECKS.md` (# P0, # P1, # P2). Iterations are
 tagged `pilot-v0.N` by the coordinator; each one is runnable with `npm run demo -- v0.N`.
 
+## pilot-v0.6
+
+Authorship and metrics, `/stats`. Still untested with a real model (fakes only).
+
+**Adds**
+- **Every line says who wrote it:** `you` (peach), `model` + the model name (sky), `controller` (lavender, next to its
+  sprite), `system`. Each line also carries `data-author` and a tooltip "authored by …".
+- **Every card says its author and who decided it.** Format: `dec-1 · model · morrow · confirmed · confirmed by you
+  10-14 09:06`. Hand edits read "you (file edit)":
+  - `confirmed by you (file edit)`: the status was changed in the file.
+  - `edited by you (file edit): column`: other fields were changed in the file.
+  - `task-7 · you (file edit)`: an item added in the file.
+- **Every pane bar says which rule and which answer:** `controller · messages ≥ 12 · you: yes 10-15 14:14`. An answer
+  that was written into `modules.json` by hand (no matching consent event) reads `you (file edit): yes`.
+- **How a hand edit is detected (write ledger):** whenever the server creates an item (extraction) or decides one
+  (`POST /answer`), it appends an `item_write` event with a full copy of the item to `metrics.jsonl`.
+  - An item in `state.json` that differs from its last copy was changed by hand. The differing fields are shown as
+    "you (file edit)".
+  - This works for edits made while the server was down. `state.json` itself gets no extra field.
+  - A later server write keeps earlier hand edits attributed (`handFields`, `addedByFile`).
+  - An item with no ledger entry (older data, the v0.4/v0.5 fixtures) shows its declared `author`. A `user` item can
+    only come from the file, so it always reads "you (file edit)".
+  - On every `state.json` change the watcher also logs `file_edit {itemId, fields}`.
+- **P5 events in `metrics.jsonl`** (still append-only):
+  - `server_start` with counts (lines, messages, items, panes, answers).
+  - `turn` with lines and messages after each chat turn.
+  - `consent` now has an `id`, which is stored as `answers.<module>.consentId`.
+  - `controller_add {module, answer, answerRef}` on both paths. Before, only `always` logged an add; a `yes` that
+    added a pane logged none.
+  - `index_jump` from the page via `POST /metric`. Only this event is accepted, and only with an existing message id.
+  - `item_write` and `file_edit` (described above).
+  - Pane entries in `modules.json` now record their `rule {metric, threshold}`.
+- **`/stats`** (and `npm run stats -- <pilotDir>`, same lines) prints the five P5 measures with their thresholds from
+  `04-build-plan.md`, PASS or NOT YET, and the numbers behind each. They are computed in `stats.js` from
+  `metrics.jsonl` and the files only: no model, no writes. Fixture data is labelled ("FIXTURE DATA: n of m …").
+- **Demo `v0.6`:** three synthetic days (made by `dev/make-fixture-v06.js`, every line `"fixture": true`).
+  - All three panes are present.
+  - Items come from the model, from you via the page, and from file edits.
+  - `/stats` shows 3 PASS and 2 NOT YET. Three index clicks turn Usefulness into PASS.
+- **Dev:**
+  - `browser-check.js v06`.
+  - `contrast-check.js` checks the author chips on the pane bar.
+  - `demo.js` fills `{app}` and `{rel}` in try lines.
+
+**Why**
+- 01-concept "every frame says whose it is" and authority rule 4. The v0.5 coordinator run found that a status
+  changed by hand still rendered as the model's.
+- P5 of the build plan is read from `metrics.jsonl`. Before v0.6 the file could not answer continuity, consent (for
+  `yes` answers), usefulness or quiet.
+
+**Deliberately does not**
+- No authorship for hand edits of `transcript.jsonl` lines. Items and pane answers only.
+- No signature field in `state.json`. Deleting or editing `metrics.jsonl` removes the evidence, and items then show
+  their declared author.
+- A hand-made item that claims `author: model` is not flagged when nothing in the ledger contradicts it.
+- "You never re-explained the project" and the kill criterion are not measured; `/stats` says so.
+- No minimum sample for Signal (1 decided proposal can PASS). Thresholds are not configurable: they are the build
+  plan's, hard-coded with their wording in `stats.js`.
+- No charts; `/stats` is text.
+
 ## pilot-v0.5
 
 Live files (P4), and `c`/`r` only on a focused proposal. Still untested with a real model (fakes only).

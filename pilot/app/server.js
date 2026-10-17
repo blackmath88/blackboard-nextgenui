@@ -1,16 +1,19 @@
 #!/usr/bin/env node
-// CLI Pilot (P0-P2 + pilot-v0.3 + pilot-v0.4 + pilot-v0.5): serves the page, proxies POST /chat to the `chat` role with
+// CLI Pilot (P0-P2 + pilot-v0.3 to pilot-v0.6): serves the page, proxies POST /chat to the `chat` role with
 // streaming and per-role candidates/policies, appends lines to .pilot/transcript.jsonl,
 // runs the deterministic growth controller (rules.json -> consent -> modules.json),
 // runs the `extract` role in the background after each reply (proposals -> .pilot/state.json),
 // handles commands via POST /command and answers via POST /answer, logs to .pilot/metrics.jsonl,
 // watches .pilot/ (fs.watch, 150 ms debounce) and pushes {file, rev} to the page over SSE (GET /events).
+// pilot-v0.6: authorship (item_write ledger in metrics.jsonl, hand edits shown as "you (file edit)"), the P5 metrics
+// events (server_start, turn, controller_add with answerRef, index_jump via POST /metric) and /stats (stats.js).
 // Node 20+, no dependencies. All paths resolve against this file's folder.
 'use strict';
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const stats = require('./stats.js');
 
 const APP = __dirname;
 const PUBLIC = path.join(APP, 'public');
@@ -74,6 +77,17 @@ function appendLine(role, text, model, kind) {
 function metric(event, fields) {
   return serial(() => appendJsonl(METRICS, { ts: new Date().toISOString(), event, ...fields }));
 }
+
+// metrics.jsonl parsed, cached by size/mtime/inode (authorship and pane info read it on every GET /state).
+let metricsCache = { sig: null, events: [] };
+function metricsEvents() {
+  let st;
+  try { st = fs.statSync(METRICS); } catch { return []; }
+  const s = `${st.size}|${st.mtimeMs}|${st.ino}`;
+  if (metricsCache.sig !== s) metricsCache = { sig: s, events: stats.readJsonl(METRICS) };
+  return metricsCache.events;
+}
+const shortId = (p) => p + '-' + crypto.randomUUID().slice(0, 8);
 
 function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return fallback; throw e; }
@@ -145,11 +159,12 @@ function runController() {
       const n = c[rule.metric];
       if (typeof n !== 'number' || typeof rule.threshold !== 'number' || !ruleDue(rule, n, m)) continue;
       const ts = new Date().toISOString();
-      if ((m.answers[rule.module] || {}).answer === 'always') {   // consent already given for good
-        m.panes.push({ module: rule.module, addedAt: ts, atCount: n });
+      const prior = m.answers[rule.module] || {};
+      if (prior.answer === 'always') {   // consent already given for good
+        m.panes.push({ module: rule.module, addedAt: ts, atCount: n, rule: { metric: rule.metric, threshold: rule.threshold } });
         writeModules(m);
         appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'controller', text: `${n} ${rule.metric}. Added the ${rule.module} pane (you said always).`, model: null, module: rule.module });
-        appendJsonl(METRICS, { ts, event: 'controller_add', module: rule.module, count: n, answer: 'always' });
+        appendJsonl(METRICS, { ts, event: 'controller_add', module: rule.module, count: n, answer: 'always', answerRef: prior.consentId || null, answerAt: prior.at || null });
         return;
       }
       const text = String(rule.ask || `Add the ${rule.module} pane?`).replace('{n}', n);
@@ -174,17 +189,22 @@ function answer(module, raw, seenRev) {
     if (!module || m.pending !== module) return { code: 409, body: { error: `no pending question for "${module}"`, pending: m.pending } };
     const ts = new Date().toISOString();
     // count = the rule's own metric (decisions for map, tasks for kanban), so "no" waits for that count to double
-    let metricName = 'messages';
-    try { metricName = ((readJson(RULES, { rules: [] }).rules || []).find((r) => r.module === module) || {}).metric || 'messages'; } catch { /* keep messages */ }
+    let rule = {};
+    try { rule = (readJson(RULES, { rules: [] }).rules || []).find((r) => r.module === module) || {}; } catch { /* keep messages */ }
+    const metricName = rule.metric || 'messages';
     const c = counts(readTranscript());
     const n = typeof c[metricName] === 'number' ? c[metricName] : c.messages;
-    m.answers[module] = { answer: ans, at: ts, count: n };
-    if ((ans === 'yes' || ans === 'always') && !m.panes.some((p) => p.module === module)) m.panes.push({ module, addedAt: ts, atCount: n });
+    // pilot-v0.6: the answer carries the id of its consent event; a pane added by it says which rule and which answer
+    const consentId = shortId('c');
+    m.answers[module] = { answer: ans, at: ts, count: n, consentId };
+    const adds = (ans === 'yes' || ans === 'always') && !m.panes.some((p) => p.module === module);
+    if (adds) m.panes.push({ module, addedAt: ts, atCount: n, rule: { metric: metricName, threshold: typeof rule.threshold === 'number' ? rule.threshold : null } });
     m.pending = null;
     writeModules(m);
     const effect = { yes: 'pane added', always: 'pane added; will not ask again', no: 'will ask again when the count has doubled', never: 'will never ask again' }[ans];
     appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'system', text: `${module}: ${ans}, ${effect}`, model: null });
-    appendJsonl(METRICS, { ts, event: 'consent', module, answer: ans, count: n, metric: metricName });
+    appendJsonl(METRICS, { ts, event: 'consent', id: consentId, module, answer: ans, count: n, metric: metricName });
+    if (adds) appendJsonl(METRICS, { ts, event: 'controller_add', module, count: n, answer: ans, answerRef: consentId, answerAt: ts });
     return { code: 200, body: { ok: true, module, answer: ans } };
   });
 }
@@ -492,10 +512,49 @@ async function runExtraction(userLine, replyLine) {
       ids.push(item.id);
     }
     const rev = ids.length ? writeState(st.doc) : st.rev;
+    for (const id of ids) itemWrite(st.doc.items.find((i) => i.id === id), 'extract', null, ts);
     appendJsonl(METRICS, { ts, event: 'extract', ...base, returned: parsed.items.length, proposed: ids.length,
       dropped: parsed.items.length - ids.length, ids, rev, latencyMs: Date.now() - t0 });
   });
   await runController();   // new proposals may cross a map/kanban threshold
+}
+
+// pilot-v0.6: the server's write ledger. Every item the server creates or decides is logged as `item_write` with a
+// copy of the item as written (see stats.js provenance). Hand edits made before this write stay attributed: their
+// fields go along as handFields (except the ones this write sets), an item that came in through the file keeps
+// addedByFile. Call inside the write chain, right after writeState.
+function itemWrite(item, via, before, ts) {
+  const set = via === 'decide' ? ['status', 'decidedAt', 'decidedBy'] : [];
+  const handFields = before ? before.fields.filter((f) => !set.includes(f)) : [];
+  const e = { ts, event: 'item_write', via, itemId: item.id, item: JSON.parse(JSON.stringify(item)) };
+  if (handFields.length) e.handFields = handFields;
+  if (before && before.added) e.addedByFile = true;
+  appendJsonl(METRICS, e);
+  noteItems();   // the server's own write is the new baseline for file-edit detection
+}
+
+// File-edit detection (pilot-v0.6): on every state.json change the watcher compares each item with the ledger; when
+// the set of hand-edited fields of an item changes, a `file_edit` event is logged (informational: the page and /stats
+// derive authorship from the ledger and the file, so edits made while the server was down are shown too).
+let provSeen = null;   // id -> JSON of the last provenance seen
+function noteItems(log) {
+  const st = readState();
+  if (st.error) return [];
+  const led = stats.ledgerOf(metricsEvents());
+  const now = new Map(st.items.map((i) => [i.id, JSON.stringify(stats.provenance(i, led.get(i.id)))]));
+  const out = [];
+  if (provSeen && log) {
+    for (const [id, p] of now) if (provSeen.get(id) !== p && p !== 'null') out.push({ itemId: id, ...JSON.parse(p) });
+    for (const id of provSeen.keys()) if (!now.has(id) && led.has(id)) out.push({ itemId: id, removed: true });
+  }
+  provSeen = now;
+  return out;
+}
+function onStateFileChange() {
+  serial(() => {
+    const ts = new Date().toISOString();
+    for (const e of noteItems(true)) appendJsonl(METRICS, { ts, event: 'file_edit', file: 'state.json', ...e });
+  }).catch((err) => console.error('file_edit:', err.message));
 }
 
 // A write from the page carried a rev that is no longer the file's: 409 with stale: true; the page reloads state.
@@ -517,8 +576,10 @@ function decide(itemId, raw, seenRev) {
     if (!item) return { code: 404, body: { error: `no item "${itemId}"` } };
     if (item.status !== 'proposed') return { code: 409, body: { error: `${itemId} is ${item.status || 'not a proposal'}, only proposed items can be decided` } };
     const ts = new Date().toISOString();
+    const before = stats.provenance(item, stats.ledgerOf(metricsEvents()).get(itemId));   // hand edits so far
     item.status = status; item.decidedAt = ts; item.decidedBy = 'user';
     const rev = writeState(st.doc);
+    itemWrite(item, 'decide', before, ts);
     appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'system', text: `${itemId} ${status}: ${item.text}`, model: null });
     appendJsonl(METRICS, { ts, event: 'decide', itemId, kind: item.kind, decision: status, decidedBy: 'user', author: item.author || null, model: item.model || null, rev });
     return { code: 200, body: { ok: true, item, rev } };
@@ -573,6 +634,7 @@ function scan() {
     for (const n of known.keys()) if (!now.has(n)) changed.push(n);
     known = now;
     for (const file of changed.sort()) broadcast('change', { file, ...fileRev(file) });
+    if (changed.includes('state.json')) onStateFileChange();
   } catch (err) { console.error('watch:', err.message); }
 }
 function startWatch() {
@@ -604,8 +666,14 @@ function statePayload(only) {
   if (want('transcript.jsonl')) { const lines = readTranscript(); out.transcript = lines.slice(-TAIL); out.total = lines.length; }
   if (want('modules.json') || want('roles.json')) out.models = modelsSummary();
   let m = null, st = null;
-  if (want('modules.json')) { m = readModules(); Object.assign(out, { panes: visiblePanes(m), pending: m.pending, answers: m.answers, modulesRev: m.rev }); }
-  if (want('state.json')) { st = readState(); Object.assign(out, { items: st.items, stateRev: st.rev, stateError: st.error || null }); }
+  if (want('modules.json')) {
+    m = readModules();
+    let rules = [];
+    try { rules = readJson(RULES, { rules: [] }).rules || []; } catch { /* broken rules.json: rule from the pane entry only */ }
+    Object.assign(out, { panes: visiblePanes(m), pending: m.pending, answers: m.answers, modulesRev: m.rev, paneInfo: stats.paneInfo(m, rules, metricsEvents()) });
+  }
+  // items carry `prov` ({added, fields}) when a part of them came from a hand edit (pilot-v0.6, see stats.js)
+  if (want('state.json')) { st = readState(); Object.assign(out, { items: stats.withProvenance(st.items, metricsEvents()), stateRev: st.rev, stateError: st.error || null }); }
   // a broken hand-editable file: the page says "file X is not valid JSON, showing last good version" until fixed
   const fileErrors = {};
   for (const [f, e] of [['state.json', (st || readState()).error], ['modules.json', (m || readModules()).error], ['roles.json', readJsonGood(ROLES, {}).error]]) if (e) fileErrors[f] = e;
@@ -667,6 +735,8 @@ async function handleChat(req, res) {
     if (!res.writableEnded) res.write(`\n[${msg}]`);
   }
   await runController();
+  const after = readTranscript();
+  await metric('turn', { ok: !!replyLine, lines: after.length, messages: after.filter((l) => l.role === 'user' || l.role === 'assistant').length });
   // Extraction only after a complete reply (not after a failure or a stall), queued before res.end() so
   // GET /state already reports it as running, and never awaited here: it cannot delay the chat reply.
   if (replyLine) queueExtraction(userLine, replyLine);
@@ -680,6 +750,7 @@ const HELP = [
   '/model <role> auto         unpin: back to the role policy, starting at the first candidate',
   '/rules                     rules from .pilot/rules.json with current counts',
   '/panes                     panes and your answers',
+  '/stats                     the five P5 measures (04-build-plan.md) from metrics.jsonl and the files, PASS / NOT YET',
   '/theme light|dark|auto     colour theme of this page (kept in this browser only)',
   '/help                      this list',
 ];
@@ -735,6 +806,7 @@ async function runCommand(input) {
       return `${r.module}: ${r.metric} ${c[r.metric]} / ${r.threshold}  (${state})`;
     }) };
   }
+  if (cmd === '/stats') return { ok: true, lines: stats.formatStats(stats.computeStats(PILOT), `${path.relative(APP, PILOT)}/`) };
   if (cmd === '/panes') {
     const m = readModules();
     const lines = ['chat (always)', ...m.panes.map((p) => `${p.module} added ${p.addedAt} at ${p.atCount} messages`)];
@@ -760,6 +832,18 @@ const server = http.createServer(async (req, res) => {
       const out = body && body.itemId !== undefined ? await decide(body.itemId, body.decision, rev) : await answer(body && body.module, body && body.answer, rev);
       return sendJson(res, out.code, out.body);
     }
+    // pilot-v0.6: the page reports index jumps (Usefulness). Only this one event, with a message id that exists.
+    if (req.method === 'POST' && pathname === '/metric') {
+      let body;
+      try { body = JSON.parse(await readBody(req, 2000)); } catch { return sendJson(res, 400, { error: 'expected JSON {event: "index_jump", target}' }); }
+      if (!body || body.event !== 'index_jump') return sendJson(res, 400, { error: 'only {event: "index_jump", target} is accepted' });
+      const target = typeof body.target === 'string' ? body.target : '';
+      const lines = readTranscript();
+      const at = lines.findIndex((l) => l.id === target);
+      if (at < 0) return sendJson(res, 400, { error: `no message "${target}"` });
+      await metric('index_jump', { target, position: at + 1, of: lines.length });
+      return sendJson(res, 200, { ok: true });
+    }
     if (req.method === 'POST' && pathname === '/command') {
       let text;
       try { text = String(JSON.parse(await readBody(req)).text || ''); } catch { return sendJson(res, 400, { ok: false, lines: ['expected JSON {text}'] }); }
@@ -777,5 +861,11 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
+  // pilot-v0.6: continuity. Counts at start, compared by /stats with the previous run's last turn.
+  const lines = readTranscript(), m = readModules(), st = readState();
+  metric('server_start', { pid: process.pid, lines: lines.length, messages: lines.filter((l) => l.role === 'user' || l.role === 'assistant').length,
+    items: st.items.length, panes: visiblePanes(m).length, answers: Object.keys(m.answers).length,
+    fileErrors: [m.error, st.error].filter(Boolean) }).catch((err) => console.error('server_start:', err.message));
+  noteItems();   // baseline for file-edit detection (edits made while the server was down show via the ledger)
   console.log(`CLI Pilot on http://${HOST}:${PORT}  (config: ${path.relative(APP, configPath)}, data: ${path.relative(APP, PILOT)}/)`);
 });

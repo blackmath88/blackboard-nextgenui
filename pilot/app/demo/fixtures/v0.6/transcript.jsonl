@@ -1,0 +1,64 @@
+{"id":"m-f001","ts":"2026-10-14T09:01:00.000Z","role":"user","text":"Let us dogfood the pilot on one real topic this week: my health insurance claim.","model":null,"fixture":true}
+{"id":"m-f002","ts":"2026-10-14T09:01:24.000Z","role":"assistant","text":"[fixture] Good choice. Decision: dogfood the pilot on the insurance claim. It has deadlines, documents and a few decisions.","model":"frontier","fixture":true}
+{"id":"m-f003","ts":"2026-10-14T09:05:17.000Z","role":"user","text":"Decision: the claim stays on local models only. I do not want the invoices in the cloud.","model":null,"fixture":true}
+{"id":"m-f004","ts":"2026-10-14T09:05:41.000Z","role":"assistant","text":"[fixture] Understood. The extract role runs on morrow, so the text stays on your network.","model":"frontier","fixture":true}
+{"id":"m-f005","ts":"2026-10-14T09:05:44.000Z","role":"controller","text":"2 decisions so far. Add a reasoning map?","model":null,"module":"map","fixture":true}
+{"id":"m-f006","ts":"2026-10-14T09:05:52.000Z","role":"system","text":"map: yes, pane added","model":null,"fixture":true}
+{"id":"m-f007","ts":"2026-10-14T09:06:12.000Z","role":"system","text":"dec-1 confirmed: dogfood the pilot on the insurance claim","model":null,"fixture":true}
+{"id":"m-f008","ts":"2026-10-14T09:06:32.000Z","role":"system","text":"dec-2 confirmed: the claim stays on local models only","model":null,"fixture":true}
+{"id":"m-f009","ts":"2026-10-14T09:09:52.000Z","role":"user","text":"What does the insurer need from me first?","model":null,"fixture":true}
+{"id":"m-f010","ts":"2026-10-14T09:10:16.000Z","role":"assistant","text":"[fixture] Usually the itemised invoice, the referral and the claim form. Task: scan the hospital invoice.","model":"frontier","fixture":true}
+{"id":"m-f011","ts":"2026-10-14T09:14:39.000Z","role":"user","text":"The invoice is here, I will scan it tonight.","model":null,"fixture":true}
+{"id":"m-f012","ts":"2026-10-14T09:15:03.000Z","role":"assistant","text":"[fixture] Fine. Their checklist is at https://example.org/claims/guide if you want to tick things off.","model":"frontier","fixture":true}
+{"id":"m-f013","ts":"2026-10-14T09:19:06.000Z","role":"user","text":"Should we write the letter with a paid cloud model? It writes better German.","model":null,"fixture":true}
+{"id":"m-f014","ts":"2026-10-14T09:19:30.000Z","role":"assistant","text":"[fixture] That would break your local-only decision. Decision: use a paid cloud model for the letter. Only if you change your mind.","model":"frontier","fixture":true}
+{"id":"m-f015","ts":"2026-10-14T09:19:53.000Z","role":"system","text":"dec-3 rejected: use a paid cloud model for the letter","model":null,"fixture":true}
+{"id":"m-f016","ts":"2026-10-14T09:22:53.000Z","role":"user","text":"No, keep it local. The letter can be plain.","model":null,"fixture":true}
+{"id":"m-f017","ts":"2026-10-14T09:23:17.000Z","role":"assistant","text":"[fixture] Then morrow drafts it and you polish it.","model":"frontier","fixture":true}
+{"id":"m-f018","ts":"2026-10-14T09:23:17.000Z","role":"controller","text":"12 messages. Scrolling back gets slow. Add an index pane?","model":null,"module":"index","fixture":true}
+{"id":"m-f019","ts":"2026-10-14T09:23:25.000Z","role":"system","text":"index: no, will ask again when the count has doubled","model":null,"fixture":true}
+{"id":"m-f020","ts":"2026-10-14T09:28:25.000Z","role":"user","text":"When is the deadline exactly?","model":null,"fixture":true}
+{"id":"m-f021","ts":"2026-10-14T09:28:49.000Z","role":"assistant","text":"[fixture] The letter says 30 days from the invoice date, so 2026-11-06.","model":"frontier","fixture":true}
+{"id":"m-f022","ts":"2026-10-14T09:32:29.000Z","role":"user","text":"Good. That is enough for today.","model":null,"fixture":true}
+{"id":"m-f023","ts":"2026-10-14T09:32:53.000Z","role":"assistant","text":"[fixture] Summary: two decisions, one task, the deadline is 2026-11-06.","model":"frontier","fixture":true}
+{"id":"m-f024","ts":"2026-10-14T09:33:13.000Z","role":"system","text":"task-1 confirmed: scan the hospital invoice","model":null,"fixture":true}
+{"id":"m-f025","ts":"2026-10-15T14:01:00.000Z","role":"user","text":"Back on the claim. I scanned the invoice yesterday.","model":null,"fixture":true}
+{"id":"m-f026","ts":"2026-10-15T14:01:24.000Z","role":"assistant","text":"[fixture] Good. Next is the call. Task: call the insurer about the deadline.","model":"frontier","fixture":true}
+{"id":"m-f027","ts":"2026-10-15T14:05:57.000Z","role":"user","text":"I called. They want the referral letter as well.","model":null,"fixture":true}
+{"id":"m-f028","ts":"2026-10-15T14:06:21.000Z","role":"assistant","text":"[fixture] Then the referral goes with the claim. Decision: send the referral together with the claim.","model":"frontier","fixture":true}
+{"id":"m-f029","ts":"2026-10-15T14:09:34.000Z","role":"user","text":"Can you remind me what we decided about the models?","model":null,"fixture":true}
+{"id":"m-f030","ts":"2026-10-15T14:09:58.000Z","role":"assistant","text":"[fixture] dec-2: the claim stays on local models only.","model":"frontier","fixture":true}
+{"id":"m-f031","ts":"2026-10-15T14:13:58.000Z","role":"user","text":"Right. Let us draft the letter now.","model":null,"fixture":true}
+{"id":"m-f032","ts":"2026-10-15T14:14:22.000Z","role":"assistant","text":"[fixture] A first outline: greeting, claim number, the three documents, one sentence on the deadline. Task: draft the claim letter.","model":"frontier","fixture":true}
+{"id":"m-f033","ts":"2026-10-15T14:14:22.000Z","role":"controller","text":"24 messages. Scrolling back gets slow. Add an index pane?","model":null,"module":"index","fixture":true}
+{"id":"m-f034","ts":"2026-10-15T14:14:33.000Z","role":"system","text":"index: yes, pane added","model":null,"fixture":true}
+{"id":"m-f035","ts":"2026-10-15T14:19:23.000Z","role":"user","text":"Decision: send it by registered mail, not the portal.","model":null,"fixture":true}
+{"id":"m-f036","ts":"2026-10-15T14:19:47.000Z","role":"assistant","text":"[fixture] Registered mail gives you a receipt with a date on it.","model":"frontier","fixture":true}
+{"id":"m-f037","ts":"2026-10-15T14:19:47.000Z","role":"controller","text":"3 tasks have come up. Track them on a board?","model":null,"module":"kanban","fixture":true}
+{"id":"m-f038","ts":"2026-10-15T14:19:58.000Z","role":"system","text":"kanban: no, will ask again when the count has doubled","model":null,"fixture":true}
+{"id":"m-f039","ts":"2026-10-15T14:20:18.000Z","role":"system","text":"task-2 confirmed: call the insurer about the deadline","model":null,"fixture":true}
+{"id":"m-f040","ts":"2026-10-15T14:20:38.000Z","role":"system","text":"dec-4 confirmed: send the referral together with the claim","model":null,"fixture":true}
+{"id":"m-f041","ts":"2026-10-15T14:20:58.000Z","role":"system","text":"dec-5 confirmed: send it by registered mail","model":null,"fixture":true}
+{"id":"m-f042","ts":"2026-10-15T14:21:18.000Z","role":"system","text":"task-3 confirmed: draft the claim letter","model":null,"fixture":true}
+{"id":"m-f043","ts":"2026-10-15T14:25:08.000Z","role":"user","text":"Should I also ask the hospital for an itemised bill?","model":null,"fixture":true}
+{"id":"m-f044","ts":"2026-10-15T14:25:32.000Z","role":"assistant","text":"[fixture] Only if the insurer asks for it. Decision: ask the hospital for an itemised bill. I would wait.","model":"frontier","fixture":true}
+{"id":"m-f045","ts":"2026-10-15T14:25:55.000Z","role":"system","text":"dec-6 rejected: ask the hospital for an itemised bill","model":null,"fixture":true}
+{"id":"m-f046","ts":"2026-10-15T14:29:15.000Z","role":"user","text":"Agreed, we wait. Enough for today.","model":null,"fixture":true}
+{"id":"m-f047","ts":"2026-10-15T14:29:39.000Z","role":"assistant","text":"[fixture] Summary: invoice scanned, insurer called, letter outlined, registered mail.","model":"frontier","fixture":true}
+{"id":"m-f048","ts":"2026-10-16T10:01:00.000Z","role":"user","text":"Letter day. Task: print the claim form.","model":null,"fixture":true}
+{"id":"m-f049","ts":"2026-10-16T10:01:24.000Z","role":"assistant","text":"[fixture] Noted. Task: sign the claim form after printing.","model":"frontier","fixture":true}
+{"id":"m-f050","ts":"2026-10-16T10:05:37.000Z","role":"user","text":"The referral is a photocopy, is that fine?","model":null,"fixture":true}
+{"id":"m-f051","ts":"2026-10-16T10:06:01.000Z","role":"assistant","text":"[fixture] Most insurers accept a copy. Task: ask the insurer whether a copy of the referral is enough.","model":"frontier","fixture":true}
+{"id":"m-f052","ts":"2026-10-16T10:06:04.000Z","role":"controller","text":"6 tasks have come up. Track them on a board?","model":null,"module":"kanban","fixture":true}
+{"id":"m-f053","ts":"2026-10-16T10:06:12.000Z","role":"system","text":"kanban: always, pane added; will not ask again","model":null,"fixture":true}
+{"id":"m-f054","ts":"2026-10-16T10:09:42.000Z","role":"user","text":"Decision: keep a copy of everything in one folder.","model":null,"fixture":true}
+{"id":"m-f055","ts":"2026-10-16T10:10:06.000Z","role":"assistant","text":"[fixture] One folder makes the receipt easy to find later.","model":"frontier","fixture":true}
+{"id":"m-f056","ts":"2026-10-16T10:13:59.000Z","role":"user","text":"Should the letter mention the 30-day deadline?","model":null,"fixture":true}
+{"id":"m-f057","ts":"2026-10-16T10:14:23.000Z","role":"assistant","text":"[fixture] Yes, in one sentence. Decision: mention the deadline in the first paragraph.","model":"frontier","fixture":true}
+{"id":"m-f058","ts":"2026-10-16T10:18:46.000Z","role":"user","text":"Decision: write the letter in English.","model":null,"fixture":true}
+{"id":"m-f059","ts":"2026-10-16T10:19:10.000Z","role":"assistant","text":"[fixture] Your insurer writes in German; I would answer in German.","model":"frontier","fixture":true}
+{"id":"m-f060","ts":"2026-10-16T10:19:33.000Z","role":"system","text":"dec-9 rejected: write the letter in English","model":null,"fixture":true}
+{"id":"m-f061","ts":"2026-10-16T10:23:33.000Z","role":"user","text":"Fine, German. Let me look back at the outline.","model":null,"fixture":true}
+{"id":"m-f062","ts":"2026-10-16T10:23:57.000Z","role":"assistant","text":"[fixture] The outline is in yesterday's reply about drafting the letter.","model":"frontier","fixture":true}
+{"id":"m-f063","ts":"2026-10-16T10:27:47.000Z","role":"user","text":"Done for today, thanks.","model":null,"fixture":true}
+{"id":"m-f064","ts":"2026-10-16T10:28:11.000Z","role":"assistant","text":"[fixture] Tomorrow: print, sign, send.","model":"frontier","fixture":true}

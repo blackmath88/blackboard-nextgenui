@@ -509,3 +509,84 @@ Run by the coordinator, not the builder.
 - c/r fix: typing "can you check" with a proposal on screen left the text in the input and dec-2 proposed; `c` from the input is text.
 - Stale rev: `POST /answer {itemId: task-2, decision: r, rev: 2}` while stateRev was 6 → 409 `{stale: true}`; task-2 stayed proposed.
 - Seen, left for v0.6: a status change made by hand edit still renders as authored "by-model". v0.6 adds file-edit authorship.
+
+# pilot-v0.6
+
+Authorship and metrics, `/stats`. Everything runs against `dev/fake-model.js`; no real endpoint was contacted.
+
+**Reproduce:** `bash pilot/app/dev/verify-v0.6.sh`. It has 51 checks; one of them runs the 24 checks of
+`browser-check.js v06` (22 + 2 global). It ends with `ALL v0.6 CHECKS PASSED` and exits non-zero on failure.
+- Own ports: server 4790, fakes 5791/5792; browser part 4795/5796/5797 and Chrome 9373; demo part 4964/5964/5965.
+- Own throwaway dirs: `.pilot-verify-v06/`, `.pilot-verify-v06c/`, `.pilot-verify-v06b/`, `.pilot-demo-verify06/`.
+
+**Everything:** `cd pilot/app && npm run verify` (p0, p1, p2, v0.3–v0.6, browser p1 + p2; the v03–v06 browser checks
+run inside their verify scripts).
+Last run (Node v25.9.0, Chrome, macOS): all passed (after the one adapted v04 assertion below). `npm run demo -- v0.3`,
+`-- v0.4`, `-- v0.5` and `-- v0.6` each served `/state` within about 1 s, and SIGINT left no process behind.
+
+## Definitions (used by `/stats`, `stats.js`)
+
+| Term | Definition |
+|---|---|
+| Work session | Activity timestamps (user/assistant lines in `transcript.jsonl`, plus `index_jump` events for Usefulness) sorted; a gap of more than 30 min starts a new session. |
+| Hour of work | Sum of the gaps between consecutive user/assistant lines that are at most 30 min. Longer gaps are breaks and count as nothing. |
+| Restart | Every `server_start` after the first. |
+| Lost (continuity) | A `server_start` reports fewer transcript lines than the previous run's last `turn` (or its own start), or fewer consent answers than the previous start. Items are not compared: deleting an item by hand is allowed. |
+| Recorded answer | A `consent` event whose `id` equals `answers.<module>.consentId` (older data: same module and timestamp). |
+| File edit (items) | A field that differs from the item's last `item_write` copy in `metrics.jsonl` (plus `handFields` carried by that write); an item without a ledger entry and `author: user`. |
+
+## P5 measures (`04-build-plan.md`, proposed thresholds)
+
+| Measure | PASS when | NOT YET when |
+|---|---|---|
+| Continuity | at least 1 restart and nothing lost | no restart yet, or something was lost (the lines say what) |
+| Consent | at least 1 pane shown, every shown pane has a recorded answer, every `controller_add` references a yes/always consent | no pane yet, or a pane/add without a recorded answer |
+| Usefulness | 3 or more `index_jump` events in one work session | fewer |
+| Signal | at least 1 model proposal decided and confirmed ≥ rejected. Counted from `state.json` (`author: model`, confirmed/rejected, hand decisions included); `decide` events shown alongside. | nothing decided, or more rejected than confirmed |
+| Quiet | at least 1 h of work and controller asks ≤ ceil(hours of work) | less than 1 h of work, or more asks |
+
+Quiet uses ceil, so a single question in the first 20 minutes does not read as "3 per hour".
+
+## Checks
+
+| # | Check | How (section of `verify-v0.6.sh`) |
+|---|---|---|
+| 1 | `server_start` at boot with counts; `turn` after a reply; `consent` has an `id` equal to `modules.json` `answers.index.consentId`; `controller_add` with `answerRef` = that id on a `yes`; the pane entry records `rule`; `/state.paneInfo` has rule, answer, `recorded`. Always path: map removed by hand from `modules.json`, the controller re-adds it with `answerRef` = the always answer. `metrics.jsonl` stays append-only (old content is a byte prefix). | 1 |
+| 2 | `POST /metric`: `index_jump` to an existing message → 200, logged with target and position; unknown target, any other event, non-JSON → 400 and nothing logged. | 2 |
+| 3 | Ledger: one `item_write` per extracted item, equal to the item in `state.json`; untouched items have no `prov`; decide → `item_write` (via decide) then `decide` as the last line. Hand edit of a text → `prov.fields [text]` and a `file_edit` event; a later confirm through the page keeps `[text]` (`handFields`); an edit undone by hand → no `prov`. Edits made while the server was down (status) are found after the restart; a hand-added user item → `added`; a model item without a ledger entry → no `prov`. `state.json` has no field the server added for authorship. | 3 |
+| 4 | Continuity: the second `server_start` ≥ the last `turn`; `/stats` continuity PASS after 1 restart. A transcript cut while the server was down → NOT YET with "LOST … transcript lines". | 4 |
+| 5 | `npm run stats -- <dir>` on a copy of the v0.6 fixture: exit 0, five measures, verdicts continuity PASS, consent PASS, usefulness NOT YET, signal PASS, quiet NOT YET; "FIXTURE DATA: 130 of 130 metrics events and 64 of 64 transcript lines"; thresholds and numbers present. Same output from another directory with an absolute path, and with a relative path from `pilot/` (INIT_CWD). Read-only: every file byte-identical. A missing dir → exit 2, nothing created. `/stats` in a server on the same dir prints exactly the same lines. 3 jumps → usefulness PASS. A hand-written `consentId` → consent NOT YET naming the pane. Signal shows "1 decided by file edit". | 5 |
+| 6 | **Page** (`browser-check.js v06`, seeded from the v0.6 fixture): lines say you / model + frontier / controller / system with `data-author` and tooltip, and their labels use the role pairs (`--you-*`, `--pilot-*`, `--ctl-*`); card bylines for: decided by you (with time), pristine proposal, status flipped by hand, column moved by hand, item added by hand; chip colours; pane bars "controller · messages ≥ 12 · you: yes 10-15 14:14" etc.; hand edit dec-7 → "confirmed by you (file edit)" within 1 s (180–189 ms, 2 runs) and a `file_edit` event; flipped back → pristine; hand-written `consentId` → "you (file edit): yes"; `c` on a focused card → "confirmed by you <time>", then a hand edit of its text → "… · edited by you (file edit): text"; 3 index clicks → 3 `index_jump` events; `/stats` in the page → 5 verdict lines (usefulness now PASS) and the fixture label; a live reply "model frontier" and a live proposal without file-edit mark; no page errors; no request outside the server. | 6 |
+| 7 | Contrast passes, including the new pairs "you/model/controller author chip on pane bar" (both themes). | 6 |
+| 8 | **Demo:** `npm run demo -- v0.6` serves `/state` within ~1 s with three panes (rule + recorded answer) and items of every author kind; `/stats` says "3 PASS, 2 NOT YET" and "FIXTURE DATA: 130 of 131 metrics events" (the 131st is the demo's own `server_start`); the try lines name /stats, the index clicks, `npm run stats` and the flip one-liner; the printed one-liner and the printed `npm run stats` line work as printed; Ctrl+C leaves no process. | 7 |
+| 9 | Old checks passing: p0, p1, p2, v0.3, v0.4, v0.5, browser p1/p2/v03/v04/v05; one assertion adapted (below). | `npm run verify` |
+
+## Adapted assertions
+
+In `dev/browser-check.js v04`, marked `ADAPTED in pilot-v0.6`: "kanban question counts proposed + confirmed tasks (3)"
+read the whole controller line (`/^3 tasks/`). The line now starts with its author label `controller`, so it reads the
+question part (`.text`). Same assertion, same count.
+
+## Decisions
+
+- **Ledger in `metrics.jsonl`, not a signature in `state.json`.** The file stays exactly as the schema describes, the
+  changed fields are known (not just "something changed"), and it survives restarts. Cost: the evidence lives in a
+  second file. If `metrics.jsonl` is lost, items fall back to their declared author.
+- **No evidence ≠ file edit.** A model item without a ledger entry shows its declared author. Otherwise every v0.4/v0.5
+  fixture item and every item from an older build would wrongly read "you (file edit)".
+- **The page shows authorship but computes none.** `/state` items carry `prov {added, fields}` and `/state.paneInfo`
+  carries `recorded`. Both are derived when they are read and never written to a file.
+- **`/stats` is `stats.js`.** `server.js` requires it; `scripts/stats.js` requires it without starting a server.
+  `stats.js` has no side effects and writes nothing.
+- **Thresholds are hard-coded** with the build plan's wording. Reading `04-build-plan.md` at runtime would couple the app
+  to a doc outside `pilot/app/`.
+- **Fixture data** is marked per line (`"fixture": true`) and counted in the `/stats` header, so a demo can never pass
+  for a real week.
+
+## Deviations
+
+1. The proposal border stays dashed lavender. Lavender is also the controller's colour, but here it encodes status
+   ("proposed"), as since v0.4. The author is now named by a sky `model · morrow` chip next to it.
+2. The assistant label changed from `pilot` to `model` (the model name follows it). Command output lines (`/stats`,
+   `/rules`, …) have no author label: they are not stored and nobody authored them.
+3. `/state` gained `paneInfo` and per-item `prov`. Without them it returns what it did before.

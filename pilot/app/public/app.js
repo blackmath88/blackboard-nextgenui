@@ -3,13 +3,17 @@
 // pilot-v0.5: live files. GET /events (SSE) says which file changed; the page reloads only that part of /state.
 // Writes carry the rev the page last saw; a stale one comes back 409 {stale} and the page reloads with a notice.
 // c/r act only on a focused proposal card (Tab or arrows into a pane; Escape back to the input).
+// pilot-v0.6: every line, item and pane says who authored it (peach you, sky model, lavender controller); a hand edit
+// of state.json shows as "you (file edit)" (the server compares the file with its own write ledger, see stats.js).
+// Index jumps are reported with POST /metric (the Usefulness measure of /stats).
 'use strict';
 const $ = (id) => document.getElementById(id);
 const bench = $('bench'), log = $('log'), form = $('form'), input = $('input');
 const meta = $('meta'), count = $('count'), models = $('models'), notice = $('notice');
 const PLACEHOLDER = input.placeholder;
 const KEYS = { y: 'yes', n: 'no', a: 'always', x: 'never' };
-const WHO = { user: 'you', assistant: 'pilot', system: 'sys', controller: 'ctl', out: '' };
+const WHO = { user: 'you', assistant: 'model', system: 'system', controller: 'controller', out: '' };
+const AUTHOR = { user: 'you', assistant: 'model', system: 'system', controller: 'controller' };
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let state = { transcript: [], panes: [], pending: null, answers: {}, items: [], extracting: false, fileErrors: {} };
 let shownPanes = '';
@@ -28,14 +32,17 @@ function addLine(role, text, model, id, kind) {
   p.className = `ln ${role}`;
   if (kind) p.classList.add(kind);              // system lines: blocked | stall | error
   if (id) p.id = `msg-${id}`;
+  if (AUTHOR[role]) { p.dataset.author = AUTHOR[role]; p.title = `authored by ${AUTHOR[role]}${model ? ` · ${model}` : ''}`; }
   const who = document.createElement('span');
   who.className = 'who';
   who.textContent = WHO[role] ?? role;
   const body = document.createElement('span');
   body.className = 'text';
   body.textContent = text;                       // model text is never parsed as HTML
-  p.append(who, body);
-  if (model) { const m = document.createElement('small'); m.className = 'model'; m.textContent = model; p.append(m); }
+  p.append(who);
+  // the model name sits right after the "model" label (pilot-v0.6), so every reply says which model wrote it
+  if (model) { const m = document.createElement('small'); m.className = 'model'; m.textContent = model; p.append(m, ' '); }
+  p.append(body);
   log.append(p);
   log.scrollTop = log.scrollHeight;
   return { p, body };
@@ -44,7 +51,7 @@ function addLine(role, text, model, id, kind) {
 // Controller question: sprite, text, and y/n/a/x buttons while it is the pending one.
 function addController(line, isLastForModule) {
   const { p } = addLine('controller', '', null, line.id);
-  p.querySelector('.who').innerHTML = Pixel.sprite('keeper', 22, 'controller');   // static sprite markup, no user text
+  p.querySelector('.who').innerHTML = Pixel.sprite('keeper', 22, 'controller') + '<span class="role">controller</span>';   // static markup, no user text
   p.querySelector('.text').textContent = line.text;
   const pending = isLastForModule && state.pending && state.pending === line.module;
   if (pending) {
@@ -128,12 +135,7 @@ function itemCard(it) {
     a.href = it.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = it.text;
     text.append(a);
   } else text.textContent = it.text;
-  const meta = document.createElement('small');
-  meta.className = 'meta';
-  const tag = document.createElement('span');
-  tag.className = `tag ${status}`; tag.textContent = status;
-  meta.append(`${it.id} · ${byModel ? `model · ${it.model || 'unknown'}` : 'you'} · `, tag);
-  el.append(text, meta);
+  el.append(text, itemMeta(it, status, byModel));
   if (status === 'proposed') {
     const keys = document.createElement('span');
     keys.className = 'keys';
@@ -151,6 +153,29 @@ function itemCard(it) {
   el.addEventListener('blur', () => el.classList.remove('selected'));
   el.addEventListener('click', () => el.focus());
   return el;
+}
+
+// Byline of a card (pilot-v0.6): "<id> · <author> · <status>", then who decided it and what was changed by hand.
+// prov comes from the server: {added, fields} when (part of) the item came from a hand edit of state.json.
+const clock = (ts) => (ts ? String(ts).slice(5, 16).replace('T', ' ') : '');
+function chip(cls, text) { const s = document.createElement('span'); s.className = `by ${cls}`; s.textContent = text; return s; }
+function itemMeta(it, status, byModel) {
+  const meta = document.createElement('small');
+  meta.className = 'meta';
+  const prov = it.prov || null;
+  const fields = prov ? prov.fields : [];
+  const tag = document.createElement('span');
+  tag.className = `tag ${status}`; tag.textContent = status;
+  meta.append(`${it.id} · `, byModel ? chip('model', `model · ${it.model || 'unknown'}`) : chip('you', prov && prov.added ? 'you (file edit)' : 'you'), ' · ', tag);
+  if (byModel && prov && prov.added) meta.append(' · added by ', chip('you', 'you (file edit)'));
+  if (status !== 'proposed') {
+    const byFile = fields.includes('status') || (!it.decidedBy && !(prov && prov.added && !byModel));
+    if (byFile) meta.append(` · ${status} by `, chip('you', 'you (file edit)'));
+    else if (it.decidedBy) meta.append(` · ${status} by `, chip('you', it.decidedBy === 'user' ? 'you' : it.decidedBy), it.decidedAt ? ` ${clock(it.decidedAt)}` : '');
+  }
+  const edited = fields.filter((f) => !['status', 'decidedAt', 'decidedBy'].includes(f));
+  if (edited.length) meta.append(' · edited by ', chip('you', 'you (file edit)'), `: ${edited.join(', ')}`);
+  return meta;
 }
 
 function itemsFor(kinds) { return (state.items || []).filter((i) => kinds.includes(i.kind)); }
@@ -262,8 +287,23 @@ function renderIndex(body) {
 function jumpTo(id) {
   const el = $(`msg-${id}`);
   if (!el) return;
+  // Usefulness (P5): the server logs index_jump; fire and forget, a failure never blocks the jump
+  fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: 'index_jump', target: id }) }).catch(() => {});
   el.scrollIntoView({ block: 'center', behavior: reducedMotion.matches ? 'auto' : 'smooth' });
   el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+}
+
+// Pane bar byline (pilot-v0.6): which rule grew the pane (controller, lavender) and which answer allowed it (you,
+// peach). An answer in modules.json without a matching consent event in metrics.jsonl was written by hand.
+function paneByline(bar, mod) {
+  const info = (state.paneInfo || {})[mod];
+  let by = bar.querySelector('.pby');
+  if (!info) { if (by) by.remove(); return; }
+  if (!by) { by = document.createElement('small'); by.className = 'pby'; bar.querySelector('span').after(by); }
+  const rule = info.metric ? `${info.metric} ≥ ${info.threshold ?? '?'}` : 'no rule';
+  by.replaceChildren(chip('ctl', `controller · ${rule}`), ' · ', chip('you', info.recorded ? 'you' : 'you (file edit)'), `: ${info.answer || 'no answer'}`,
+    info.answeredAt ? ` ${clock(info.answeredAt)}` : '');
+  by.title = `added ${info.addedAt || '?'} at ${info.atCount ?? '?'} ${info.metric || ''}; answer ${info.answer || 'none'} ${info.recorded ? 'recorded through the page' : 'not in metrics.jsonl (hand edit of modules.json)'}`;
 }
 
 function renderPanes(contentOnly) {
@@ -284,13 +324,17 @@ function renderPanes(contentOnly) {
       sec.style.viewTransitionName = `pane-${mod}`;
       sec.setAttribute('aria-label', PANES[mod].title);
       sec.innerHTML = `<div class="bar"><span>${PANES[mod].title}</span></div><div class="body"></div>`;
+      paneByline(sec.querySelector('.bar'), mod);
       PANES[mod].render(sec.querySelector('.body'));
       bench.append(sec);
     });
     bench.className = `bench n${list.length + 1}`;
   };
   if (key === shownPanes || contentOnly) {       // same panes: refresh contents only
-    list.forEach((mod) => { const b = bench.querySelector(`#pane-${mod} .body`); if (b) PANES[mod].render(b); });
+    list.forEach((mod) => {
+      const b = bench.querySelector(`#pane-${mod} .body`);
+      if (b) { paneByline(b.parentElement.querySelector('.bar'), mod); PANES[mod].render(b); }
+    });
     return done();
   }
   const first = shownPanes === '' && !document.body.dataset.loaded;
@@ -320,12 +364,13 @@ try { applyTheme(localStorage.getItem('pilot-theme')); } catch { /* storage bloc
 // response is newer than the one that last set it, so an older full load can never overwrite a newer partial one.
 const PARTS = { 'transcript.jsonl': ['transcript', 'total'], 'modules.json': ['panes', 'pending', 'answers', 'modulesRev', 'models'],
   'roles.json': ['models'], 'state.json': ['items', 'stateRev', 'stateError'] };
+PARTS['modules.json'].push('paneInfo');
 let reqGen = 0;
 const appliedGen = {};
 const sigs = {};
 const sigOf = {
   log: (s) => [s.total, (s.transcript[s.transcript.length - 1] || {}).id, s.pending, JSON.stringify(s.answers)].join('|'),
-  panes: (s) => [(s.panes || []).join(','), s.stateRev, JSON.stringify(s.items)].join('|'),   // items too: hand edits keep rev
+  panes: (s) => [(s.panes || []).join(','), s.stateRev, JSON.stringify(s.items), JSON.stringify(s.paneInfo)].join('|'),   // items too: hand edits keep rev
   models: (s) => JSON.stringify(s.models),
 };
 async function loadState(files) {
@@ -399,7 +444,12 @@ async function runCommand(text) {
   const out = await res.json();
   await loadState();                             // picks up a /model system line and the new status bar
   addLine('out', text).p.classList.add('cmd');
-  for (const l of out.lines || []) addLine('out', l).p.classList.toggle('err', !out.ok);
+  for (const l of out.lines || []) {
+    const { p } = addLine('out', l);
+    p.classList.toggle('err', !out.ok);
+    const v = cmd === '/stats' && /^\w+ +(PASS|NOT YET) /.exec(l);   // /stats verdict lines: mint PASS, rose NOT YET
+    if (v) p.classList.add('stat', v[1] === 'PASS' ? 'pass' : 'notyet');
+  }
 }
 
 // Consent keys: a lowercase y/n/a/x answers the pending question only if the input is empty at keydown.

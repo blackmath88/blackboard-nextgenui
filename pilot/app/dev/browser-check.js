@@ -4,9 +4,11 @@
 // and WIPE .pilot/ first. v03: own ports (4765/5766/5767, Chrome 9343) and its own dir .pilot-verify-v03b/,
 // so it never touches .pilot/ or a running demo. v04 (pilot-v0.4 proposals): ports 4775/5776/5777, Chrome 9353,
 // dir .pilot-verify-v04b/. v05 (pilot-v0.5 live files, c/r only on a focused card): ports 4785/5786/5787,
-// Chrome 9363, dir .pilot-verify-v05b/; opens a second tab.
+// Chrome 9363, dir .pilot-verify-v05b/; opens a second tab. v06 (pilot-v0.6 authorship, metrics, /stats): ports
+// 4795/5796/5797, Chrome 9373, dir .pilot-verify-v06b/ seeded from demo/fixtures/v0.6/ (SHOT=<file.png> saves a
+// screenshot).
 // Needs Node 22+ (global WebSocket) and Google Chrome. No dependencies.
-// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
+// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
 'use strict';
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -307,7 +309,8 @@ async function v04(page) {
   check('after one message a dashed dec-4 appears and the kanban question asks, without a reload', appeared && (await style('dec-4') || {}).style === 'dashed', `${Date.now() - t0} ms`);
   // ADAPTED in pilot-v0.5: pickup is by SSE now (polling only without SSE); the assertion itself is unchanged.
   check('page loaded once (pickup without navigation)', page.net.filter((n) => n.url === URL).length === 1);
-  check('kanban question counts proposed + confirmed tasks (3)', await page.eval(`/^3 tasks/.test(document.querySelector('.ln.controller.pending').textContent)`));
+  // ADAPTED in pilot-v0.6: the line now starts with its author label "controller"; the question is its .text part.
+  check('kanban question counts proposed + confirmed tasks (3)', await page.eval(`/^3 tasks/.test(document.querySelector('.ln.controller.pending .text').textContent)`));
   await page.eval(`document.getElementById('input').focus()`);
   await page.key('y'); await sleep(900);
   check('y adds the kanban pane; tasks in columns (task-1 in done)', await page.eval(`!!document.querySelector('#pane-kanban .col.done .item[data-id="task-1"]') && !!document.querySelector('#pane-kanban .col.todo .item[data-id="task-2"]')`));
@@ -465,7 +468,97 @@ async function v05(page) {
   console.log(`TIMING tab sync ${timings.tabSyncMs} ms; hand edit -> DOM ${lat.join(', ')} ms`);
 }
 
-const SCENARIOS = { p1, p2, v03, v04, v05 };
+// pilot-v0.6: authorship on lines, cards and panes; hand edits as "you (file edit)"; index jumps; /stats in the page.
+async function v06(page) {
+  const file = (f) => path.join(APP, ENV.dir, f);
+  await stop('server');   // reseed from the v0.6 fixture before the server starts (its server_start counts the files)
+  const fix = path.join(APP, 'demo', 'fixtures', 'v0.6');
+  for (const f of fs.readdirSync(fix)) if (!['demo.json', 'pilot.config.json'].includes(f)) fs.copyFileSync(path.join(fix, f), file(f));
+  await startServer();
+  const waitFor = async (expr, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await page.eval(expr)) return Date.now() - t0; await sleep(15); } return null; };
+  const meta = (id) => `((document.querySelector('.item[data-id="${id}"] .meta') || {}).textContent || '')`;
+  const editState = (fn) => { const j = JSON.parse(fs.readFileSync(file('state.json'), 'utf8')); fn(j); fs.writeFileSync(file('state.json'), JSON.stringify(j, null, 2)); };
+  const events = () => fs.readFileSync(file('metrics.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  // a label's colours (text|fill) must be its role pair: --you-fg/--you-bg (peach), --pilot-* (sky), --ctl-* (lavender).
+  // Dark mode: pastel text, no fill; light mode: ink on the pastel fill. Either way the pair names the role.
+  const color = (sel) => `(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const c = getComputedStyle(e); return c.color + '|' + c.backgroundColor; })()`;
+  const token = (r) => page.eval(`(() => { const d = document.createElement('span'); d.style.color = 'var(--${r}-fg)'; d.style.background = 'var(--${r}-bg)'; document.body.append(d); const c = getComputedStyle(d); const v = c.color + '|' + c.backgroundColor; d.remove(); return v; })()`);
+  await page.goto(URL);
+  await waitFor(`document.getElementById('meta').textContent.includes('live')`);
+  const [peach, sky, lav] = [await token('you'), await token('pilot'), await token('ctl')];
+  check('(setup) the three role pairs differ', new Set([peach, sky, lav]).size === 3, [peach, sky, lav].join(' / '));
+
+  // transcript lines: you / model + name / controller / system, in the palette roles
+  const lines = await page.eval(`(() => { const one = (s) => document.querySelector(s); const t = (e) => e ? e.querySelector('.who').textContent : null;
+    return { user: t(one('.ln.user')), userA: one('.ln.user').dataset.author, asst: t(one('.ln.assistant')), asstModel: one('.ln.assistant .model').textContent,
+      ctl: (one('.ln.controller .who .role') || {}).textContent, sys: t(one('.ln.system')), sysA: one('.ln.system').dataset.author,
+      title: one('.ln.assistant').title }; })()`);
+  check('transcript: every line names its author (you / model + model name / controller / system)', lines.user === 'you' && lines.userA === 'you' && lines.asst === 'model'
+    && lines.asstModel === 'frontier' && lines.ctl === 'controller' && lines.sys === 'system' && lines.sysA === 'system' && lines.title === 'authored by model · frontier', JSON.stringify(lines));
+  check('transcript labels use the palette roles: peach you, sky model, lavender controller', (await page.eval(color('.ln.user .who'))) === peach
+    && (await page.eval(color('.ln.assistant .who'))) === sky && (await page.eval(color('.ln.controller .who .role'))) === lav);
+
+  // cards: author, decided by, hand edits
+  const m = {};
+  for (const id of ['dec-1', 'dec-7', 'dec-8', 'task-1', 'task-7']) m[id] = await page.eval(meta(id));
+  check('model item decided through the page: "model · morrow · confirmed · confirmed by you <time>"', /^dec-1 · model · morrow · confirmed · confirmed by you 10-14 \d\d:\d\d$/.test(m['dec-1']), m['dec-1']);
+  check('pristine proposal: "model · morrow · proposed", no file-edit mark', m['dec-7'] === 'dec-7 · model · morrow · proposed', m['dec-7']);
+  check('status flipped in the file: "confirmed by you (file edit)"', m['dec-8'] === 'dec-8 · model · morrow · confirmed · confirmed by you (file edit)', m['dec-8']);
+  check('column moved in the file: "edited by you (file edit): column"', /edited by you \(file edit\): column$/.test(m['task-1']) && /confirmed by you 10-14/.test(m['task-1']), m['task-1']);
+  check('item added in the file: "task-7 · you (file edit) · confirmed"', m['task-7'] === 'task-7 · you (file edit) · confirmed', m['task-7']);
+  check('card chips: model sky, you peach', (await page.eval(color('.item[data-id="dec-1"] .by.model'))) === sky && (await page.eval(color('.item[data-id="dec-8"] .by.you:last-child'))) === peach);
+
+  // panes: which rule, which answer
+  const bars = await page.eval(`Object.fromEntries(['index', 'map', 'kanban'].map((m) => [m, (document.querySelector('#pane-' + m + ' .pby') || {}).textContent]))`);
+  check('pane bars name the rule (controller) and the answer (you)', /^controller · messages ≥ 12 · you: yes 10-15 14:14$/.test(bars.index) && /^controller · decisions ≥ 2 · you: yes/.test(bars.map)
+    && /^controller · tasks ≥ 3 · you: always/.test(bars.kanban), JSON.stringify(bars));
+  check('pane bar chips: controller lavender, you peach', (await page.eval(color('#pane-index .pby .by.ctl'))) === lav && (await page.eval(color('#pane-index .pby .by.you'))) === peach);
+
+  // hand edits while the page is open (the coordinator's v0.5 note: a hand-made decision must not read as by-model)
+  const t0 = Date.now();
+  editState((j) => { j.items.find((i) => i.id === 'dec-7').status = 'confirmed'; });
+  const ms = await waitFor(`${meta('dec-7')}.endsWith('confirmed by you (file edit)')`);
+  check('hand edit (dec-7 proposed -> confirmed): the card says "confirmed by you (file edit)" within 1 s', ms !== null && Date.now() - t0 < 1000, `${Date.now() - t0} ms`);
+  await sleep(400);
+  check('the watcher logged file_edit {itemId: dec-7, fields: [status]}', events().some((e) => e.event === 'file_edit' && e.itemId === 'dec-7' && e.fields.join() === 'status'));
+  editState((j) => { j.items.find((i) => i.id === 'dec-7').status = 'proposed'; });
+  check('flipped back by hand: the card is pristine again ("model · morrow · proposed")', (await waitFor(`${meta('dec-7')} === 'dec-7 · model · morrow · proposed'`)) !== null);
+  const mods = fs.readFileSync(file('modules.json'), 'utf8');
+  fs.writeFileSync(file('modules.json'), mods.replace('"consentId": "c-f03"', '"consentId": "c-hand"'));
+  check('an answer in modules.json without a consent event: pane bar says "you (file edit): yes"', (await waitFor(`(document.querySelector('#pane-index .pby') || {}).textContent.includes('you (file edit): yes')`)) !== null);
+  fs.writeFileSync(file('modules.json'), mods);
+  await waitFor(`!(document.querySelector('#pane-index .pby') || {}).textContent.includes('file edit')`);
+
+  // decide through the page, then a hand edit of its text: both authors stay visible
+  await page.eval(`document.querySelector('.item[data-id="task-4"]').focus()`);
+  await page.key('c');
+  check('c on a focused proposal: "confirmed by you <time>"', (await waitFor(`/confirmed by you \\d\\d-\\d\\d \\d\\d:\\d\\d$/.test(${meta('task-4')})`)) !== null, await page.eval(meta('task-4')));
+  editState((j) => { j.items.find((i) => i.id === 'task-4').text = 'print the claim form twice'; });
+  check('then a hand edit of its text: "confirmed by you <time> · edited by you (file edit): text"', (await waitFor(`/confirmed by you \\d\\d-\\d\\d \\d\\d:\\d\\d · edited by you \\(file edit\\): text$/.test(${meta('task-4')})`)) !== null, await page.eval(meta('task-4')));
+
+  // index jumps -> metrics; /stats in the page
+  const before = events().filter((e) => e.event === 'index_jump').length;
+  for (const n of [1, 5, 9]) { await page.eval(`document.querySelectorAll('#pane-index .idx button')[${n}].click()`); await sleep(150); }
+  await sleep(300);
+  const jumps = events().filter((e) => e.event === 'index_jump').slice(before);
+  check('three index clicks -> three index_jump events with the message ids', jumps.length === 3 && jumps.every((j) => /^m-f\d+$/.test(j.target)), JSON.stringify(jumps.map((j) => j.target)));
+  await page.submit('/stats', 800);
+  const st = await page.eval(`[...document.querySelectorAll('.ln.out.stat')].map((l) => l.className.split(' ').pop() + ' ' + l.textContent.split(/ +/)[0])`);
+  check('/stats in the page: five verdict lines; usefulness now PASS (three jumps in this session), quiet NOT YET', st.join() === 'pass continuity,pass consent,pass usefulness,pass signal,notyet quiet', st.join());
+  check('/stats labels the fixture data', await page.eval(`[...document.querySelectorAll('.ln.out')].some((l) => /^FIXTURE DATA: \\d+ of \\d+ metrics events/.test(l.textContent))`));
+
+  // a live turn: the reply says which model wrote it; the new proposal is the model's, not a file edit
+  await page.submit('Decision: we post the letter on Monday.', 2500);
+  const last = await page.eval(`(() => { const l = [...document.querySelectorAll('.ln.assistant')].pop(); return l.querySelector('.who').textContent + ' ' + l.querySelector('.model').textContent; })()`);
+  check('live reply: "model frontier"', last === 'model frontier', last);
+  check('live proposal dec-10: "model · morrow · proposed", no file-edit mark', (await waitFor(`${meta('dec-10')} === 'dec-10 · model · morrow · proposed'`, 4000)) !== null, await page.eval(meta('dec-10')));
+  if (process.env.SHOT) {
+    const shot = await page.send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(process.env.SHOT, Buffer.from(shot.result.data, 'base64'));
+  }
+}
+
+const SCENARIOS = { p1, p2, v03, v04, v05, v06 };
 const ENVS = {
   v03: () => {
     const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
@@ -496,6 +589,16 @@ const ENVS = {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v05b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4785/', fakes: [5786, 5787], dir: '.pilot-verify-v05b', config: file, cdp: 9363 };
+  },
+  v06: () => {
+    const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
+    c.port = 4795;
+    c.roles.chat.candidates[0].baseUrl = 'http://127.0.0.1:5796/v1';
+    c.roles.chat.candidates[1].baseUrl = 'http://127.0.0.1:5797/v1';
+    c.roles.extract.candidates[0].baseUrl = 'http://127.0.0.1:5797/v1';
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v06b-')), 'config.json');
+    fs.writeFileSync(file, JSON.stringify(c));
+    return { url: 'http://127.0.0.1:4795/', fakes: [5796, 5797], dir: '.pilot-verify-v06b', config: file, cdp: 9373 };
   },
 };
 
