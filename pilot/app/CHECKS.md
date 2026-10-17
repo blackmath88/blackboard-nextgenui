@@ -514,8 +514,8 @@ Run by the coordinator, not the builder.
 
 Authorship and metrics, `/stats`. Everything runs against `dev/fake-model.js`; no real endpoint was contacted.
 
-**Reproduce:** `bash pilot/app/dev/verify-v0.6.sh`. It has 51 checks; one of them runs the 24 checks of
-`browser-check.js v06` (22 + 2 global). It ends with `ALL v0.6 CHECKS PASSED` and exits non-zero on failure.
+**Reproduce:** `bash pilot/app/dev/verify-v0.6.sh`. It has 51 checks; one of them runs the 26 checks of
+`browser-check.js v06` (24 + 2 global). It ends with `ALL v0.6 CHECKS PASSED` and exits non-zero on failure.
 - Own ports: server 4790, fakes 5791/5792; browser part 4795/5796/5797 and Chrome 9373; demo part 4964/5964/5965.
 - Own throwaway dirs: `.pilot-verify-v06/`, `.pilot-verify-v06c/`, `.pilot-verify-v06b/`, `.pilot-demo-verify06/`.
 
@@ -556,7 +556,8 @@ Quiet uses ceil, so a single question in the first 20 minutes does not read as "
 | 3 | Ledger: one `item_write` per extracted item, equal to the item in `state.json`; untouched items have no `prov`; decide → `item_write` (via decide) then `decide` as the last line. Hand edit of a text → `prov.fields [text]` and a `file_edit` event; a later confirm through the page keeps `[text]` (`handFields`); an edit undone by hand → no `prov`. Edits made while the server was down (status) are found after the restart; a hand-added user item → `added`; a model item without a ledger entry → no `prov`. `state.json` has no field the server added for authorship. | 3 |
 | 4 | Continuity: the second `server_start` ≥ the last `turn`; `/stats` continuity PASS after 1 restart. A transcript cut while the server was down → NOT YET with "LOST … transcript lines". | 4 |
 | 5 | `npm run stats -- <dir>` on a copy of the v0.6 fixture: exit 0, five measures, verdicts continuity PASS, consent PASS, usefulness NOT YET, signal PASS, quiet NOT YET; "FIXTURE DATA: 130 of 130 metrics events and 64 of 64 transcript lines"; thresholds and numbers present. Same output from another directory with an absolute path, and with a relative path from `pilot/` (INIT_CWD). Read-only: every file byte-identical. A missing dir → exit 2, nothing created. `/stats` in a server on the same dir prints exactly the same lines. 3 jumps → usefulness PASS. A hand-written `consentId` → consent NOT YET naming the pane. Signal shows "1 decided by file edit". | 5 |
-| 6 | **Page** (`browser-check.js v06`, seeded from the v0.6 fixture): lines say you / model + frontier / controller / system with `data-author` and tooltip, and their labels use the role pairs (`--you-*`, `--pilot-*`, `--ctl-*`); card bylines for: decided by you (with time), pristine proposal, status flipped by hand, column moved by hand, item added by hand; chip colours; pane bars "controller · messages ≥ 12 · you: yes 10-15 14:14" etc.; hand edit dec-7 → "confirmed by you (file edit)" within 1 s (180–189 ms, 2 runs) and a `file_edit` event; flipped back → pristine; hand-written `consentId` → "you (file edit): yes"; `c` on a focused card → "confirmed by you <time>", then a hand edit of its text → "… · edited by you (file edit): text"; 3 index clicks → 3 `index_jump` events; `/stats` in the page → 5 verdict lines (usefulness now PASS) and the fixture label; a live reply "model frontier" and a live proposal without file-edit mark; no page errors; no request outside the server. | 6 |
+| 6 | **Page** (`browser-check.js v06`, seeded from the v0.6 fixture): lines say you / model + frontier / controller / system with `data-author` and tooltip, and their labels use the role pairs (`--you-*`, `--pilot-*`, `--ctl-*`); card bylines for: decided by you (with time), pristine proposal, status flipped by hand, column moved by hand, item added by hand; chip colours; the proposed tag is not in the controller's pair; times are local (the check pins the page to UTC) with the
+ISO timestamp as tooltip; pane bars "controller · messages ≥ 12 · you: yes 10-15 14:14" etc.; hand edit dec-7 → "confirmed by you (file edit)" within 1 s (180–189 ms, 2 runs) and a `file_edit` event; flipped back → pristine; hand-written `consentId` → "you (file edit): yes"; `c` on a focused card → "confirmed by you <time>", then a hand edit of its text → "… · edited by you (file edit): text"; 3 index clicks → 3 `index_jump` events; `/stats` in the page → 5 verdict lines (usefulness now PASS) and the fixture label; a live reply "model frontier" and a live proposal without file-edit mark; no page errors; no request outside the server. | 6 |
 | 7 | Contrast passes, including the new pairs "you/model/controller author chip on pane bar" (both themes). | 6 |
 | 8 | **Demo:** `npm run demo -- v0.6` serves `/state` within ~1 s with three panes (rule + recorded answer) and items of every author kind; `/stats` says "3 PASS, 2 NOT YET" and "FIXTURE DATA: 130 of 131 metrics events" (the 131st is the demo's own `server_start`); the try lines name /stats, the index clicks, `npm run stats` and the flip one-liner; the printed one-liner and the printed `npm run stats` line work as printed; Ctrl+C leaves no process. | 7 |
 | 9 | Old checks passing: p0, p1, p2, v0.3, v0.4, v0.5, browser p1/p2/v03/v04/v05; one assertion adapted (below). | `npm run verify` |
@@ -585,8 +586,11 @@ question part (`.text`). Same assertion, same count.
 
 ## Deviations
 
-1. The proposal border stays dashed lavender. Lavender is also the controller's colour, but here it encodes status
-   ("proposed"), as since v0.4. The author is now named by a sky `model · morrow` chip next to it.
+1. The proposal border stays dashed lavender (as since v0.4; v04 checks its colour). There the dash marks status, not
+   author. The author is named by the sky `model · morrow` chip. The `proposed` tag was lavender (the controller's pair)
+   and is now neutral (text with a dashed outline), so no lavender label on a card names an author.
+4. Times on cards and pane bars are the browser's local time (tooltip: the ISO timestamp from the file). `/stats`
+   prints UTC and says so ("Times in UTC"), because `npm run stats` has no browser.
 2. The assistant label changed from `pilot` to `model` (the model name follows it). Command output lines (`/stats`,
    `/rules`, …) have no author label: they are not stored and nobody authored them.
 3. `/state` gained `paneInfo` and per-item `prov`. Without them it returns what it did before.

@@ -475,6 +475,7 @@ async function v06(page) {
   const fix = path.join(APP, 'demo', 'fixtures', 'v0.6');
   for (const f of fs.readdirSync(fix)) if (!['demo.json', 'pilot.config.json'].includes(f)) fs.copyFileSync(path.join(fix, f), file(f));
   await startServer();
+  await page.send('Emulation.setTimezoneOverride', { timezoneId: 'UTC' });   // the page shows local time; fixture times are UTC
   const waitFor = async (expr, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await page.eval(expr)) return Date.now() - t0; await sleep(15); } return null; };
   const meta = (id) => `((document.querySelector('.item[data-id="${id}"] .meta') || {}).textContent || '')`;
   const editState = (fn) => { const j = JSON.parse(fs.readFileSync(file('state.json'), 'utf8')); fn(j); fs.writeFileSync(file('state.json'), JSON.stringify(j, null, 2)); };
@@ -506,6 +507,8 @@ async function v06(page) {
   check('status flipped in the file: "confirmed by you (file edit)"', m['dec-8'] === 'dec-8 · model · morrow · confirmed · confirmed by you (file edit)', m['dec-8']);
   check('column moved in the file: "edited by you (file edit): column"', /edited by you \(file edit\): column$/.test(m['task-1']) && /confirmed by you 10-14/.test(m['task-1']), m['task-1']);
   check('item added in the file: "task-7 · you (file edit) · confirmed"', m['task-7'] === 'task-7 · you (file edit) · confirmed', m['task-7']);
+  check('the proposed tag is not drawn in the controller pair (lavender stays the controller\'s)', (await page.eval(color('.item[data-id="dec-7"] .tag'))) !== lav);
+  check('times on cards are local with the ISO timestamp as tooltip', await page.eval(`(() => { const w = document.querySelector('.item[data-id="dec-1"] .when'); return !!w && /^\\d{4}-\\d\\d-\\d\\dT/.test(w.title); })()`));
   check('card chips: model sky, you peach', (await page.eval(color('.item[data-id="dec-1"] .by.model'))) === sky && (await page.eval(color('.item[data-id="dec-8"] .by.you:last-child'))) === peach);
 
   // panes: which rule, which answer

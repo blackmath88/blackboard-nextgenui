@@ -157,7 +157,10 @@ function itemCard(it) {
 
 // Byline of a card (pilot-v0.6): "<id> · <author> · <status>", then who decided it and what was changed by hand.
 // prov comes from the server: {added, fields} when (part of) the item came from a hand edit of state.json.
-const clock = (ts) => (ts ? String(ts).slice(5, 16).replace('T', ' ') : '');
+// times in the page are local ("10-14 11:06"); the full ISO timestamp from the file is in the tooltip
+const pad = (n) => String(n).padStart(2, '0');
+const clock = (ts) => { const d = new Date(ts); return ts && !isNaN(d) ? `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}` : ''; };
+function when(ts) { const s = document.createElement('span'); s.className = 'when'; s.textContent = clock(ts); s.title = ts; return s; }
 function chip(cls, text) { const s = document.createElement('span'); s.className = `by ${cls}`; s.textContent = text; return s; }
 function itemMeta(it, status, byModel) {
   const meta = document.createElement('small');
@@ -171,7 +174,7 @@ function itemMeta(it, status, byModel) {
   if (status !== 'proposed') {
     const byFile = fields.includes('status') || (!it.decidedBy && !(prov && prov.added && !byModel));
     if (byFile) meta.append(` · ${status} by `, chip('you', 'you (file edit)'));
-    else if (it.decidedBy) meta.append(` · ${status} by `, chip('you', it.decidedBy === 'user' ? 'you' : it.decidedBy), it.decidedAt ? ` ${clock(it.decidedAt)}` : '');
+    else if (it.decidedBy) meta.append(` · ${status} by `, chip('you', it.decidedBy === 'user' ? 'you' : it.decidedBy), ...(it.decidedAt ? [' ', when(it.decidedAt)] : []));
   }
   const edited = fields.filter((f) => !['status', 'decidedAt', 'decidedBy'].includes(f));
   if (edited.length) meta.append(' · edited by ', chip('you', 'you (file edit)'), `: ${edited.join(', ')}`);
@@ -302,7 +305,7 @@ function paneByline(bar, mod) {
   if (!by) { by = document.createElement('small'); by.className = 'pby'; bar.querySelector('span').after(by); }
   const rule = info.metric ? `${info.metric} ≥ ${info.threshold ?? '?'}` : 'no rule';
   by.replaceChildren(chip('ctl', `controller · ${rule}`), ' · ', chip('you', info.recorded ? 'you' : 'you (file edit)'), `: ${info.answer || 'no answer'}`,
-    info.answeredAt ? ` ${clock(info.answeredAt)}` : '');
+    ...(info.answeredAt ? [' ', when(info.answeredAt)] : []));
   by.title = `added ${info.addedAt || '?'} at ${info.atCount ?? '?'} ${info.metric || ''}; answer ${info.answer || 'none'} ${info.recorded ? 'recorded through the page' : 'not in metrics.jsonl (hand edit of modules.json)'}`;
 }
 

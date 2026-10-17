@@ -131,7 +131,8 @@ body { margin: 0; background: var(--base); color: var(--text); font: 400 15px/1.
 .item .text a { color: var(--text); text-decoration-color: var(--lavender); }
 .item .meta { display: block; color: var(--muted); font-size: 11.5px; }
 .item .tag { padding: 0 4px; }
-.item .tag.proposed { color: var(--ctl-fg); background: var(--ctl-bg); }
+/* pilot-v0.6: the proposed tag is neutral (text + dashed outline), so lavender stays the controller's colour */
+.item .tag.proposed { color: var(--text); background: transparent; outline: 1px dashed var(--muted); outline-offset: -1px; }
 .item .tag.confirmed { color: var(--ok-fg); background: var(--ok-bg); }
 .item .tag.rejected { color: var(--bad-fg); background: var(--bad-bg); }
 .item .keys { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }

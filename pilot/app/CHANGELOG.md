@@ -16,6 +16,8 @@ Authorship and metrics, `/stats`. Still untested with a real model (fakes only).
   - `confirmed by you (file edit)`: the status was changed in the file.
   - `edited by you (file edit): column`: other fields were changed in the file.
   - `task-7 · you (file edit)`: an item added in the file.
+- The `proposed` tag on a card is now neutral (it used the controller's lavender pair). Times on cards and pane bars are
+  local, with the ISO timestamp as tooltip.
 - **Every pane bar says which rule and which answer:** `controller · messages ≥ 12 · you: yes 10-15 14:14`. An answer
   that was written into `modules.json` by hand (no matching consent event) reads `you (file edit): yes`.
 - **How a hand edit is detected (write ledger):** whenever the server creates an item (extraction) or decides one

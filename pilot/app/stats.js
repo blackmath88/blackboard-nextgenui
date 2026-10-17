@@ -221,7 +221,7 @@ function formatStats(s, label) {
   }
   const total = Object.keys(s.measures).length;
   out.push(`${pass} PASS, ${total - pass} NOT YET. Not measurable from files: "you never re-explained the project", the kill criterion.`);
-  out.push('Work session: activity with no gap over 30 min. Hour of work: sum of gaps of at most 30 min between messages.');
+  out.push('Work session: activity with no gap over 30 min. Hour of work: sum of gaps of at most 30 min between messages. Times in UTC.');
   return out;
 }
 
