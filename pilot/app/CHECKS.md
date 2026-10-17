@@ -671,3 +671,13 @@ each served `/state` within about 1–2 s, and SIGINT left no process behind.
 2. The "show m-…" link reuses the index's scroll-and-flash but not its `index_jump` metric (see Decisions in v0.6:
    Usefulness counts index use only).
 3. `/why` prints recorded ISO times verbatim. Cards and pane bars stay local time.
+
+## pilot-v0.7: coordinator re-run (2026-10-17)
+
+Run by the coordinator, not the builder.
+- Scope: only `pilot/app/**` plus one line in the "Pilot iterations" list of `index.html`.
+- `npm run verify`: exit 0; every earlier script passes, plus v0.7.
+- Demos v0.3 to v0.7: `/state` 200 within about 1 s each; no orphan processes.
+- `/why`, `/why map`, `/why dec-2` on demo v0.7 give concrete statements, each with a source. Spot-checked by hand: `metrics.jsonl:12` is the map `controller_ask` at count 2 / threshold 2, and `transcript.jsonl:3` is m-f003 holding the quoted words.
+- The "why?" button on the dec-2 card printed the same explanation in the chat.
+- Layout at 820 px: "controller" stays whole, the kanban stacks its columns, no horizontal page scroll.
