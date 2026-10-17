@@ -73,5 +73,7 @@ date, old plan, new plan and why.
     after the controller has run.
   - **After a removal (yes), the rule asks again only once its count has doubled, and an old "always" no longer adds
     the pane by itself.** Without this, a kanban answered "always" would come straight back on the next turn.
+  - **A touch withdraws an open removal question, and a withdrawn question does not count as asked.** Opening the tab to
+    look at the pane before answering must not forfeit the question for good, and must not answer it.
 - Why: fading is reversible and silent; removal is not, so it needs consent like growth. That keeps "every pane earned
   and consented" true in both directions.

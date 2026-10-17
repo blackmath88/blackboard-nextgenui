@@ -20,7 +20,7 @@ tab?"): fade first, then ask. Still untested with a real model (fakes only).
     `pane_fade` (turn, idle turns, threshold, the last touch's turn).
 - **Fading is not removal.** A faded pane stays in `modules.json` with `"state": "faded"`, `fadedAt` and `fadedTurn`. It
   keeps its place in the layout order as a slim labelled strip (`▸ kanban  tab · untouched since turn 22`). The grid
-  gives it an auto row and the shown panes share the height; with only tabs, the side column shrinks to their width.
+  gives it an auto row and the shown panes share the height; with only tabs, the side column shrinks to their width (at most 18rem).
   `/state.panes` still lists it; `/state.faded` and `paneInfo.<module>.fade` say it is a tab.
 - **A touch brings it back at once.** Click, Enter or Space on the tab: the page shows the pane before the server answers,
   with a View Transition (instant with reduced motion), and reports `POST /touch {module, how: "tab"}`.
@@ -54,8 +54,10 @@ tab?"): fade first, then ask. Still untested with a real model (fakes only).
   The answer is recorded like any consent: `modules.json` `removals.<module> {answer, at, turn, count, consentId}`
   (kept apart from `answers.<module>`, which stays the growth consent), a `consent` event with `question: "remove"`, a
   system line, and `pane_remove` with `answerRef` for yes and never. No rule removes a pane; only this answer does.
-  Touching the pane while its question is open withdraws the question (system line, `controller_withdraw`). It is not
-  asked again for that pane.
+  Touching the pane while its question is open withdraws the question (system line, `controller_withdraw`). A withdrawn
+  question does not count as asked: looking is not an answer. It can come again once the pane has faded again and
+  stayed a tab for `askRemoveAfterTurns` turns. An answered question is never asked again for that pane entry; a pane
+  that is removed and grows again is a new entry with its own question.
 - **`/why <pane>` explains fading** (sources as in v0.7):
   - shown or a tab since turn X;
   - the last touch: how, when, which turn (`metrics.jsonl:N pane_touch map`);
@@ -72,7 +74,7 @@ tab?"): fade first, then ask. Still untested with a real model (fakes only).
   faded at turn 30, and the map was last clicked at turn 30. Your first message (turn 38) fades the map and makes the
   kanban removal question due.
 - **Dev:**
-  - `dev/verify-v0.8.sh`: 43 checks, one of which runs `browser-check.js v08` (23 checks);
+  - `dev/verify-v0.8.sh`: 44 checks, one of which runs `browser-check.js v08` (24 checks);
   - `dev/why-cites.js` resolves the new citations (pane events by module, `removals.<m>`, `fadeAfterTurns`).
 
 **Why**

@@ -258,11 +258,14 @@ function askRemoval(m, rulesDoc, lines) {
   }
 }
 
-// A touch while the removal question for that pane is open withdraws the question (you are using the pane). The
-// question is not asked again for this pane (removalAsked stays). Mutates m; inside the write chain.
+// A touch while the removal question for that pane is open withdraws the question (you are using the pane). A
+// withdrawn question does not count as asked: looking at a pane is not an answer, so the question can come again
+// once the pane has faded again and stayed a tab for askRemoveAfterTurns turns. Mutates m; inside the write chain.
 function withdrawRemoval(m, mod, why, ts) {
   if (m.pending !== mod || m.pendingKind !== 'remove') return false;
   m.pending = null; delete m.pendingKind;
+  const entry = m.panes.find((p) => p && p.module === mod);
+  if (entry) delete entry.removalAsked;
   appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `remove ${mod}: question withdrawn, ${why}`, model: null });
   appendJsonl(METRICS, { ts, event: 'controller_withdraw', question: 'remove', module: mod, reason: why });
   return true;

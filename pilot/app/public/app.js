@@ -385,13 +385,14 @@ function bringBack(mod) {
   renderPanes();
 }
 // Grid template for a layout with tabs: a shown pane gets a 1fr row, a tab an auto row; with only tabs, the side
-// column shrinks to the tabs' width and an empty row fills the height.
+// column shrinks to the tabs' titles (at most 18rem; the note after a title only uses space that is left) and an empty
+// row fills the height.
 function benchTemplate(list) {
   const faded = (m) => (state.faded || []).includes(m);
   const anyShown = list.some((m) => !faded(m));
   const rows = list.map((m, i) => `"chat p${i + 1}" ${faded(m) ? 'auto' : 'minmax(0, 1fr)'}`);
   if (!anyShown) rows.push('"chat ." minmax(0, 1fr)');
-  return `${rows.join(' ')} / ${anyShown ? 'minmax(0, 1.6fr) minmax(0, 1fr)' : 'minmax(0, 1fr) max-content'}`;
+  return `${rows.join(' ')} / ${anyShown ? 'minmax(0, 1.6fr) minmax(0, 1fr)' : 'minmax(0, 1fr) fit-content(18rem)'}`;
 }
 
 function renderPanes(contentOnly) {

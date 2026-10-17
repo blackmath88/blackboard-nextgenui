@@ -97,8 +97,11 @@ editjs state.json 's.items.push({id:"dec-9",kind:"decision",text:"a proposal wri
 chat "after the hand edit"
 check "a proposal arriving in a faded map brings the map back (pane_unfade reason proposal, not a touch, controller line)" "$(state | q '!x.faded.includes("map")' | grep -q true && ev 'x.some(e=>e.event==="pane_unfade"&&e.module==="map"&&e.reason==="proposal"&&e.holds.includes("dec-9"))' $DIR | grep -q true && ev '!x.some(e=>e.event==="pane_touch"&&e.module==="map"&&e.unfaded)' $DIR | grep -q true && qa 'x.some(l=>l.role==="controller"&&l.pane==="map"&&/holds a proposal \(dec-9\)/.test(l.text))' < $DIR/transcript.jsonl)"
 # the index: fade -> removal question -> yes
-for i in 1 2 3 4 5; do chat "wait $i"; done
-check "the index fades again, but its removal question is not asked again after it was withdrawn (once per pane)" "$(state | q 'x.faded.includes("index") && x.pending!=="index"' | grep -q true && ev 'x.filter(e=>e.event==="controller_ask"&&e.question==="remove"&&e.module==="index").length===1' $DIR)"
+for i in 1 2 3 4 5; do [ "$(mo 'x.pending' $DIR)" = "index" ] && break; chat "wait $i"; done
+check "a withdrawn question does not count as asked: the index faded again and, 2 turns later, is asked again" "$(mo 'x.pending==="index" && x.pendingKind==="remove" && x.panes.find(p=>p.module==="index").removalAsked===true' $DIR | grep -q true && ev 'x.filter(e=>e.event==="controller_ask"&&e.question==="remove"&&e.module==="index").length===2' $DIR)"
+post answer '{"module":"index","answer":"n"}' > /dev/null
+for i in 1 2 3; do chat "after no $i"; done
+check "an answered question is not asked again (once per pane): after n, three more turns, still 2 asks" "$(ev 'x.filter(e=>e.event==="controller_ask"&&e.question==="remove"&&e.module==="index").length===2' $DIR)"
 stop_server
 
 echo "== 3. removal yes and never, and what growth does afterwards (fresh dir)"

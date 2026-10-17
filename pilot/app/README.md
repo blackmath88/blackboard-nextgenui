@@ -130,7 +130,8 @@ in `modules.json` with `"state": "faded"`. After `askRemoveAfterTurns` more turn
 `question: "remove"`); no rule ever removes a pane.
 - **Touch:** a click, a wheel/touch scroll, or keyboard focus you move into the pane; confirming or rejecting one of its
   cards; the tab. Only the first touch of a pane per turn is recorded (`lastTouch` in its `modules.json` entry, a
-  `pane_touch` event). Touching a pane whose removal question is open withdraws the question.
+  `pane_touch` event). Touching a pane whose removal question is open withdraws the question; it can come again after the
+  pane has faded again (looking is not an answer). An answered question is not asked again for that pane.
 - **Never faded:** the chat, and a pane holding an unanswered proposal (a tab would hide a decision). A proposal that
   arrives in a faded pane brings it back.
 - **Settings** in `rules.json`: `"fadeAfterTurns": 8, "askRemoveAfterTurns": 8` at the top level (default), or on a

@@ -210,14 +210,15 @@ body { margin: 0; background: var(--base); color: var(--text); font: 400 15px/1.
 .go:hover { border-color: var(--sky); }
 
 /* pilot-v0.8: a faded pane is a slim labelled tab in its place. The grid gives it an auto row (JS sets --tpl from the
-   layout: shown panes 1fr, tabs auto; with only tabs the side column shrinks to their width). Colours reuse checked
+   layout: shown panes 1fr, tabs auto; with only tabs the side column shrinks to their width, at most 18rem). Colours reuse checked
    pairs: the title is a pane title on the bar colour (--accent-fg on --base), the note is meta text (--muted on --base). */
 .bench.dyn { grid-template: var(--tpl); }
 @media (max-width: 800px) { .bench.dyn { grid-template: none; } }
 .side.faded { border-style: dashed; background: var(--base); }
 .side.faded .tab { display: flex; align-items: baseline; gap: 8px; width: 100%; background: transparent; border: 0; padding: 3px 10px; cursor: pointer; text-align: left; color: var(--accent-fg); }
 .side.faded .tab .tt { font: 400 20px/1.2 var(--px); white-space: nowrap; }
-.side.faded .tab small { font: 400 12px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side.faded .tab small { font: 400 12px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 0; min-width: 0; contain: inline-size; }
+/* the note takes only the space left: the tab's own width is its title, so a column of tabs only is as wide as the titles */
 .side.faded .tab:hover .tt { text-decoration: underline; text-decoration-color: var(--lavender); }
 .side .body:focus { outline: none; }
 .side .body:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }

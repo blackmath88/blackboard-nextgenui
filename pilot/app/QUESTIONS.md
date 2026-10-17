@@ -50,6 +50,9 @@ while someone is about to type a message starting with y, n, a or x into the emp
 class as the old `c`/`r` (one keystroke answers). The brief keeps the v0.3 rule (empty input), so nothing changed.
 - Blocks: nothing; it is a usability risk during dogfooding.
 - Options: keep; ignore y/n/a/x for ~1 s after a question appeared; require focus on the question (Tab), like c/r.
+- (v0.8) The stakes are higher for the removal question: it appears right after a reply, so a next message starting
+  with "y" ("yes, and…", "you…") removes a pane, and one starting with "x" removes it for good. Not changed (the brief
+  says "recorded like any consent"). One more option: require focus on the question for removal only.
 
 ## 2026-10-17 (v0.6) How strict should the P5 thresholds be read?
 `/stats` reads the build plan's proposed thresholds literally and adds only what was needed to make each measurable
@@ -94,3 +97,9 @@ They are guesses: a pane fades after 8 untouched messages and is offered for rem
 fixtures have about 7 messages from you per work session (22 over three sessions), so a pane fades after roughly one
 session without use.
 - Blocks: nothing. Tune after a few days of dogfooding (`pane_fade` vs `pane_touch` with `unfaded` in `metrics.jsonl`).
+
+## 2026-10-17 (v0.8) "Once per pane" means once per pane entry
+The removal question is asked at most once for a pane entry in `modules.json` (`removalAsked`). A pane that was removed
+and grows again through its rule is a new entry and gets its own question. A question withdrawn by a touch does not
+count as asked.
+- Blocks: nothing. Options: keep; or once per module, ever (then a re-grown pane could never be offered for removal).

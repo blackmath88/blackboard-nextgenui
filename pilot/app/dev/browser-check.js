@@ -777,6 +777,21 @@ async function v08(page) {
     check(`${width} px with a tab: no horizontal scroll, the tab label on one line inside its strip (${r.h} px high)`, !r.hscroll && r.lines === 1 && r.inside && r.h < 44, JSON.stringify(r));
     await shot(`4-tab-${width}`);
   }
+  // all side panes faded (by hand): tabs stack at the top of a column as wide as the tabs, the chat keeps the height
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  const m2 = modules(); for (const p of m2.panes) { p.state = 'faded'; p.fadedAt = p.fadedAt || new Date().toISOString(); p.fadedTurn = p.fadedTurn || t39; }
+  fs.writeFileSync(file('modules.json'), JSON.stringify(m2, null, 2));
+  await waitFor(`document.querySelectorAll('.side.faded').length === 3`);
+  await sleep(800);   // after the View Transition (480 ms)
+  const all = await page.eval(`(() => {
+    const r = (el) => el.getBoundingClientRect(); const chat = r(document.getElementById('pane-chat')), bench = r(document.getElementById('bench'));
+    const tabs = [...document.querySelectorAll('.side.faded')].map(r);
+    return { hscroll: document.documentElement.scrollWidth > window.innerWidth, chatH: Math.round(chat.height), benchH: Math.round(bench.height),
+      tops: tabs.map((t) => Math.round(t.top)), hs: tabs.map((t) => Math.round(t.height)), w: Math.round(tabs[0].width), chatW: Math.round(chat.width) };
+  })()`);
+  check(`all three side panes faded: tabs stacked at the top (${all.tops.join('/')}), column ${all.w} px (at most 18rem), chat ${all.chatW} × ${all.chatH} px of ${all.benchH}`,
+    !all.hscroll && all.hs.every((h) => h < 44) && all.tops[0] < all.tops[1] && all.tops[1] < all.tops[2] && all.tops[2] < all.benchH / 3 && all.chatH >= all.benchH - 2 && all.w <= 290, JSON.stringify(all));
+  await shot('5-all-tabs');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
 }
 
