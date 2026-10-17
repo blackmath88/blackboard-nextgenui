@@ -18,7 +18,7 @@ explainers/
   04-growing-workbench/          grow panes by consent (English)
 pilot/
   cli-pilot-v1/                  concept and build plan for the first real build
-  app/                           the build in progress (local Node server, P0–P2)
+  app/                           the build (local Node server, tagged iterations v0.3–v0.10)
 notes/
   summaries/
     generative-ui-shared-state-summary.json   the conversation's session summary
@@ -26,7 +26,7 @@ notes/
 
 Each explainer keeps its own `README.md` with its acts, structure and sources. The explainers and the plan are kept as they were delivered. The only change to the explainers is a small "← Overview" link at the top of each page.
 
-The pilot build lives in `pilot/app/` and is in progress (steps P0–P2 done, P3–P4 next). See `pilot/app/README.md` for how to run it.
+The pilot build lives in `pilot/app/` and grows in tagged iterations (`pilot-v0.3` to `pilot-v0.10`; see `pilot/app/CHANGELOG.md` and `pilot/app/REPORT.md`). Run any of them with `cd pilot/app && npm run demo -- v0.N`, or a tag with `bash pilot/app/scripts/try.sh pilot-v0.N`.
 
 ## How to open
 

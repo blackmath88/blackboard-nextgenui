@@ -159,3 +159,8 @@ shown and not a tab. With a local model that is a second background call per tur
 `frame_apply`, `frame_dismiss`, `frame_reset`), but `/stats` does not count them. The five P5 measures are unchanged.
 - Blocks: nothing. Options: add an experiments line "frames: n proposed, n applied, n dismissed, n reset, n rejected"
   (measured, not judged, like settled input); or wait for a real model, since the fake's apply rate means nothing.
+
+## 2026-10-17 (coordinator) The overview's CLI Pilot card is stale
+The "CLI Pilot v1" card in the story section of the root `index.html` still says "steps P0 to P2 are done, P3 and P4 are next". The coordinator may not change story sections, only the iterations list (which is current).
+- Blocks: nothing; the overview contradicts itself until it is fixed.
+- Options: one-line edit, e.g. "The build is in `pilot/app/`, in tagged iterations up to pilot-v0.10 (see Pilot iterations below)."
