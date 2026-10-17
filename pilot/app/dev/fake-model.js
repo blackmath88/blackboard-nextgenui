@@ -2,13 +2,19 @@
 // DEV ONLY. Not used by the normal start path (`node server.js`).
 // A tiny fake OpenAI-compatible endpoint: POST /v1/chat/completions,
 // streaming (SSE) and non-streaming, canned replies, no dependencies.
-// Usage: node dev/fake-model.js <port> [name]    e.g. node dev/fake-model.js 5701 frontier
+// Usage: node dev/fake-model.js <port> [name] [--delay=<ms>] [--status=<code>]
+//   e.g. node dev/fake-model.js 5701 frontier
+//   --delay=<ms>     wait before the first byte (to exercise timeouts)
+//   --status=<code>  answer every request with this HTTP error (to exercise fallback)
 // Every reply starts with "[fake:<name>]" so you can tell instances apart.
 'use strict';
 const http = require('http');
 
 const port = Number(process.argv[2]);
-const name = process.argv[3] || `fake-${port}`;
+const name = (process.argv[3] && !process.argv[3].startsWith('--')) ? process.argv[3] : `fake-${port}`;
+const opt = (k) => { const a = process.argv.find((x) => x.startsWith(`--${k}=`)); return a ? Number(a.split('=')[1]) : 0; };
+const delay = opt('delay');
+const failStatus = opt('status');
 if (!port) { console.error('usage: node dev/fake-model.js <port> [name]'); process.exit(1); }
 
 const CANNED = [
@@ -26,7 +32,11 @@ http.createServer((req, res) => {
   }
   let body = '';
   req.on('data', (c) => { body += c; });
-  req.on('end', () => {
+  req.on('end', () => setTimeout(() => {
+    if (failStatus) {
+      res.writeHead(failStatus, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ error: { message: `[fake:${name}] forced error ${failStatus}` } }));
+    }
     let reqJson = {};
     try { reqJson = JSON.parse(body); } catch { /* ignore */ }
     const msgs = Array.isArray(reqJson.messages) ? reqJson.messages : [];
@@ -55,5 +65,5 @@ http.createServer((req, res) => {
       res.end('data: [DONE]\n\n');
     }, 40);
     res.on('close', () => clearInterval(t));
-  });
-}).listen(port, '127.0.0.1', () => console.log(`[dev] fake model "${name}" on http://127.0.0.1:${port}/v1`));
+  }, delay));
+}).listen(port, '127.0.0.1', () => console.log(`[dev] fake model "${name}" on http://127.0.0.1:${port}/v1${delay ? ` (delay ${delay} ms)` : ''}${failStatus ? ` (always HTTP ${failStatus})` : ''}`));

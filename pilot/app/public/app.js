@@ -1,14 +1,15 @@
-// CLI Pilot page, P0. Talks only to its own server (same origin): GET /state, POST /chat.
+// CLI Pilot page. Talks only to its own server (same origin): GET /state, POST /chat, POST /command.
 'use strict';
 const log = document.getElementById('log');
 const form = document.getElementById('form');
 const input = document.getElementById('input');
 const meta = document.getElementById('meta');
 const count = document.getElementById('count');
+const models = document.getElementById('models');
 let lines = 0;
 document.getElementById('brand').insertAdjacentHTML('afterbegin', Pixel.sprite('teletype', 18, 'pilot') + ' ');
 
-const WHO = { user: 'you', assistant: 'pilot', system: 'sys', controller: 'ctl' };
+const WHO = { user: 'you', assistant: 'pilot', system: 'sys', controller: 'ctl', out: '' };
 
 function addLine(role, text, model) {
   const p = document.createElement('p');
@@ -33,6 +34,25 @@ async function loadState() {
   log.textContent = ''; lines = 0;
   for (const l of state.transcript) addLine(l.role, l.text, l.model);
   meta.textContent = state.total > state.transcript.length ? `showing last ${state.transcript.length} of ${state.total}` : 'ready';
+  renderModels(state.models);
+}
+
+// Status bar: active model per role; "a→b" when fallback answered with another candidate.
+function renderModels(m) {
+  models.textContent = Object.entries(m || {}).map(([role, r]) => {
+    const name = r.active || 'none';
+    return `${role}: ${r.last && r.last !== name ? `${name}→${r.last}` : name}`;
+  }).join(' · ');
+  models.title = Object.entries(m || {}).map(([role, r]) => `${role}: ${r.policy}, candidates ${r.candidates.join(', ') || 'none'}`).join('\n');
+}
+
+// Command output is shown locally only; it never goes to a model and is not stored (except /model switches).
+async function runCommand(text) {
+  const res = await fetch('/command', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+  const out = await res.json();
+  await loadState();                             // picks up a /model system line and the new status bar
+  addLine('out', text).p.classList.add('cmd');
+  for (const l of out.lines || []) addLine('out', l).p.classList.toggle('err', !out.ok);
 }
 
 form.addEventListener('submit', async (e) => {
@@ -40,6 +60,10 @@ form.addEventListener('submit', async (e) => {
   const text = input.value.trim();
   if (!text) return;
   input.value = '';
+  if (text.startsWith('/')) {
+    try { await runCommand(text); } catch (err) { addLine('system', `error: ${err.message}`); }
+    return;
+  }
   input.disabled = true;
   addLine('user', text);
   const { p, body } = addLine('assistant', '');

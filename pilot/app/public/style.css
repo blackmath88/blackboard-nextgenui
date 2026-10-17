@@ -31,6 +31,10 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 400 15px/1.6 
 .ln .model { margin-left: 8px; color: var(--dim); font-size: 11.5px; }
 .ln.system { color: var(--muted); font-size: 13px; }
 .ln.system .who { color: var(--red); }
+.ln.out { color: var(--muted); font-size: 13px; margin-bottom: 2px; }
+.ln.out .who { display: none; }
+.ln.out.cmd { color: var(--amber); margin-top: 8px; }
+.ln.out.err { color: var(--red); }
 .ln.controller { color: var(--paper); border-left: 2px solid var(--amber); padding-left: 10px; }
 .ln.streaming .text::after { content: ""; display: inline-block; width: 9px; height: 16px; background: var(--amber); vertical-align: -3px; margin-left: 2px; animation: blink 1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }

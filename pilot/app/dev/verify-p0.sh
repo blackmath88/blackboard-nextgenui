@@ -23,7 +23,7 @@ kill $S; wait $S 2>/dev/null
 PILOT_CONFIG=pilot.config.dev.json node server.js > $L/s2.log 2>&1 & S=$!
 sleep 0.5
 echo "== /state after restart"; curl -s localhost:4747/state | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log("total",j.total);for(const l of j.transcript)console.log(l.role,l.model,JSON.stringify(l.text).slice(0,90))})'
-echo "== fake down -> system line"; kill $F1; wait $F1 2>/dev/null
+echo "== frontier fake down -> morrow answers (P1 fallback; P0 wrote a system line here)"; kill $F1; wait $F1 2>/dev/null
 curl -sN -X POST localhost:4747/chat -H 'content-type: application/json' -d '{"text":"Third, with frontier down"}'; echo
 tail -2 .pilot/transcript.jsonl
 kill $S $F2; wait 2>/dev/null
