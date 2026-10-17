@@ -497,3 +497,15 @@ In `dev/browser-check.js v04`, each marked `ADAPTED in pilot-v0.5` in the code:
    unchanged.
 3. `/state` gained `?only=`, `modulesRev` and `fileErrors`; without `only` it returns what it did before plus those
    fields.
+
+## pilot-v0.5: coordinator re-run (2026-10-17)
+
+Run by the coordinator, not the builder.
+- Scope: only `pilot/app/**` plus one line in the "Pilot iterations" list of `index.html`.
+- `npm run verify`: exit 0; all earlier scripts pass (p0, p1, p2, v0.3, v0.4, browser), plus v0.5.
+- Demos v0.3, v0.4, v0.5: `/state` 200 within about 1 s each; no orphan processes.
+- Hand edit: flipping dec-2 in `.pilot-demo/state.json` with the demo's own one-liner showed up in a second browser tab 221 ms later (MutationObserver vs. the write timestamp).
+- Two tabs: confirming dec-2 in tab A by keyboard (empty input → ↓ focuses dec-2 → `c`) appeared in tab B within 1 s.
+- c/r fix: typing "can you check" with a proposal on screen left the text in the input and dec-2 proposed; `c` from the input is text.
+- Stale rev: `POST /answer {itemId: task-2, decision: r, rev: 2}` while stateRev was 6 → 409 `{stale: true}`; task-2 stayed proposed.
+- Seen, left for v0.6: a status change made by hand edit still renders as authored "by-model". v0.6 adds file-edit authorship.
