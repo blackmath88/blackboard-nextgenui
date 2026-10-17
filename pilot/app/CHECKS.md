@@ -71,7 +71,7 @@ Reproduce everything with `bash pilot/app/dev/verify-p0.sh` (wipes `.pilot/` fir
 
 # P1 Roles and commands
 
-Scripted: `bash pilot/app/dev/verify-p1.sh` (curl, 19 checks) and `node pilot/app/dev/browser-check.js p1`
+Scripted: `bash pilot/app/dev/verify-p1.sh` (curl, 17 checks) and `node pilot/app/dev/browser-check.js p1`
 (headless Chrome via the DevTools protocol, needs Node 22+ and Chrome). Both start their own fakes and
 server with the dev config and wipe `.pilot/` first. Last run: all passed.
 
@@ -137,7 +137,7 @@ server with the dev config and wipe `.pilot/` first. Last run: all passed.
 
 # P2 Growth
 
-Scripted: `bash pilot/app/dev/verify-p2.sh` (curl, 25 checks) and `node pilot/app/dev/browser-check.js p2`
+Scripted: `bash pilot/app/dev/verify-p2.sh` (curl, 24 checks) and `node pilot/app/dev/browser-check.js p2`
 (headless Chrome, 16 checks). Both wipe `.pilot/` and use the dev config. Last run: all passed;
 `verify-p0.sh` and `verify-p1.sh` still pass on the P2 code.
 
