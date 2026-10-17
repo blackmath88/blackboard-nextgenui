@@ -8,6 +8,9 @@
 // pilot-v0.6: authorship (item_write ledger in metrics.jsonl, hand edits shown as "you (file edit)"), the P5 metrics
 // events (server_start, turn, controller_add with answerRef, index_jump via POST /metric) and /stats (stats.js).
 // pilot-v0.7: /why explains the current panes and items from the files only, every statement with its source (why.js).
+// pilot-v0.8: panes can go. A pane nobody touched for fadeAfterTurns turns fades to a tab (modules.json state "faded",
+// never deleted); a touch (POST /touch, or a decision on one of its cards) brings it back. After askRemoveAfterTurns
+// more turns as a tab the controller asks once whether to remove it; only a recorded yes/never removes it (fade.js).
 // Node 20+, no dependencies. All paths resolve against this file's folder.
 'use strict';
 const http = require('http');
@@ -16,6 +19,7 @@ const path = require('path');
 const crypto = require('crypto');
 const stats = require('./stats.js');
 const why = require('./why.js');
+const fade = require('./fade.js');
 
 const APP = __dirname;
 const PUBLIC = path.join(APP, 'public');
@@ -114,6 +118,7 @@ function readJsonGood(file, fallback) {
 
 // ---- growth: deterministic controller over rules.json, consent answers in modules.json ----
 const ANSWERS = { y: 'yes', n: 'no', a: 'always', x: 'never', yes: 'yes', no: 'no', always: 'always', never: 'never' };
+const lineId = () => 'm-' + crypto.randomUUID().slice(0, 8);
 
 // A broken modules.json reads as its last good version with `error` set; callers must not write it then.
 function readModules() {
@@ -121,10 +126,20 @@ function readModules() {
   const m = r.doc && typeof r.doc === 'object' && !Array.isArray(r.doc) ? r.doc : {};
   const out = { rev: Number.isInteger(m.rev) ? m.rev : 0, panes: Array.isArray(m.panes) ? m.panes : [],
     answers: m.answers && typeof m.answers === 'object' ? m.answers : {}, pending: m.pending || null };
+  // pilot-v0.8: removal answers are kept apart from the growth answers (answers.<module> stays the growth consent);
+  // pendingKind "remove" marks the pending question as the removal question (missing = a growth question)
+  out.removals = m.removals && typeof m.removals === 'object' && !Array.isArray(m.removals) ? m.removals : {};
+  if (m.pendingKind === 'remove' && out.pending) out.pendingKind = 'remove';
   if (r.error) out.error = r.error;
   return out;
 }
-function writeModules(m) { delete m.error; m.rev = (m.rev || 0) + 1; atomicWrite(MODULES, JSON.stringify(m, null, 2) + '\n'); lastGood['modules.json'] = m; }
+function writeModules(m) {
+  delete m.error; if (!m.pending) delete m.pendingKind;
+  m.rev = (m.rev || 0) + 1;
+  // pilot-v0.8: an empty removals map is not written (files without removals stay as they were); m keeps it
+  const out = m.removals && !Object.keys(m.removals).length ? { ...m, removals: undefined } : m;
+  atomicWrite(MODULES, JSON.stringify(out, null, 2) + '\n'); lastGood['modules.json'] = JSON.parse(JSON.stringify(out));
+}
 
 // Visible panes: only those with a recorded yes/always answer (a hand-added pane without one stays hidden).
 function visiblePanes(m) {
@@ -139,31 +154,47 @@ function counts(lines, items = readState().items) {
 }
 
 // When a rule may ask: count >= threshold, not answered never, and after "no" only once the count has doubled.
+// pilot-v0.8: after a removal (yes) the rule asks again, never re-adds through an old "always", and only once its count
+// has doubled since the removal (like after "no"); after removal "never" it never asks again.
 function ruleDue(rule, n, m) {
   if (!BUILT.includes(rule.module) || m.panes.some((p) => p.module === rule.module)) return false;
   const ans = m.answers[rule.module];
   if (ans && ans.answer === 'never') return false;
+  const rem = removedSince(m, rule.module);
+  if (rem && rem.answer === 'never') return false;
+  if (rem) return n >= Math.max(rule.threshold, 2 * (rem.count || 0));
   const need = ans && ans.answer === 'no' ? Math.max(rule.threshold, 2 * ans.count) : rule.threshold;
   return n >= need;
+}
+// The removal answer that removed a module's pane, if the pane has not come back since (removal yes/never).
+function removedSince(m, mod) {
+  const rem = m.removals[mod];
+  if (!rem || !['yes', 'never'].includes(rem.answer)) return null;
+  const ans = m.answers[mod];
+  return ans && Date.parse(ans.at) > Date.parse(rem.at) ? null : rem;
 }
 
 // Runs after every turn, inside the write chain. Reads rules.json fresh each time. At most one question at a time.
 function runController() {
   return serial(() => {
-    let rules;
-    try { rules = readJson(RULES, { rules: [] }).rules || []; }
+    let rulesDoc;
+    try { rulesDoc = readJson(RULES, { rules: [] }) || {}; }
     catch (err) { appendJsonl(METRICS, { ts: new Date().toISOString(), event: 'controller_error', error: `rules.json: ${err.message}` }); return; }
+    const rules = Array.isArray(rulesDoc.rules) ? rulesDoc.rules : [];
     const m = readModules();
     if (m.error) { appendJsonl(METRICS, { ts: new Date().toISOString(), event: 'controller_error', error: m.error }); return; }
+    const lines = readTranscript();
+    // pilot-v0.8: fading is not a question, so it runs before the one-question-at-a-time check
+    if (runFades(m, rulesDoc, lines)) writeModules(m);
     if (m.pending) return;
-    const c = counts(readTranscript());
+    const c = counts(lines);
     for (const rule of rules) {
       const n = c[rule.metric];
       if (typeof n !== 'number' || typeof rule.threshold !== 'number' || !ruleDue(rule, n, m)) continue;
       const ts = new Date().toISOString();
       const prior = m.answers[rule.module] || {};
-      if (prior.answer === 'always') {   // consent already given for good
-        m.panes.push({ module: rule.module, addedAt: ts, atCount: n, rule: { metric: rule.metric, threshold: rule.threshold } });
+      if (prior.answer === 'always' && !removedSince(m, rule.module)) {   // consent already given for good (not after a removal)
+        m.panes.push({ module: rule.module, addedAt: ts, atCount: n, rule: { metric: rule.metric, threshold: rule.threshold }, lastTouch: { at: ts, turn: fade.turnOf(lines), how: 'added' } });
         writeModules(m);
         appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'controller', text: `${n} ${rule.metric}. Added the ${rule.module} pane (you said always).`, model: null, module: rule.module });
         appendJsonl(METRICS, { ts, event: 'controller_add', module: rule.module, count: n, answer: 'always', answerRef: prior.consentId || null, answerAt: prior.at || null });
@@ -176,6 +207,95 @@ function runController() {
       appendJsonl(METRICS, { ts, event: 'controller_ask', module: rule.module, metric: rule.metric, count: n, threshold: rule.threshold });
       return;
     }
+    askRemoval(m, rulesDoc, lines);
+  });
+}
+
+// ---- pilot-v0.8: panes can go (fade.js has the rules; these functions write) ----
+// Fades every shown pane that is due (untouched for fadeAfterTurns turns, holding no proposal) and brings back a faded
+// pane that holds a proposal (a faded pane must not hide a decision; that is not a touch). Mutates m, returns whether
+// it changed; the caller writes modules.json. Inside the write chain.
+function runFades(m, rulesDoc, lines) {
+  const turn = fade.turnOf(lines);
+  const items = readState().items;
+  let changed = false;
+  for (const entry of m.panes) {
+    if (!entry || !BUILT.includes(entry.module) || !visiblePanes(m).includes(entry.module)) continue;
+    const st = fade.status(entry, { lines, turn, rulesDoc, items });
+    const ts = new Date().toISOString();
+    if (st.fadeDue) {
+      entry.state = 'faded'; entry.fadedAt = ts; entry.fadedTurn = turn;
+      changed = true;
+      appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'controller', text: `${entry.module} pane faded to a tab: untouched for ${st.idle} turns (fadeAfterTurns ${st.fadeAfter}). Click the tab to bring it back.`, model: null, pane: entry.module, event: 'fade' });
+      appendJsonl(METRICS, { ts, event: 'pane_fade', module: entry.module, turn, idle: st.idle, fadeAfterTurns: st.fadeAfter, lastTouchTurn: st.lastTouch.turn, lastTouchRecorded: st.lastTouch.recorded });
+    } else if (st.faded && st.holds.length) {
+      unfade(entry);
+      changed = true;
+      appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'controller', text: `${entry.module} pane is back: it holds a proposal (${st.holds.join(', ')}), and a tab must not hide a decision.`, model: null, pane: entry.module, event: 'unfade' });
+      appendJsonl(METRICS, { ts, event: 'pane_unfade', module: entry.module, turn, reason: 'proposal', holds: st.holds });
+      withdrawRemoval(m, entry.module, 'it holds a proposal', ts);
+    }
+  }
+  return changed;
+}
+function unfade(entry) { delete entry.state; delete entry.fadedAt; delete entry.fadedTurn; }
+
+// Asks the removal question for the first faded pane that is due (once per pane). Inside the write chain, m.pending empty.
+function askRemoval(m, rulesDoc, lines) {
+  const turn = fade.turnOf(lines);
+  const items = readState().items;
+  for (const entry of m.panes) {
+    if (!entry || !BUILT.includes(entry.module)) continue;
+    const st = fade.status(entry, { lines, turn, rulesDoc, items });
+    if (!st.removeDue) continue;
+    const ts = new Date().toISOString();
+    entry.removalAsked = true;
+    m.pending = entry.module; m.pendingKind = 'remove';
+    writeModules(m);
+    appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'controller', text: `The ${entry.module} pane has been a tab for ${st.fadedFor} turns. Remove the ${entry.module} pane? (y removes it, the rule may offer it again later; n keeps the tab; x removes it for good)`, model: null, module: entry.module, question: 'remove' });
+    appendJsonl(METRICS, { ts, event: 'controller_ask', question: 'remove', module: entry.module, turn, fadedFor: st.fadedFor, askRemoveAfterTurns: st.askRemoveAfter, fadedTurn: st.fadedTurn });
+    return;
+  }
+}
+
+// A touch while the removal question for that pane is open withdraws the question (you are using the pane). The
+// question is not asked again for this pane (removalAsked stays). Mutates m; inside the write chain.
+function withdrawRemoval(m, mod, why, ts) {
+  if (m.pending !== mod || m.pendingKind !== 'remove') return false;
+  m.pending = null; delete m.pendingKind;
+  appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `remove ${mod}: question withdrawn, ${why}`, model: null });
+  appendJsonl(METRICS, { ts, event: 'controller_withdraw', question: 'remove', module: mod, reason: why });
+  return true;
+}
+
+// Records a touch on a pane: lastTouch moves to this turn; a faded pane comes back. Only the first touch of a pane in
+// a turn is written and logged (a later one in the same turn changes nothing, so it is not written: no rev bump, no
+// event). Mutates m and returns {changed, unfaded}; the caller writes. Inside the write chain.
+function applyTouch(m, mod, how, ts, turn) {
+  const entry = m.panes.find((p) => p && p.module === mod);
+  if (!entry) return { changed: false };
+  const was = entry.lastTouch;
+  const faded = fade.isFaded(entry);
+  if (!faded && was && was.turn === turn) return { changed: false };
+  entry.lastTouch = { at: ts, turn, how };
+  if (faded) unfade(entry);
+  appendJsonl(METRICS, { ts, event: 'pane_touch', module: mod, how, turn, ...(faded ? { unfaded: true } : {}) });
+  withdrawRemoval(m, mod, 'you used the pane', ts);
+  return { changed: true, unfaded: faded };
+}
+
+// POST /touch {module, how}: the page reports an interaction with a pane (see CHECKS.md # pilot-v0.8 for the list).
+// No rev: a touch never conflicts with anything. Returns {ok, changed, unfaded, rev}.
+function touch(mod, how) {
+  return serial(() => {
+    if (mod === 'chat') return { code: 400, body: { error: 'the chat pane never fades, it needs no touch' } };
+    if (!fade.TOUCH_HOWS.includes(how)) return { code: 400, body: { error: `how must be one of ${fade.TOUCH_HOWS.join(', ')}` } };
+    const m = readModules();
+    if (m.error) return { code: 409, body: { error: `${m.error}; fix the file by hand first` } };
+    if (!visiblePanes(m).includes(mod)) return { code: 404, body: { error: `no pane "${mod}" shown` } };
+    const r = applyTouch(m, mod, how, new Date().toISOString(), fade.turnOf(readTranscript()));
+    if (r.changed) writeModules(m);
+    return { code: 200, body: { ok: true, module: mod, changed: r.changed, unfaded: !!r.unfaded, rev: m.rev } };
   });
 }
 
@@ -189,6 +309,7 @@ function answer(module, raw, seenRev) {
     if (m.error) return { code: 409, body: { error: `${m.error}; fix the file by hand first` } };
     if (seenRev !== undefined && seenRev !== m.rev) return stale('modules.json', seenRev, m.rev);
     if (!module || m.pending !== module) return { code: 409, body: { error: `no pending question for "${module}"`, pending: m.pending } };
+    if (m.pendingKind === 'remove') return answerRemoval(m, module, ans);
     const ts = new Date().toISOString();
     // count = the rule's own metric (decisions for map, tasks for kanban), so "no" waits for that count to double
     let rule = {};
@@ -200,7 +321,8 @@ function answer(module, raw, seenRev) {
     const consentId = shortId('c');
     m.answers[module] = { answer: ans, at: ts, count: n, consentId };
     const adds = (ans === 'yes' || ans === 'always') && !m.panes.some((p) => p.module === module);
-    if (adds) m.panes.push({ module, addedAt: ts, atCount: n, rule: { metric: metricName, threshold: typeof rule.threshold === 'number' ? rule.threshold : null } });
+    // pilot-v0.8: being added counts as the first touch (the fade count starts here)
+    if (adds) m.panes.push({ module, addedAt: ts, atCount: n, rule: { metric: metricName, threshold: typeof rule.threshold === 'number' ? rule.threshold : null }, lastTouch: { at: ts, turn: fade.turnOf(readTranscript()), how: 'added' } });
     m.pending = null;
     writeModules(m);
     const effect = { yes: 'pane added', always: 'pane added; will not ask again', no: 'will ask again when the count has doubled', never: 'will never ask again' }[ans];
@@ -209,6 +331,30 @@ function answer(module, raw, seenRev) {
     if (adds) appendJsonl(METRICS, { ts, event: 'controller_add', module, count: n, answer: ans, answerRef: consentId, answerAt: ts });
     return { code: 200, body: { ok: true, module, answer: ans } };
   });
+}
+
+// pilot-v0.8: the answer to "remove the <module> pane?". yes: the pane entry is removed (its rule may offer it again,
+// see ruleDue); no: it stays a tab and is not asked again; never: removed, and its rule never asks again. "always" has
+// no meaning here and is refused. Recorded like any consent (consent event with question "remove"). In the chain.
+function answerRemoval(m, module, ans) {
+  if (ans === 'always') return { code: 400, body: { error: 'the removal question takes y/n/x (yes/no/never)' } };
+  const ts = new Date().toISOString();
+  const turn = fade.turnOf(readTranscript());
+  let rule = {};
+  try { rule = (readJson(RULES, { rules: [] }).rules || []).find((r) => r.module === module) || {}; } catch { /* no rule */ }
+  const c = counts(readTranscript());
+  const n = typeof c[rule.metric] === 'number' ? c[rule.metric] : c.messages;
+  const consentId = shortId('c');
+  const entry = m.panes.find((p) => p.module === module);
+  m.removals[module] = { answer: ans, at: ts, turn, count: n, metric: rule.metric || 'messages', consentId };
+  if (ans !== 'no') m.panes = m.panes.filter((p) => p.module !== module);
+  m.pending = null; delete m.pendingKind;
+  writeModules(m);
+  const effect = { yes: 'pane removed; its rule may offer it again once the count has doubled', no: 'kept as a tab; will not ask again', never: 'pane removed; its rule will never offer it again' }[ans];
+  appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `remove ${module}: ${ans}, ${effect}`, model: null });
+  appendJsonl(METRICS, { ts, event: 'consent', question: 'remove', id: consentId, module, answer: ans, count: n, metric: rule.metric || 'messages', turn });
+  if (ans !== 'no') appendJsonl(METRICS, { ts, event: 'pane_remove', module, answer: ans, answerRef: consentId, turn, fadedTurn: entry && entry.fadedTurn });
+  return { code: 200, body: { ok: true, module, answer: ans, question: 'remove' } };
 }
 
 // ---- model roles: candidates, policy, active choice (persisted in .pilot/roles.json) ----
@@ -584,6 +730,9 @@ function decide(itemId, raw, seenRev) {
     itemWrite(item, 'decide', before, ts);
     appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'system', text: `${itemId} ${status}: ${item.text}`, model: null });
     appendJsonl(METRICS, { ts, event: 'decide', itemId, kind: item.kind, decision: status, decidedBy: 'user', author: item.author || null, model: item.model || null, rev });
+    // pilot-v0.8: a decision on a card is a touch of the pane that shows it
+    const mod = fade.paneOfKind(item.kind), m = readModules();
+    if (mod && !m.error && visiblePanes(m).includes(mod) && applyTouch(m, mod, 'decide', ts, fade.turnOf(readTranscript())).changed) writeModules(m);
     return { code: 200, body: { ok: true, item, rev } };
   });
 }
@@ -665,14 +814,20 @@ function handleEvents(req, res) {
 function statePayload(only) {
   const want = (f) => !only || only.includes(f);
   const out = { extracting: extracting > 0 };
-  if (want('transcript.jsonl')) { const lines = readTranscript(); out.transcript = lines.slice(-TAIL); out.total = lines.length; }
+  if (want('transcript.jsonl')) { const lines = readTranscript(); out.transcript = lines.slice(-TAIL); out.total = lines.length; out.turn = fade.turnOf(lines); }
   if (want('modules.json') || want('roles.json')) out.models = modelsSummary();
   let m = null, st = null;
   if (want('modules.json')) {
     m = readModules();
-    let rules = [];
-    try { rules = readJson(RULES, { rules: [] }).rules || []; } catch { /* broken rules.json: rule from the pane entry only */ }
-    Object.assign(out, { panes: visiblePanes(m), pending: m.pending, answers: m.answers, modulesRev: m.rev, paneInfo: stats.paneInfo(m, rules, metricsEvents()) });
+    let rulesDoc = { rules: [] };
+    try { rulesDoc = readJson(RULES, { rules: [] }) || rulesDoc; } catch { /* broken rules.json: rule from the pane entry only */ }
+    const rules = Array.isArray(rulesDoc.rules) ? rulesDoc.rules : [];
+    const paneInfo = stats.paneInfo(m, rules, metricsEvents());
+    // pilot-v0.8: paneInfo.<module>.fade = fade.status() (faded, lastTouch, idle, thresholds, proposals held)
+    const lines = readTranscript(), items = readState().items, turn = fade.turnOf(lines);
+    for (const p of m.panes) if (p && paneInfo[p.module]) paneInfo[p.module].fade = fade.status(p, { lines, turn, rulesDoc, items });
+    Object.assign(out, { panes: visiblePanes(m), pending: m.pending, pendingKind: m.pendingKind || null, answers: m.answers, removals: m.removals,
+      modulesRev: m.rev, paneInfo, faded: visiblePanes(m).filter((mod) => fade.isFaded(m.panes.find((p) => p.module === mod))) });
   }
   // items carry `prov` ({added, fields}) when a part of them came from a hand edit (pilot-v0.6, see stats.js)
   if (want('state.json')) { st = readState(); Object.assign(out, { items: stats.withProvenance(st.items, metricsEvents()), stateRev: st.rev, stateError: st.error || null }); }
@@ -804,7 +959,9 @@ async function runCommand(input) {
     const c = counts(readTranscript()), m = readModules();
     return { ok: true, lines: rules.map((r) => {
       const ans = m.answers[r.module];
-      const state = m.panes.some((p) => p.module === r.module) ? 'pane shown' : m.pending === r.module ? 'asking now'
+      const entry = m.panes.find((p) => p.module === r.module), rem = removedSince(m, r.module);
+      const state = m.pending === r.module ? (m.pendingKind === 'remove' ? 'asking whether to remove it' : 'asking now')
+        : entry ? (fade.isFaded(entry) ? 'pane faded to a tab' : 'pane shown') : rem ? `removed (${rem.answer})`
         : ans ? `answered ${ans.answer} at ${ans.count}` : BUILT.includes(r.module) ? 'not asked yet' : 'not built yet';
       return `${r.module}: ${r.metric} ${c[r.metric]} / ${r.threshold}  (${state})`;
     }) };
@@ -817,9 +974,10 @@ async function runCommand(input) {
   if (cmd === '/stats') return { ok: true, lines: stats.formatStats(stats.computeStats(PILOT), `${path.relative(APP, PILOT)}/`) };
   if (cmd === '/panes') {
     const m = readModules();
-    const lines = ['chat (always)', ...m.panes.map((p) => `${p.module} added ${p.addedAt} at ${p.atCount} messages`)];
+    const lines = ['chat (always, never fades)', ...m.panes.map((p) => `${p.module} added ${p.addedAt} at ${p.atCount} messages${fade.isFaded(p) ? `, faded to a tab at turn ${p.fadedTurn}` : ''}`)];
     for (const [mod, a] of Object.entries(m.answers)) lines.push(`answer ${mod}: ${a.answer} (${a.at}, count ${a.count})`);
-    if (m.pending) lines.push(`pending question: ${m.pending}`);
+    for (const [mod, a] of Object.entries(m.removals)) lines.push(`remove ${mod}: ${a.answer} (${a.at}, turn ${a.turn})`);
+    if (m.pending) lines.push(`pending question: ${m.pendingKind === 'remove' ? `remove ${m.pending}` : m.pending}`);
     return { ok: true, lines };
   }
   return { ok: false, lines: [`unknown command "${cmd}". Try /help`] };
@@ -851,6 +1009,13 @@ const server = http.createServer(async (req, res) => {
       if (at < 0) return sendJson(res, 400, { error: `no message "${target}"` });
       await metric('index_jump', { target, position: at + 1, of: lines.length });
       return sendJson(res, 200, { ok: true });
+    }
+    // pilot-v0.8: the page reports an interaction with a pane (a faded pane comes back)
+    if (req.method === 'POST' && pathname === '/touch') {
+      let body;
+      try { body = JSON.parse(await readBody(req, 2000)); } catch { return sendJson(res, 400, { error: 'expected JSON {module, how}' }); }
+      const out = await touch(body && body.module, body && body.how);
+      return sendJson(res, out.code, out.body);
     }
     if (req.method === 'POST' && pathname === '/command') {
       let text;

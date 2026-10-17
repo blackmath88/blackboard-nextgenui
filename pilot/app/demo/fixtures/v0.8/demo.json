@@ -1,0 +1,12 @@
+{
+  "fakes": [
+    { "name": "frontier", "port": 5772 },
+    { "name": "morrow", "port": 5773 }
+  ],
+  "try": [
+    "Open {url}: map, index and a slim \"kanban\" tab (it faded at turn 30; nobody touched it after the decisions at turn 22). Type /why map: last touch turn 30, 7 turns since, fades after 8.",
+    "Send any message (e.g. \"what is left for Monday?\"). After the reply the map fades to a tab (untouched for 8 turns) and the controller asks \"Remove the kanban pane?\": y removes it, n keeps the tab, x removes it for good. Your answer is recorded like any consent.",
+    "Click the map tab (or Tab to it and press Enter): it comes back at once. A click, a scroll, Tab into a pane or a c/r on a card count as a touch (metrics.jsonl pane_touch); /why kanban explains the fade and the removal question.",
+    "Faded panes stay in {dir}/modules.json (\"state\": \"faded\"); no rule ever deletes one. Thresholds: fadeAfterTurns / askRemoveAfterTurns in rules.json."
+  ]
+}

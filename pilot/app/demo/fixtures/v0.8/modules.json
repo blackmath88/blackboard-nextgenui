@@ -1,0 +1,71 @@
+{
+  "rev": 17,
+  "panes": [
+    {
+      "module": "map",
+      "addedAt": "2026-10-14T09:05:52.000Z",
+      "atCount": 2,
+      "rule": {
+        "metric": "decisions",
+        "threshold": 2
+      },
+      "lastTouch": {
+        "at": "2026-10-17T08:55:02.000Z",
+        "turn": 30,
+        "how": "click"
+      }
+    },
+    {
+      "module": "index",
+      "addedAt": "2026-10-15T14:14:33.000Z",
+      "atCount": 24,
+      "rule": {
+        "metric": "messages",
+        "threshold": 12
+      },
+      "lastTouch": {
+        "at": "2026-10-17T09:12:26.000Z",
+        "turn": 36,
+        "how": "click"
+      }
+    },
+    {
+      "module": "kanban",
+      "addedAt": "2026-10-16T10:06:12.000Z",
+      "atCount": 6,
+      "rule": {
+        "metric": "tasks",
+        "threshold": 3
+      },
+      "lastTouch": {
+        "at": "2026-10-16T18:35:00.000Z",
+        "turn": 22,
+        "how": "decide"
+      },
+      "state": "faded",
+      "fadedAt": "2026-10-17T08:54:42.000Z",
+      "fadedTurn": 30
+    }
+  ],
+  "answers": {
+    "map": {
+      "answer": "yes",
+      "at": "2026-10-14T09:05:52.000Z",
+      "count": 2,
+      "consentId": "c-f01"
+    },
+    "index": {
+      "answer": "yes",
+      "at": "2026-10-15T14:14:33.000Z",
+      "count": 24,
+      "consentId": "c-f03"
+    },
+    "kanban": {
+      "answer": "always",
+      "at": "2026-10-16T10:06:12.000Z",
+      "count": 6,
+      "consentId": "c-f05"
+    }
+  },
+  "pending": null
+}

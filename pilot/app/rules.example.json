@@ -6,5 +6,8 @@
     { "module": "kanban", "metric": "tasks",     "threshold": 4,  "ask": "{n} tasks have come up. Track them on a board?" }
   ],
   "afterNo": "ask again when the count has doubled",
-  "_notes": ["Edit by hand; the controller reads this file on every turn.", "decisions and tasks count proposed and confirmed items, not rejected ones."]
+  "fadeAfterTurns": 8,
+  "askRemoveAfterTurns": 8,
+  "_notes": ["Edit by hand; the controller reads this file on every turn.", "decisions and tasks count proposed and confirmed items, not rejected ones.",
+    "fadeAfterTurns: a pane nobody touched for that many turns (messages you sent) fades to a tab; askRemoveAfterTurns: after that many more turns as a tab the controller asks once whether to remove it. Both can also be set per rule; leave one out to switch it off. The chat never fades, and a pane holding an unanswered proposal never fades."]
 }

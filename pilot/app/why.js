@@ -6,11 +6,14 @@
 // `file:line path` for JSON entries (the line of the entry in the file as it is now; the path alone if not found).
 // A fact that is not recorded is said plainly ("no recorded answer", "when is not recorded").
 // The Observstory idea `explain_frame` ("why does my screen look like this?") applied to this pilot.
+// pilot-v0.8: /why <pane> also explains fading: the last touch, the turns since, the threshold, whether and when it
+// fades (or why it cannot: it holds a proposal), the removal question and its answer; a removed pane says so.
 // Node 20+, no dependencies. server.js requires it for /why.
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const stats = require('./stats.js');
+const fade = require('./fade.js');
 
 const MODULES = ['index', 'map', 'kanban'];   // panes this build can show (server.js BUILT)
 const TITLES = { chat: 'chat', index: 'index', map: 'reasoning map', kanban: 'kanban' };
@@ -61,6 +64,31 @@ const answerCite = (ctx, mod) => {
 };
 const paneCite = (ctx, mod) => inFile(ctx, 'modules.json', new RegExp(`"module"\\s*:\\s*"${esc(mod)}"`), `panes ${mod}`);
 const ruleCite = (ctx, mod) => inFile(ctx, 'rules.json', new RegExp(`"module"\\s*:\\s*"${esc(mod)}"`), `rules ${mod}`);
+// pilot-v0.8: modules.json removals.<module>; rules.json fadeAfterTurns / askRemoveAfterTurns (per rule: the first
+// line with the key at or after the rule's module line; default: the top-level key, outside the rules array)
+const removalCite = (ctx, mod) => {
+  const raw = ctx.raw['modules.json'] || '';
+  const a = lineOf(raw, /"removals"\s*:/);
+  const n = a ? lineOf(raw, new RegExp(`^\\s*"${esc(mod)}"\\s*:`), a) : null;
+  return n ? `modules.json:${n} removals.${mod}` : `modules.json removals.${mod}`;
+};
+function keyCite(ctx, key, mod, from) {
+  const raw = ctx.raw['rules.json'] || '';
+  const re = new RegExp(`"${key}"\\s*:`);
+  let n = null;
+  if (from === 'rule') {
+    const r = lineOf(raw, new RegExp(`"module"\\s*:\\s*"${esc(mod)}"`));
+    n = r ? lineOf(raw, re, r - 1) : null;
+  } else {
+    const ls = raw.split('\n');
+    let depth = 0;
+    for (let i = 0; i < ls.length && n === null; i++) {   // the key at nesting depth 1 (top level of the document)
+      if (depth === 1 && re.test(ls[i])) n = i + 1;
+      for (const ch of ls[i].replace(/"(?:[^"\\]|\\.)*"/g, '')) depth += ch === '{' || ch === '[' ? 1 : ch === '}' || ch === ']' ? -1 : 0;
+    }
+  }
+  return n ? `rules.json:${n} ${key}${from === 'rule' ? ` ${mod}` : ''}` : `rules.json (no ${key})`;
+}
 
 function load(dir) {
   const ctx = { dir, raw: {} };
@@ -76,6 +104,8 @@ function load(dir) {
   ctx.panes = Array.isArray(m.panes) ? m.panes.filter((p) => p && typeof p.module === 'string') : [];
   ctx.answers = m.answers && typeof m.answers === 'object' ? m.answers : {};
   ctx.pending = m.pending || null;
+  ctx.pendingKind = m.pendingKind === 'remove' ? 'remove' : null;
+  ctx.removals = m.removals && typeof m.removals === 'object' ? m.removals : {};
   const s = ctx.state.doc && typeof ctx.state.doc === 'object' ? ctx.state.doc : {};
   ctx.items = Array.isArray(s.items) ? s.items.filter((i) => i && typeof i.id === 'string' && typeof i.kind === 'string') : [];
   const r = ctx.rules.doc && typeof ctx.rules.doc === 'object' ? ctx.rules.doc : {};
@@ -98,8 +128,37 @@ function questionLine(ctx, ask) {
 // ---- panes ----
 function paneHistory(ctx, mod) {
   const out = [];
-  for (const row of ev(ctx, (e) => e.module === mod && ['controller_ask', 'consent', 'controller_add'].includes(e.event))) {
+  const kinds = ['controller_ask', 'consent', 'controller_add', 'pane_fade', 'pane_unfade', 'pane_remove', 'controller_withdraw'];
+  for (const row of ev(ctx, (e) => e.module === mod && kinds.includes(e.event))) {
     const e = row.obj;
+    // pilot-v0.8: fading, the removal question and its answer (touches are summed up in fadeFacts)
+    if (e.event === 'pane_fade') {
+      out.push({ text: `the controller faded it to a tab at ${e.ts} (turn ${e.turn}): untouched for ${e.idle} turns, fadeAfterTurns ${e.fadeAfterTurns}`, cite: [jl('metrics.jsonl', row, `pane_fade ${mod}`)] });
+      continue;
+    }
+    if (e.event === 'pane_unfade') {
+      out.push({ text: `the controller brought it back at ${e.ts} (turn ${e.turn}): it held a proposal (${(e.holds || []).join(', ')}); not a touch`, cite: [jl('metrics.jsonl', row, `pane_unfade ${mod}`)] });
+      continue;
+    }
+    if (e.event === 'pane_remove') {
+      out.push({ text: `removed at ${e.ts} (turn ${e.turn}), allowed by your answer "${e.answer}" to the removal question (${e.answerRef})`, cite: [jl('metrics.jsonl', row, `pane_remove ${mod}`)] });
+      continue;
+    }
+    if (e.event === 'controller_withdraw') {
+      out.push({ text: `the removal question was withdrawn at ${e.ts}: ${e.reason}`, cite: [jl('metrics.jsonl', row, `controller_withdraw ${mod}`)] });
+      continue;
+    }
+    if (e.question === 'remove') {
+      if (e.event === 'controller_ask') {
+        const q = questionLine(ctx, e);
+        out.push({ text: `the controller asked at ${e.ts} (turn ${e.turn}) whether to remove it: a tab for ${e.fadedFor} turns, askRemoveAfterTurns ${e.askRemoveAfterTurns}`
+          + (q ? `, "${q.obj.text}"` : ' (the question line is not in transcript.jsonl)'),
+          cite: [jl('metrics.jsonl', row, 'controller_ask'), ...(q ? [jl('transcript.jsonl', q, q.obj.id)] : [])], ...(q ? { msg: q.obj.id } : {}) });
+      } else if (e.event === 'consent') {
+        out.push({ text: `you answered "${e.answer}" to removing it at ${e.ts} (turn ${e.turn})`, cite: [jl('metrics.jsonl', row, `consent ${e.id || ''}`.trim())] });
+      }
+      continue;
+    }
     if (e.event === 'controller_ask') {
       const q = questionLine(ctx, e);
       out.push({ text: `the controller asked at ${e.ts}: ${e.count} ${e.metric} reached the threshold ${e.threshold}`
@@ -159,14 +218,64 @@ function explainPane(ctx, mod) {
   if (shown(ctx, mod)) out.push({ text: `shown: listed in modules.json and answered "${ans.answer}"`, cite: [paneCite(ctx, mod), answerCite(ctx, mod)] });
   else if (entry) out.push({ text: `not shown: listed in modules.json, but ${ans ? `the answer is "${ans.answer}"` : 'there is no recorded answer'} (a pane needs yes or always)`, cite: [paneCite(ctx, mod), ans ? answerCite(ctx, mod) : `modules.json answers.${mod} (absent)`] });
   else if (ctx.pending === mod) out.push({ text: 'not shown: the controller is asking now', cite: [inFile(ctx, 'modules.json', /"pending"\s*:/, 'pending')] });
+  else if (removal(ctx, mod)) {
+    const rem = removal(ctx, mod);
+    out.push({ text: `not shown: removed with your answer "${rem.answer}" at ${rem.at} (turn ${rem.turn})${rem.answer === 'never' ? '; its rule will never offer it again' : '; its rule may offer it again once its count has doubled'}`, cite: [removalCite(ctx, mod)] });
+  }
   else out.push({ text: 'not shown: not listed in modules.json', cite: ['modules.json panes'] });
   out.push(...ruleFacts(ctx, mod, entry));
   const hist = paneHistory(ctx, mod);
   out.push(...hist);
   if (!hist.length) out.push({ text: 'no question, answer or add for this pane in metrics.jsonl', cite: ['metrics.jsonl'] });
   out.push(...answerFacts(ctx, mod));
+  if (entry && shown(ctx, mod)) out.push(...fadeFacts(ctx, entry));
   if (entry && !ev(ctx, (e) => e.event === 'controller_add' && e.module === mod).length) {
     out.push({ text: `the pane entry has no controller_add event: added by file edit, when is not recorded${entry.addedAt ? ` (the entry says addedAt ${entry.addedAt})` : ''}`, cite: [paneCite(ctx, mod), 'metrics.jsonl (no controller_add)'] });
+  }
+  return out;
+}
+
+// pilot-v0.8: a removal answer that removed the pane (yes/never), unless a growth answer came after it
+function removal(ctx, mod) {
+  const rem = ctx.removals[mod];
+  if (!rem || !['yes', 'never'].includes(rem.answer) || ctx.panes.some((p) => p.module === mod)) return null;
+  return rem;
+}
+
+// pilot-v0.8: fading of a shown pane: state, last touch, turns since, threshold, what happens next, removal question.
+function fadeFacts(ctx, entry) {
+  const mod = entry.module;
+  const turn = fade.turnOf(ctx.lines.map((r) => r.obj));
+  const st = fade.status(entry, { lines: ctx.lines.map((r) => r.obj), turn, rulesDoc: ctx.rules.doc, items: ctx.items });
+  const pc = paneCite(ctx, mod);
+  const turns = `transcript.jsonl user lines ×${turn}`;
+  const out = [];
+  const fadeRow = ev(ctx, (e) => e.event === 'pane_fade' && e.module === mod).pop();
+  if (st.faded) out.push({ text: `faded to a tab at ${st.fadedAt || '(time not in the entry)'} (turn ${st.fadedTurn ?? '?'}), a tab for ${st.fadedFor ?? '?'} turns now; it stays in modules.json, a touch on the tab brings it back`,
+    cite: [pc, ...(fadeRow ? [jl('metrics.jsonl', fadeRow, `pane_fade ${mod}`)] : [])] });
+  else out.push({ text: 'shown (not faded)', cite: [pc] });
+  const lt = st.lastTouch;
+  if (lt.recorded) {
+    const row = ev(ctx, (e) => e.event === 'pane_touch' && e.module === mod && e.turn === lt.turn).pop()
+      || ev(ctx, (e) => e.event === 'decide' && fade.paneOfKind(e.kind) === mod && e.ts === lt.at).pop();
+    out.push({ text: `last touch: ${lt.how} at ${lt.at} (turn ${lt.turn})`, cite: [pc, ...(row ? [jl('metrics.jsonl', row, row.obj.event === 'decide' ? `decide ${row.obj.itemId}` : `pane_touch ${mod}`)] : [])] });
+  } else out.push({ text: `no touch recorded: counted from when it was added (${lt.at || 'addedAt not in the entry'}, turn ${lt.turn})`, cite: [pc] });
+  out.push({ text: `turns since: ${st.idle} (now turn ${turn}; a turn is one message you sent)`, cite: [turns] });
+  if (st.fadeAfter === null) out.push({ text: 'never fades: rules.json sets no fadeAfterTurns (neither for this rule nor as the default)', cite: [ctx.rules.error ? 'rules.json (not valid JSON)' : 'rules.json (no fadeAfterTurns)'] });
+  else {
+    const tc = keyCite(ctx, 'fadeAfterTurns', mod, st.fadeFrom);
+    if (st.faded) out.push({ text: `threshold: fades after ${st.fadeAfter} untouched turns (${st.fadeFrom === 'rule' ? 'this rule' : 'the default'})`, cite: [tc] });
+    else if (st.holds.length) out.push({ text: `threshold: fades after ${st.fadeAfter} untouched turns (${st.fadeFrom === 'rule' ? 'this rule' : 'the default'}), but it holds an unanswered proposal (${st.holds.join(', ')}), so it does not fade: a tab would hide a decision`,
+      cite: [tc, ...st.holds.map((id) => itemCite(ctx, id))] });
+    else out.push({ text: `threshold: fades after ${st.fadeAfter} untouched turns (${st.fadeFrom === 'rule' ? 'this rule' : 'the default'}); ${st.fadeDue ? 'due now: it fades after the next turn' : `fades after turn ${lt.turn + st.fadeAfter} if nobody touches it`}`, cite: [tc] });
+  }
+  if (st.faded) {
+    const ask = ev(ctx, (e) => e.event === 'controller_ask' && e.question === 'remove' && e.module === mod).pop();
+    const rem = ctx.removals[mod];
+    if (ctx.pending === mod && ctx.pendingKind === 'remove') out.push({ text: 'removal question open now (y removes, n keeps the tab, x removes for good)', cite: [inFile(ctx, 'modules.json', /"pending"\s*:/, 'pending'), ...(ask ? [jl('metrics.jsonl', ask, 'controller_ask')] : [])] });
+    else if (st.removalAsked) out.push({ text: `removal question already asked for this pane (asked once per pane)${rem ? `; your answer: "${rem.answer}" at ${rem.at}` : ''}`, cite: [pc, ...(rem ? [removalCite(ctx, mod)] : [])] });
+    else if (st.askRemoveAfter === null) out.push({ text: 'never offered for removal: rules.json sets no askRemoveAfterTurns', cite: ['rules.json (no askRemoveAfterTurns)'] });
+    else out.push({ text: `removal question after ${st.askRemoveAfter} turns as a tab (${st.askFrom === 'rule' ? 'this rule' : 'the default'}): ${st.removeDue ? 'due, asked after the next turn' : `at turn ${st.fadedTurn + st.askRemoveAfter}`}; only your answer removes a pane`, cite: [keyCite(ctx, 'askRemoveAfterTurns', mod, st.askFrom)] });
   }
   return out;
 }
@@ -248,7 +357,8 @@ function explainFrame(ctx) {
   const out = [{ head: true, text: `why the workbench looks like this (from the files in ${ctx.label}, no model)` }];
   if (ctx.modules.error) out.push({ text: `${ctx.modules.error}: panes cannot be explained until it is fixed`, cite: ['modules.json'] });
   const vis = MODULES.filter((m) => shown(ctx, m));
-  out.push({ text: `panes: chat${vis.map((m) => ` + ${m}`).join('')} (chat is always there)`, cite: ['modules.json panes', 'modules.json answers'] });
+  const tabs = vis.filter((m) => fade.isFaded(ctx.panes.find((p) => p.module === m)));
+  out.push({ text: `panes: chat${vis.map((m) => ` + ${m}${tabs.includes(m) ? ' (tab)' : ''}`).join('')} (chat is always there and never fades)`, cite: ['modules.json panes', 'modules.json answers'] });
   for (const mod of MODULES) {
     const entry = ctx.panes.find((p) => p.module === mod) || null;
     const ans = ctx.answers[mod];
@@ -262,10 +372,14 @@ function explainFrame(ctx) {
       const asked = ask ? `asked at ${ask.obj.count} ${ask.obj.metric} (${ask.obj.ts})` : 'no question recorded';
       const said = crow ? `you said ${crow.obj.answer} (${crow.obj.ts})` : `answer "${ans.answer}" written by file edit (no consent event)`;
       const added = add ? `added by the controller${add.obj.answer === 'always' && crow && add.obj.ts !== crow.obj.ts ? ` at ${add.obj.ts} (always)` : ''}` : 'added by file edit (no controller_add)';
-      out.push({ text: `${mod}: ${rule}; ${asked}; ${said}; ${added}`,
+      const faded = fade.isFaded(entry) ? `; faded to a tab at turn ${entry.fadedTurn ?? '?'}` : '';
+      out.push({ text: `${mod}: ${rule}; ${asked}; ${said}; ${added}${faded}`,
         cite: [paneCite(ctx, mod) + '.rule', ...(ctx.rules.list.some((r) => r && r.module === mod && entry.rule && r.metric === entry.rule.metric && r.threshold === entry.rule.threshold) ? [ruleCite(ctx, mod)] : []), ...(ask ? [jl('metrics.jsonl', ask, 'controller_ask')] : []), ...(q ? [jl('transcript.jsonl', q, q.obj.id)] : []),
           crow ? jl('metrics.jsonl', crow, `consent ${crow.obj.id || ''}`.trim()) : answerCite(ctx, mod), ...(add ? [jl('metrics.jsonl', add, 'controller_add')] : [])],
         ...(q ? { msg: q.obj.id } : {}) });
+    } else if (removal(ctx, mod)) {
+      const rem = ctx.removals[mod];
+      out.push({ text: `${mod} not shown: removed, you said ${rem.answer} to removing it (${rem.at})${ctx.pending === mod ? '; its rule is asking again now' : ''}`, cite: [removalCite(ctx, mod)] });
     } else if (entry || ans || ctx.pending === mod) {
       const why = entry && !ans ? 'listed in modules.json without a recorded answer' : ctx.pending === mod ? 'the controller is asking now'
         : `you answered "${ans.answer}" at ${ans.count}${ans.answer === 'no' ? ' (asks again when the count has doubled)' : ''}`;

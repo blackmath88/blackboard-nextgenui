@@ -7,9 +7,10 @@
 // Chrome 9363, dir .pilot-verify-v05b/; opens a second tab. v06 (pilot-v0.6 authorship, metrics, /stats): ports
 // 4795/5796/5797, Chrome 9373, dir .pilot-verify-v06b/ seeded from demo/fixtures/v0.6/ (SHOT=<file.png> saves a
 // screenshot). v07 (pilot-v0.7 /why and the layout fix): ports 4805/5806/5807, Chrome 9383, dir .pilot-verify-v07b/
-// seeded from demo/fixtures/v0.7/ (SHOT=<dir> saves one screenshot per tested width).
+// seeded from demo/fixtures/v0.7/ (SHOT=<dir> saves one screenshot per tested width). v08 (pilot-v0.8 panes can go):
+// ports 4815/5816/5817, Chrome 9393, dir .pilot-verify-v08b/ seeded from demo/fixtures/v0.8/ (SHOT=<dir> saves screenshots).
 // Needs Node 22+ (global WebSocket) and Google Chrome. No dependencies.
-// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|v07|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
+// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|v07|v08|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
 'use strict';
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -669,7 +670,117 @@ async function v07(page) {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
 }
 
-const SCENARIOS = { p1, p2, v03, v04, v05, v06, v07 };
+async function v08(page) {
+  const file = (f) => path.join(APP, ENV.dir, f);
+  await stop('server');   // reseed from the v0.8 fixture before the server starts
+  const fix = path.join(APP, 'demo', 'fixtures', 'v0.8');
+  for (const f of fs.readdirSync(fix)) if (!['demo.json', 'pilot.config.json'].includes(f)) fs.copyFileSync(path.join(fix, f), file(f));
+  await startServer();
+  const waitFor = async (expr, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await page.eval(expr)) return Date.now() - t0; await sleep(15); } return null; };
+  const events = () => fs.readFileSync(file('metrics.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const touches = (mod) => events().filter((e) => e.event === 'pane_touch' && e.module === mod);
+  const modules = () => JSON.parse(fs.readFileSync(file('modules.json'), 'utf8'));
+  const entry = (mod) => modules().panes.find((p) => p.module === mod);
+  const rect = (sel) => `(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return null; const r = el.getBoundingClientRect(); return { top: Math.round(r.top), h: Math.round(r.height), w: Math.round(r.width), left: Math.round(r.left) }; })()`;
+  const shot = async (name) => {
+    if (!process.env.SHOT) return;
+    fs.mkdirSync(process.env.SHOT, { recursive: true });
+    const r = await page.send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(process.env.SHOT, `v08-${name}.png`), Buffer.from(r.result.data, 'base64'));
+  };
+  await page.goto(URL);
+  await waitFor(`document.getElementById('meta').textContent.includes('live')`);
+
+  // the fixture: map and index shown, kanban a tab in its place (third), the grid row shrunk to the tab
+  const k = await page.eval(rect('#pane-kanban')), mp = await page.eval(rect('#pane-map')), ix = await page.eval(rect('#pane-index'));
+  check('kanban is a slim labelled tab (button "▸ kanban"), map and index are full panes', await page.eval(`!!document.querySelector('#pane-kanban.faded > button.tab') && document.querySelector('#pane-kanban .tab').textContent.includes('kanban')
+    && !document.querySelector('#pane-kanban .body') && !!document.querySelector('#pane-map:not(.faded) .body') && !!document.querySelector('#pane-index:not(.faded) .body')`));
+  check('the tab keeps its place in the layout order (below map and index) and its row shrinks to about one line', k && mp && ix && k.top > ix.top && ix.top > mp.top && k.h < 44 && mp.h > 4 * k.h,
+    JSON.stringify({ k, mp, ix }));
+  await shot('1-kanban-tab');
+
+  // one message: the map fades (untouched for 8 turns), and the removal question for the kanban appears with y/n/x
+  await page.submit('what is left for Monday?', 2500);
+  await waitFor(`!!document.querySelector('#pane-map.faded')`);
+  check('after the message the map is a tab too; the index stays', await page.eval(`!!document.querySelector('#pane-map.faded .tab') && !!document.querySelector('#pane-index:not(.faded) .body')`));
+  check('the controller says the map faded (a plain controller line, no keys)', await page.eval(`[...document.querySelectorAll('.ln.controller.fade-note')].some((l) => /map pane faded to a tab: untouched for 8 turns/.test(l.textContent) && !l.querySelector('.keys'))`));
+  const q = await page.eval(`(() => { const l = document.querySelector('.ln.controller.pending'); return l && { text: l.textContent, keys: [...l.querySelectorAll('button.key')].map((b) => b.dataset.answer) }; })()`);
+  check('the removal question "Remove the kanban pane?" has y/n/x buttons (no always)', q && /Remove the kanban pane\?/.test(q.text) && JSON.stringify(q.keys) === '["yes","no","never"]', JSON.stringify(q));
+  check('the placeholder says y/n/x', /y\/n\/x answer the question/.test(await page.eval(`document.getElementById('input').placeholder`)));
+  const mp2 = await page.eval(rect('#pane-map')), ix2 = await page.eval(rect('#pane-index'));
+  check('with two tabs the index takes the freed height', mp2.h < 44 && ix2.h > ix.h, JSON.stringify({ mp2, ix, ix2 }));
+  await shot('2-two-tabs-question');
+  await page.eval(`document.getElementById('input').focus()`);
+  await page.key('a'); await sleep(400);
+  check('"a" in the empty input does not answer the removal question (it is text)', modules().pending === 'kanban' && await page.eval(`document.getElementById('input').value === 'a'`));
+  await page.eval(`document.getElementById('input').value = ''`);
+
+  // touches: a wheel on the index is a scroll touch, a second interaction in the same turn is not logged again
+  const turn = () => JSON.parse(fs.readFileSync(file('transcript.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((l) => l.role === 'user').length);
+  const t38 = turn();
+  const ib = await page.eval(rect('#pane-index .body'));
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: ib.left + 20, y: ib.top + 20, deltaX: 0, deltaY: 60 }); await sleep(500);
+  check(`a wheel over the index logs pane_touch index scroll at turn ${t38}`, touches('index').some((e) => e.how === 'scroll' && e.turn === t38) && entry('index').lastTouch.turn === t38);
+  const n0 = touches('index').length;
+  await page.eval(`document.querySelector('#pane-index .idx button').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`); await sleep(400);
+  check('a second touch of the index in the same turn writes nothing new (once per pane per turn)', touches('index').length === n0);
+
+  // the tab: a click brings the map back at once, with a View Transition; the server records a tab touch
+  await page.eval(`(() => { window.__vt = 0; const o = document.startViewTransition && document.startViewTransition.bind(document); if (o) document.startViewTransition = (cb) => { window.__vt++; return o(cb); }; })()`);
+  await page.eval(`document.querySelector('#pane-map .tab').click()`);
+  const backMs = await waitFor(`!!document.querySelector('#pane-map:not(.faded) .body .item')`, 2000);
+  check(`a click on the map tab brings the map back at once (${backMs} ms, before the server's answer), with a View Transition`, backMs !== null && backMs < 400 && await page.eval('window.__vt') >= 1);
+  await sleep(500);
+  const tt = touches('map').pop();
+  check('the server records pane_touch map tab (unfaded) and the map is no longer faded in modules.json', tt && tt.how === 'tab' && tt.unfaded === true && !entry('map').state && entry('map').lastTouch.how === 'tab');
+  check('the removal question for the kanban is still open (touching the map does not answer it)', modules().pending === 'kanban' && modules().pendingKind === 'remove');
+
+  // reduced motion: the bring-back is instant (no View Transition), from the keyboard (Tab to the tab, Enter)
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await page.eval(`document.querySelector('#pane-kanban .tab').focus()`);
+  await page.eval('window.__vt = 0');
+  await page.key('Enter');
+  check('reduced motion: Enter on the kanban tab shows the kanban in the same frame, without a View Transition', await page.eval(`!!document.querySelector('#pane-kanban:not(.faded) .body') && window.__vt === 0`));
+  await sleep(500);
+  check('... and touching the kanban while its removal question is open withdraws the question', !modules().pending && events().some((e) => e.event === 'controller_withdraw' && e.module === 'kanban')
+    && await page.eval(`!document.querySelector('.ln.controller.pending') && [...document.querySelectorAll('.ln.system')].some((l) => /remove kanban: question withdrawn, you used the pane/.test(l.textContent))`));
+  await page.send('Emulation.setEmulatedMedia', { features: [] });
+  await shot('3-all-back');
+
+  // the next turn: Tab into a pane is a focus touch; focus the page sets by itself is not
+  await page.submit('one more thing about the envelope', 2500);
+  const t39 = turn();
+  await page.eval(`document.querySelector('#pane-map .item').focus()`); await sleep(400);
+  check('focus set by script (no key) is not a touch', !touches('map').some((e) => e.turn === t39));
+  await page.eval(`document.getElementById('input').focus()`);
+  let tabs = 0;
+  while (tabs < 80 && !(await page.eval(`!!document.activeElement.closest('#pane-index')`))) { await page.key('Tab'); tabs++; }
+  await sleep(400);
+  check(`Tab into the index (${tabs} tabs) logs pane_touch index focus at turn ${t39}`, tabs < 80 && touches('index').some((e) => e.how === 'focus' && e.turn === t39));
+  check('the chat pane has no tab and no touch events (it never fades)', await page.eval(`!document.querySelector('#pane-chat.faded') && !document.querySelector('#pane-chat .tab')`) && !events().some((e) => e.event === 'pane_touch' && e.module === 'chat'));
+
+  // a narrow window: tabs and labels stay whole, no horizontal scroll
+  await page.eval(`document.getElementById('input').focus()`);
+  await page.submit('/why', 600);   // nothing faded now; fade the index by hand to see two layouts with a tab
+  const m = modules(); const ie = m.panes.find((p) => p.module === 'index'); ie.state = 'faded'; ie.fadedAt = new Date().toISOString(); ie.fadedTurn = t39;
+  fs.writeFileSync(file('modules.json'), JSON.stringify(m, null, 2));
+  await waitFor(`!!document.querySelector('#pane-index.faded')`);
+  for (const width of [800, 820, 1280]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false });
+    await sleep(400);
+    const r = await page.eval(`(() => {
+      const t = document.querySelector('#pane-index .tab .tt'); const range = document.createRange(); range.selectNodeContents(t);
+      const lines = new Set([...range.getClientRects()].map((x) => Math.round(x.top))).size;
+      const tab = document.querySelector('#pane-index').getBoundingClientRect(), b = document.querySelector('#pane-index .tab').getBoundingClientRect();
+      return { hscroll: document.documentElement.scrollWidth > window.innerWidth, lines, inside: b.right <= tab.right + 1, h: Math.round(tab.height) };
+    })()`);
+    check(`${width} px with a tab: no horizontal scroll, the tab label on one line inside its strip (${r.h} px high)`, !r.hscroll && r.lines === 1 && r.inside && r.h < 44, JSON.stringify(r));
+    await shot(`4-tab-${width}`);
+  }
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+}
+
+const SCENARIOS = { p1, p2, v03, v04, v05, v06, v07, v08 };
 const ENVS = {
   v03: () => {
     const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
@@ -720,6 +831,16 @@ const ENVS = {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v07b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4805/', fakes: [5806, 5807], dir: '.pilot-verify-v07b', config: file, cdp: 9383 };
+  },
+  v08: () => {
+    const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
+    c.port = 4815;
+    c.roles.chat.candidates[0].baseUrl = 'http://127.0.0.1:5816/v1';
+    c.roles.chat.candidates[1].baseUrl = 'http://127.0.0.1:5817/v1';
+    c.roles.extract.candidates[0].baseUrl = 'http://127.0.0.1:5817/v1';
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v08b-')), 'config.json');
+    fs.writeFileSync(file, JSON.stringify(c));
+    return { url: 'http://127.0.0.1:4815/', fakes: [5816, 5817], dir: '.pilot-verify-v08b', config: file, cdp: 9393 };
   },
 };
 

@@ -50,3 +50,28 @@ date, old plan, new plan and why.
   reproduces the bug at 820 px: "contr/oller", kanban columns of 81 px, chips sticking out of their column. The
   coordinator's 800 px window was probably slightly wider than 800 px of viewport. Checking only 800 would not have
   caught it.
+
+## 2026-10-17 (v0.8) Panes can go: fade first, then ask
+- Old plan: "pilot-v0.8 panes can go". The brief left open how a pane goes ("remove, ask, or fade?",
+  `06-open-questions.md`).
+- New plan, built:
+  - a pane untouched for `fadeAfterTurns` turns fades to a tab; it stays in `modules.json` (`state: "faded"`);
+  - a touch brings it back;
+  - after `askRemoveAfterTurns` more turns as a tab the controller asks once whether to remove it;
+  - only a recorded yes/never removes it;
+  - the chat never fades, and a pane holding an unanswered proposal never fades.
+  Alternatives considered, the rule chosen and what would reverse it: CHANGELOG.md # pilot-v0.8, "Decision".
+- Smaller choices made while building:
+  - **Turns are messages you sent.** Not minutes, so a pane does not fade overnight. Not `turn` events in
+    `metrics.jsonl`: the transcript is the file a person reads.
+  - **A touch is written only once per pane per turn.** Writing `modules.json` on every scroll would bump its rev
+    constantly and make consent answers stale (409).
+  - **`scroll` means wheel/touchmove, not the `scroll` event. `focus` means focus you moved with a key.** A re-render
+    resets scroll positions and restores focus by script, so the page would otherwise touch its own panes.
+  - **A proposal arriving in a faded pane brings it back** (`pane_unfade`, not a touch). Alternatives were a badge on
+    the tab, or "only before fading". A badge still hides the decision; "only before" misses extractions that land
+    after the controller has run.
+  - **After a removal (yes), the rule asks again only once its count has doubled, and an old "always" no longer adds
+    the pane by itself.** Without this, a kanban answered "always" would come straight back on the next turn.
+- Why: fading is reversible and silent; removal is not, so it needs consent like growth. That keeps "every pane earned
+  and consented" true in both directions.

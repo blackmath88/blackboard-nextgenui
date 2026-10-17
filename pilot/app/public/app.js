@@ -8,6 +8,11 @@
 // Index jumps are reported with POST /metric (the Usefulness measure of /stats).
 // pilot-v0.7: /why (typed, or the "why?" button on a pane bar or a card) shows the server's explanation with its sources;
 // a "show m-…" link scrolls to the message (no index_jump: it is not an index use).
+// pilot-v0.8: panes can go. A faded pane is a slim labelled tab in its place (the grid rows shrink); a click or Enter on
+// the tab brings it back at once (View Transition, instant with reduced motion). The page reports touches with
+// POST /touch: a pointerdown or a wheel/touchmove inside a pane, or keyboard focus moved into it by you (Tab, arrows);
+// decisions on cards are touches on the server side. At most one report per pane per turn (the server writes only the
+// first). The removal question ("remove the map pane?") takes y/n/x.
 'use strict';
 const $ = (id) => document.getElementById(id);
 const bench = $('bench'), log = $('log'), form = $('form'), input = $('input');
@@ -17,7 +22,7 @@ const KEYS = { y: 'yes', n: 'no', a: 'always', x: 'never' };
 const WHO = { user: 'you', assistant: 'model', system: 'system', controller: 'controller', out: '' };
 const AUTHOR = { user: 'you', assistant: 'model', system: 'system', controller: 'controller' };
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-let state = { transcript: [], panes: [], pending: null, answers: {}, items: [], extracting: false, fileErrors: {} };
+let state = { transcript: [], panes: [], pending: null, pendingKind: null, answers: {}, removals: {}, faded: [], turn: 0, items: [], extracting: false, fileErrors: {} };
 let shownPanes = '';
 let selected = null;        // the proposal ArrowDown/ArrowUp from the empty input moves focus to (the newest by default)
 let seen = null;            // proposal ids already shown; a new one becomes the arrow target
@@ -51,15 +56,20 @@ function addLine(role, text, model, id, kind) {
 }
 
 // Controller question: sprite, text, and y/n/a/x buttons while it is the pending one.
+// pilot-v0.8: a removal question (line.question "remove") takes y/n/x; its answer is in state.removals, not answers.
+// Fade/unfade lines (line.pane, no module) are plain controller lines without keys.
+const isRemove = (line) => line.question === 'remove';
 function addController(line, isLastForModule) {
   const { p } = addLine('controller', '', null, line.id);
   p.querySelector('.who').innerHTML = Pixel.sprite('keeper', 22, 'controller') + '<span class="role">controller</span>';   // static markup, no user text
   p.querySelector('.text').textContent = line.text;
-  const pending = isLastForModule && state.pending && state.pending === line.module;
+  if (line.pane) p.classList.add('fade-note');
+  const pending = isLastForModule && state.pending && state.pending === line.module && isRemove(line) === (state.pendingKind === 'remove');
   if (pending) {
     const keys = document.createElement('span');
     keys.className = 'keys';
     for (const [k, word] of Object.entries(KEYS)) {
+      if (isRemove(line) && k === 'a') continue;
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'key'; b.dataset.answer = word;
       b.innerHTML = `<kbd>${k}</kbd> ${word}`;
@@ -68,9 +78,10 @@ function addController(line, isLastForModule) {
     }
     p.querySelector('.text').append(keys);
     p.classList.add('pending');
+    log.scrollTop = log.scrollHeight;   // the buttons made the line taller after addLine scrolled
   } else {
     p.classList.add('done');
-    const a = state.answers[line.module];
+    const a = line.module ? (isRemove(line) ? (state.removals || {})[line.module] : state.answers[line.module]) : null;
     if (isLastForModule && a) { const s = document.createElement('small'); s.className = `model ${a.answer}`; s.textContent = `answered: ${a.answer}`; p.append(s); }
   }
 }
@@ -78,9 +89,10 @@ function addController(line, isLastForModule) {
 function renderLog() {
   log.textContent = '';
   const lastCtl = {};
-  state.transcript.forEach((l, i) => { if (l.role === 'controller' && l.module) lastCtl[l.module] = i; });
+  const ctlKey = (l) => `${l.module}|${isRemove(l) ? 'remove' : 'grow'}`;
+  state.transcript.forEach((l, i) => { if (l.role === 'controller' && l.module) lastCtl[ctlKey(l)] = i; });
   state.transcript.forEach((l, i) => {
-    if (l.role === 'controller') addController(l, lastCtl[l.module] === i);
+    if (l.role === 'controller') addController(l, !!l.module && lastCtl[ctlKey(l)] === i);
     else addLine(l.role, l.text, l.model, l.id, l.kind);
   });
   updateCount();
@@ -92,7 +104,7 @@ function updateCount() {
 
 function updatePlaceholder() {
   const parts = [];
-  if (state.pending) parts.push('y/n/a/x answer the question');
+  if (state.pending) parts.push(state.pendingKind === 'remove' ? 'y/n/x answer the question' : 'y/n/a/x answer the question');
   if (selected) parts.push('↓ or Tab to the proposals (c/r there, Esc back)');
   input.placeholder = parts.length ? `Empty input: ${parts.join(' · ')}` : PLACEHOLDER;
 }
@@ -350,13 +362,47 @@ function paneByline(bar, mod) {
   by.title = `added ${info.addedAt || '?'} at ${info.atCount ?? '?'} ${info.metric || ''}; answer ${info.answer || 'none'} ${info.recorded ? 'recorded through the page' : 'not in metrics.jsonl (hand edit of modules.json)'}`;
 }
 
+// pilot-v0.8: the tab of a faded pane: a real button (Tab reaches it; click, Enter or Space bring the pane back).
+function fadedTab(sec, mod) {
+  const f = ((state.paneInfo || {})[mod] || {}).fade || {};
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'tab'; b.setAttribute('aria-expanded', 'false');
+  b.setAttribute('aria-label', `${PANES[mod].title}: faded, press to bring it back`);
+  const lt = f.lastTouch || {};
+  b.title = `faded at turn ${f.fadedTurn ?? '?'}: untouched since turn ${lt.turn ?? '?'} (fadeAfterTurns ${f.fadeAfter ?? '?'}). Click or press Enter to bring it back.`;
+  const t = document.createElement('span'); t.className = 'tt'; t.textContent = `▸ ${PANES[mod].title}`;
+  const s = document.createElement('small'); s.textContent = `tab · untouched since turn ${lt.turn ?? '?'}`;
+  b.append(t, ' ', s);
+  b.addEventListener('click', () => bringBack(mod));
+  sec.append(b);
+}
+// Brings a faded pane back at once (locally first, then POST /touch {how: "tab"}; the server's answer follows by SSE).
+let afterRender = null;   // runs once the next pane render is applied (after its View Transition callback)
+function bringBack(mod) {
+  sendTouch(mod, 'tab', true);   // first, so the focus that follows is not reported as a second touch
+  state.faded = (state.faded || []).filter((m) => m !== mod);
+  afterRender = () => { const b = document.querySelector(`#pane-${mod} .body`); if (b) { restoring = true; b.focus({ preventScroll: true }); restoring = false; } };
+  renderPanes();
+}
+// Grid template for a layout with tabs: a shown pane gets a 1fr row, a tab an auto row; with only tabs, the side
+// column shrinks to the tabs' width and an empty row fills the height.
+function benchTemplate(list) {
+  const faded = (m) => (state.faded || []).includes(m);
+  const anyShown = list.some((m) => !faded(m));
+  const rows = list.map((m, i) => `"chat p${i + 1}" ${faded(m) ? 'auto' : 'minmax(0, 1fr)'}`);
+  if (!anyShown) rows.push('"chat ." minmax(0, 1fr)');
+  return `${rows.join(' ')} / ${anyShown ? 'minmax(0, 1.6fr) minmax(0, 1fr)' : 'minmax(0, 1fr) max-content'}`;
+}
+
 function renderPanes(contentOnly) {
   const list = state.panes.filter((m) => PANES[m]).slice(0, 3);
-  const key = list.join(',');
+  const isFaded = (m) => (state.faded || []).includes(m);
+  const key = list.map((m) => (isFaded(m) ? `${m}:tab` : m)).join(',');
   const focusedId = document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('item') ? document.activeElement.dataset.id : null;
   const done = () => {
+    if (afterRender) { const f = afterRender; afterRender = null; f(); }
     markSelected();
-    if (focusedId) { const el = bench.querySelector(`.item[data-id="${CSS.escape(focusedId)}"]`); if (el) el.focus(); }
+    if (focusedId) { const el = bench.querySelector(`.item[data-id="${CSS.escape(focusedId)}"]`); if (el) { restoring = true; el.focus(); restoring = false; } }
   };
   const apply = () => {
     bench.querySelectorAll('.side').forEach((el) => el.remove());
@@ -364,19 +410,25 @@ function renderPanes(contentOnly) {
       const sec = document.createElement('section');
       sec.className = `pane side ${mod}`;
       sec.id = `pane-${mod}`;
+      sec.dataset.pane = mod;
       sec.style.gridArea = `p${i + 1}`;
       sec.style.viewTransitionName = `pane-${mod}`;
       sec.setAttribute('aria-label', PANES[mod].title);
+      if (isFaded(mod)) { sec.classList.add('faded'); fadedTab(sec, mod); bench.append(sec); return; }
       sec.innerHTML = `<div class="bar"><span>${PANES[mod].title}</span></div><div class="body"></div>`;
       sec.querySelector('.bar').append(whyButton(mod, `why is the ${PANES[mod].title} pane here?`));
       paneByline(sec.querySelector('.bar'), mod);
+      sec.querySelector('.body').tabIndex = -1;   // focus target when the pane comes back from a tab
       PANES[mod].render(sec.querySelector('.body'));
       bench.append(sec);
     });
     bench.className = `bench n${list.length + 1}`;
+    if (list.some(isFaded)) { bench.classList.add('dyn'); bench.style.setProperty('--tpl', benchTemplate(list)); }
+    else bench.style.removeProperty('--tpl');
   };
   if (key === shownPanes || contentOnly) {       // same panes: refresh contents only
     list.forEach((mod) => {
+      if (isFaded(mod)) return;
       const b = bench.querySelector(`#pane-${mod} .body`);
       if (b) { paneByline(b.parentElement.querySelector('.bar'), mod); PANES[mod].render(b); }
     });
@@ -409,13 +461,17 @@ try { applyTheme(localStorage.getItem('pilot-theme')); } catch { /* storage bloc
 // response is newer than the one that last set it, so an older full load can never overwrite a newer partial one.
 const PARTS = { 'transcript.jsonl': ['transcript', 'total'], 'modules.json': ['panes', 'pending', 'answers', 'modulesRev', 'models'],
   'roles.json': ['models'], 'state.json': ['items', 'stateRev', 'stateError'] };
-PARTS['modules.json'].push('paneInfo');
+PARTS['modules.json'].push('paneInfo', 'pendingKind', 'removals', 'faded');   // pilot-v0.6, pilot-v0.8
+PARTS['transcript.jsonl'].push('turn');                                       // pilot-v0.8
 let reqGen = 0;
 const appliedGen = {};
 const sigs = {};
 const sigOf = {
-  log: (s) => [s.total, (s.transcript[s.transcript.length - 1] || {}).id, s.pending, JSON.stringify(s.answers)].join('|'),
-  panes: (s) => [(s.panes || []).join(','), s.stateRev, JSON.stringify(s.items), JSON.stringify(s.paneInfo)].join('|'),   // items too: hand edits keep rev
+  log: (s) => [s.total, (s.transcript[s.transcript.length - 1] || {}).id, s.pending, s.pendingKind, JSON.stringify(s.answers), JSON.stringify(s.removals)].join('|'),
+  // items too: hand edits keep rev. pilot-v0.8: of the fade status only what the panes show (tab or not, its label), so
+  // a touch (lastTouch moves) does not re-render the panes
+  panes: (s) => [(s.panes || []).join(','), (s.faded || []).join(','), s.stateRev, JSON.stringify(s.items), JSON.stringify(s.paneInfo, (k, v) => (k === 'fade'
+    ? (v && v.faded ? { fadedTurn: v.fadedTurn, lastTouch: v.lastTouch && v.lastTouch.turn, fadeAfter: v.fadeAfter } : null) : v))].join('|'),
   models: (s) => JSON.stringify(s.models),
 };
 async function loadState(files) {
@@ -468,6 +524,32 @@ function connectEvents() {
   es.onerror = () => { live = false; if (!streaming) meta.textContent = 'reconnecting…'; };   // EventSource retries
 }
 
+// ---- pilot-v0.8: touches. A touch is your interaction with a pane: pointerdown inside it (click, index jump, card,
+// button, scrollbar), wheel or touchmove inside it (scrolling), or keyboard focus moved into it by you (Tab or arrows,
+// i.e. a keydown just before the focus arrived; focus the page restores after a re-render is not a touch). c/r on a
+// card are decided on the server, which counts the decision as a touch. Reported at most once per pane per turn.
+let restoring = false, lastKeyAt = 0;
+const touched = {};   // pane -> turn of the last report
+function sendTouch(mod, how, force) {
+  if (!force && touched[mod] === state.turn) return;
+  touched[mod] = state.turn;
+  fetch('/touch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ module: mod, how }) })
+    .then((r) => r.json()).then((b) => {
+      // keep the modules.json rev current, so the touch never makes a consent answer stale
+      if (b && Number.isInteger(b.rev) && b.rev > (state.modulesRev || 0)) state.modulesRev = b.rev;
+      if (!live) loadState().catch(() => {});
+    }).catch(() => {});
+}
+const paneOf = (el) => { const sec = el && el.closest ? el.closest('.side[data-pane]') : null; return sec && !sec.classList.contains('faded') ? sec.dataset.pane : null; };
+bench.addEventListener('pointerdown', (e) => { const m = paneOf(e.target); if (m) sendTouch(m, 'click'); });
+bench.addEventListener('wheel', (e) => { const m = paneOf(e.target); if (m) sendTouch(m, 'scroll'); }, { passive: true });
+bench.addEventListener('touchmove', (e) => { const m = paneOf(e.target); if (m) sendTouch(m, 'scroll'); }, { passive: true });
+document.addEventListener('keydown', () => { lastKeyAt = Date.now(); }, true);
+bench.addEventListener('focusin', (e) => {
+  const m = paneOf(e.target);
+  if (m && !restoring && Date.now() - lastKeyAt < 500) sendTouch(m, 'focus');
+});
+
 async function sendAnswer(module, word) {
   const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ module, answer: word, rev: state.modulesRev }) });
   if (!res.ok) await writeFailed(res);
@@ -502,6 +584,7 @@ async function runCommand(text) {
 // Once anything is typed, every key is text. The buttons always work.
 input.addEventListener('keydown', (e) => {
   if (!state.pending || input.value !== '' || e.isComposing || e.repeat || e.ctrlKey || e.metaKey || e.altKey || !KEYS[e.key]) return;
+  if (e.key === 'a' && state.pendingKind === 'remove') return;   // the removal question has no "always": a stays text
   e.preventDefault();
   sendAnswer(state.pending, KEYS[e.key]);
 });

@@ -1,0 +1,32 @@
+{
+  "rev": 1,
+  "rules": [
+    {
+      "module": "index",
+      "metric": "messages",
+      "threshold": 12,
+      "ask": "{n} messages. Scrolling back gets slow. Add an index pane?"
+    },
+    {
+      "module": "map",
+      "metric": "decisions",
+      "threshold": 2,
+      "ask": "{n} decisions so far. Add a reasoning map?"
+    },
+    {
+      "module": "kanban",
+      "metric": "tasks",
+      "threshold": 3,
+      "ask": "{n} tasks have come up. Track them on a board?"
+    }
+  ],
+  "afterNo": "ask again when the count has doubled",
+  "_notes": [
+    "Edit by hand; the controller reads this file on every turn.",
+    "decisions and tasks count proposed and confirmed items, not rejected ones.",
+    "fadeAfterTurns / askRemoveAfterTurns: default for every pane; a rule may set its own (pilot-v0.8).",
+    "Demo fixture v0.8 (synthetic, see dev/make-fixture-v08.js): the map fades after your next message, and the removal question for the long-faded kanban is due."
+  ],
+  "fadeAfterTurns": 8,
+  "askRemoveAfterTurns": 8
+}

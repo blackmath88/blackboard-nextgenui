@@ -681,3 +681,59 @@ Run by the coordinator, not the builder.
 - `/why`, `/why map`, `/why dec-2` on demo v0.7 give concrete statements, each with a source. Spot-checked by hand: `metrics.jsonl:12` is the map `controller_ask` at count 2 / threshold 2, and `transcript.jsonl:3` is m-f003 holding the quoted words.
 - The "why?" button on the dec-2 card printed the same explanation in the chat.
 - Layout at 820 px: "controller" stays whole, the kanban stacks its columns, no horizontal page scroll.
+
+# pilot-v0.8
+
+Panes can go. Everything runs against `dev/fake-model.js`; no real endpoint was contacted.
+
+**Reproduce:** `bash pilot/app/dev/verify-v0.8.sh`. It has 43 checks; one of them runs the 23 checks of
+`browser-check.js v08` (21 + 2 global). It ends with `ALL v0.8 CHECKS PASSED` and exits non-zero on failure.
+- Own ports: server 4810, fakes 5811/5812; browser part 4815/5816/5817 and Chrome 9393; demo part 4972/5972/5973.
+- Own throwaway dirs: `.pilot-verify-v08/`, `.pilot-verify-v08c/`, `.pilot-verify-v08b/`, `.pilot-demo-verify08/`.
+- Screenshots: `SHOT=<dir> node dev/browser-check.js v08` writes `v08-1-kanban-tab.png`, `v08-2-two-tabs-question.png`,
+  `v08-3-all-back.png` and `v08-4-tab-<width>.png`.
+- The fixture is generated: `node dev/make-fixture-v08.js` (deterministic, from `demo/fixtures/v0.7/`).
+
+**Everything:** `cd pilot/app && npm run verify` (p0, p1, p2, v0.3–v0.8, browser p1 + p2; the v03–v08 browser checks
+run inside their verify scripts).
+Last run (Node v25.9.0, Chrome, macOS): all passed, no earlier assertion adapted. `rules.example.json` now enables
+fading (8/8); the p0–v0.7 checks pass with it. `npm run demo -- v0.3` to `-- v0.8` each served `/state` within about
+1 s, and SIGINT left no process behind.
+
+## Definitions
+
+| Term | Definition |
+|---|---|
+| turn | one message you sent: the turn number is the count of `user` lines in `transcript.jsonl` (commands are not turns) |
+| touch | `click` (pointerdown inside a shown pane: cards, buttons, index entries, the scrollbar), `scroll` (wheel or touchmove inside it), `focus` (keyboard focus moved into it by you: a keydown less than 500 ms before), `decide` (c/r or the buttons on one of its cards, recorded by the server), `tab` (click/Enter/Space on a faded pane's tab). Not: typing `/why <pane>`, the "show m-…" link, focus restored by the page |
+| recorded touch | the first touch of a pane in a turn: `lastTouch {at, turn, how}` in its `modules.json` entry and a `pane_touch` event. Later touches in the same turn write nothing. A touch on a tab is always recorded (`unfaded: true`) |
+| idle | turn now − `lastTouch.turn` (an entry without `lastTouch` counts from the turn of its `addedAt`) |
+| fades | after a turn, when idle ≥ `fadeAfterTurns` (the rule's own value, else the top-level default; neither = never) and the pane holds no proposal |
+| removal question due | a tab for ≥ `askRemoveAfterTurns` turns (turn now − `fadedTurn`), never asked for this pane entry, no proposal held, no other question open |
+
+## Checks
+
+| # | Check | How (section of `verify-v0.8.sh`) |
+|---|---|---|
+| 1 | v0.8 fixture before: kanban a tab since turn 30, turn 37; `/why map` "last touch: click … (turn 30)" citing its `pane_touch`, "turns since: 7", "fades after turn 38 if nobody touches it" citing `rules.json:N fadeAfterTurns`. | 1 |
+| 2 | One message: the map fades (`state: "faded"`, `fadedTurn` 38, still in `modules.json`), `pane_fade` with idle 8 and last touch turn 30, a controller line; the removal question for the kanban is asked once (`pending` kanban, `pendingKind` remove, `controller_ask` question remove, the transcript line). `/why map` explains the fade and when the removal question would come (turn 46); `/why` marks "(tab)". | 1 |
+| 3 | The removal question refuses `a` (400, still pending). `n` keeps the tab, is recorded (`removals.kanban`, `consent` with question remove and id), leaves the growth answer alone, and the question is not asked again after two more turns. `/why kanban` shows the question, your no, "asked once per pane". `/stats` Consent still PASS. | 1 |
+| 4 | Every cited source resolves (`dev/why-cites.js`) on the fixture and on live data. | 1, 3 |
+| 5 | `POST /touch`: chat 400 ("never fades"), unknown `how` 400, a pane not shown 404. A touch bumps the rev once and logs one `pane_touch`; a second one in the same turn returns `changed: false` and writes nothing. New panes start with `lastTouch.how: "added"`. | 2 |
+| 6 | **Proposal guard:** the map holding proposal dec-1 does not fade after 6 idle turns (its own `fadeAfterTurns` 4, the default 3); the index does. `/why map` says it holds dec-1 and cites the per-rule threshold and the item. | 2 |
+| 7 | The removal question for the index comes after 2 turns as a tab; a touch on its tab brings it back and withdraws the question (`controller_withdraw`, system line). Confirming dec-1 is a `decide` touch of the map. Four turns later the map fades (rule 4) and the index again (default 3). A proposal written into `state.json` brings the faded map back on the next turn (`pane_unfade` reason proposal, a controller line, no touch). After the withdrawn question the index fades again but is not asked again. | 2 |
+| 8 | **Removal yes:** the entry leaves `panes`, `removals.index` yes, `pane_remove` with `answerRef` = the consent id. The old "always" does not re-add it; the rule stays quiet until its count has doubled, then asks a growth question (no auto-add). `/why` says "removed … its rule is asking again now". Yes adds a new pane, which fades and gets its own removal question. **Removal never:** removed, and no growth question even after the count more than doubled. Every `pane_remove` has a removal consent yes/never. `/rules` and `/panes` show it. Without `fadeAfterTurns` fading is off. | 3 |
+| 9 | **Page** (`browser-check.js v08`, v0.8 fixture, 1280 px): the kanban is a tab button below map and index, about 32 px high, map 344 px. After one message the map is a tab too and the index takes the height (655 px); the fade line has no keys; the removal question has exactly y/n/x buttons; the placeholder says y/n/x; `a` in the empty input stays text. A wheel over the index logs `pane_touch` scroll; a second pointerdown in that turn logs nothing. A click on the map tab shows the map within about 25 ms (before the server answers), through a View Transition; the server records `tab`, `unfaded`. Reduced motion: Enter on the focused kanban tab shows the kanban in the same frame without a View Transition, and withdraws its open removal question. Next turn: focus set by script is not a touch; Tab into the index (18 tabs) is a `focus` touch. The chat has no tab and no touch. At 800, 820 and 1280 px with a tab: no horizontal scroll, the tab label on one line, about 32 px high. | 4 |
+| 10 | Contrast passes. The tab uses the pane-title pair (`--accent-fg` on `--base`) and the meta pair (`--muted` on `--base`), both already checked; the fade line uses `--muted` on the panel. | 4 |
+| 11 | **Demo:** `npm run demo -- v0.8` serves `/state` within about 1 s with the kanban as a tab; one message fades the map and asks to remove the kanban; the try lines name the tab, `/why map`, the removal question and clicking a tab; Ctrl+C leaves no process. | 5 |
+| 12 | Old checks still passing: p0, p1, p2, v0.3–v0.7, browser p1/p2/v03–v07. | `npm run verify` |
+
+## Deviations
+
+1. The brief's example "remove the map pane? [y/n]" got a third answer, `x` (remove for good), because the brief also
+   says a removed pane can come back "only if its answer was not `x`". `a` is refused. See QUESTIONS.md.
+2. The brief lists "index jump" as a touch. An index jump starts with a pointerdown inside the index, so it is recorded
+   as `click` (the first touch of the turn). The `index_jump` metric is unchanged.
+3. The brief lists "focus" and "scroll inside it". They are narrowed to focus you moved with a key and to wheel/touchmove,
+   because the page re-renders panes (scroll resets, focus restored by script) and would otherwise touch its own panes.
+   ITERATIONS.md has the reasoning.

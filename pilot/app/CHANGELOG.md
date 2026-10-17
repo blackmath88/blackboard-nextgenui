@@ -4,6 +4,115 @@ P0 to P2 (skeleton, model roles, growth controller with consent and the index pa
 baseline, merged before the numbered iterations started; see `CHECKS.md` (# P0, # P1, # P2). Iterations are
 tagged `pilot-v0.N` by the coordinator; each one is runnable with `npm run demo -- v0.N`.
 
+## pilot-v0.8
+
+Panes can go: an untouched pane fades to a tab, a touch brings it back, and only your answer removes it. This answers
+the open question the growing-workbench explainer and `06-open-questions.md` hand on ("Remove, ask, or fade into a
+tab?"): fade first, then ask. Still untested with a real model (fakes only).
+
+**Adds**
+- **Fading.** After every turn the controller checks each shown pane. A pane nobody touched for `fadeAfterTurns` turns
+  fades to a tab:
+  - a turn is one message you sent (the count of `user` lines in `transcript.jsonl`; commands are not turns);
+  - `rules.json` sets `fadeAfterTurns` as a default at the top level, and a rule may set its own (the rule wins);
+    without one, the pane never fades. `rules.example.json` now has `fadeAfterTurns: 8` and `askRemoveAfterTurns: 8`;
+  - the controller says so in a controller line ("map pane faded to a tab: untouched for 8 turns …") and logs
+    `pane_fade` (turn, idle turns, threshold, the last touch's turn).
+- **Fading is not removal.** A faded pane stays in `modules.json` with `"state": "faded"`, `fadedAt` and `fadedTurn`. It
+  keeps its place in the layout order as a slim labelled strip (`▸ kanban  tab · untouched since turn 22`). The grid
+  gives it an auto row and the shown panes share the height; with only tabs, the side column shrinks to their width.
+  `/state.panes` still lists it; `/state.faded` and `paneInfo.<module>.fade` say it is a tab.
+- **A touch brings it back at once.** Click, Enter or Space on the tab: the page shows the pane before the server answers,
+  with a View Transition (instant with reduced motion), and reports `POST /touch {module, how: "tab"}`.
+- **Touch, defined exactly.** A touch is your interaction with a shown pane:
+  - `click`: a pointerdown anywhere inside it (a card, a button, an index entry, so also an index jump; the scrollbar);
+  - `scroll`: a wheel or touchmove inside it;
+  - `focus`: keyboard focus moved into it by you (Tab or arrows; a keydown less than 500 ms before the focus arrived).
+    Focus the page restores after a re-render is not a touch;
+  - `decide`: confirming or rejecting one of its cards (the server records it, also for `curl`);
+  - `tab`: the tab of a faded pane.
+  Typing `/why map` in the chat is not a touch of the map (it is the chat). Each touch moves the pane entry's
+  `lastTouch {at, turn, how}`. Only the first touch of a pane in a turn is written and logged as `pane_touch` (a later
+  one changes nothing, so there is no rev bump and no event); a touch on a tab is always recorded (`unfaded: true`). A
+  new pane starts with `lastTouch.how: "added"`; an older entry without `lastTouch` counts from its `addedAt`.
+- **Two panes never fade:**
+  - the chat. It is not in `modules.json`, and `POST /touch {module: "chat"}` answers 400;
+  - a pane holding an unanswered proposal (map: decisions and sources; kanban: tasks). A tab would hide a decision you
+    have not made. If a proposal arrives in a faded pane (extraction, or a hand edit seen on the next turn), the
+    controller brings the pane back at once, says why in a controller line, and logs `pane_unfade` (reason
+    `proposal`). That is not a touch. A pane holding a proposal is also never offered for removal.
+- **Removal only with consent.** After `askRemoveAfterTurns` more turns as a tab, the controller asks, once per pane: "The
+  kanban pane has been a tab for 8 turns. Remove the kanban pane?" It goes through the same one-question-at-a-time
+  controller as growth (`modules.json` `pending` plus `pendingKind: "remove"`; `controller_ask` with `question:
+  "remove"`). Answers: buttons, or keys in the empty input:
+  - `y` (yes): the pane entry leaves `modules.json`. Its rule may offer it again, but only as a new question (an old
+    "always" no longer adds it by itself) and only once the rule's count has doubled since the removal, like after
+    "no";
+  - `n` (no): it stays a tab and is not asked again;
+  - `x` (never): removed, and its rule never offers it again;
+  - `a` has no meaning here: 400 from `/answer`, and in the input it stays text.
+  The answer is recorded like any consent: `modules.json` `removals.<module> {answer, at, turn, count, consentId}`
+  (kept apart from `answers.<module>`, which stays the growth consent), a `consent` event with `question: "remove"`, a
+  system line, and `pane_remove` with `answerRef` for yes and never. No rule removes a pane; only this answer does.
+  Touching the pane while its question is open withdraws the question (system line, `controller_withdraw`). It is not
+  asked again for that pane.
+- **`/why <pane>` explains fading** (sources as in v0.7):
+  - shown or a tab since turn X;
+  - the last touch: how, when, which turn (`metrics.jsonl:N pane_touch map`);
+  - the turns since (`transcript.jsonl user lines ×N`);
+  - the threshold and whether it comes from the rule or the default (`rules.json:N fadeAfterTurns`);
+  - what happens next: "fades after turn 38 if nobody touches it", or "holds an unanswered proposal (dec-1), so it does
+    not fade";
+  - the removal question: when it is due, open, or asked with your answer.
+  Its history adds `pane_fade`, `pane_unfade`, the removal question and answer, and `pane_remove`. `/why` marks tabs
+  ("map (tab)") and removed panes. `/rules` and `/panes` show faded and removed panes.
+- **`fade.js`** (beside `stats.js` and `why.js`): the pure rules (turn count, thresholds, last touch, proposals held,
+  due or not), used by the controller and by `/why`, so both say the same thing.
+- **Demo `v0.8`** (`dev/make-fixture-v08.js`, from the v0.7 fixture). The open proposals are decided, the kanban
+  faded at turn 30, and the map was last clicked at turn 30. Your first message (turn 38) fades the map and makes the
+  kanban removal question due.
+- **Dev:**
+  - `dev/verify-v0.8.sh`: 43 checks, one of which runs `browser-check.js v08` (23 checks);
+  - `dev/why-cites.js` resolves the new citations (pane events by module, `removals.<m>`, `fadeAfterTurns`).
+
+**Why**
+- The growing-workbench explainer ends on "panes must also go: remove, ask, or fade?" (`06-open-questions.md`, first
+  row). A workbench that only grows ends up as the overwhelm the diachronic idea was meant to avoid. Removing a pane
+  silently would break "every pane earned and consented".
+
+**Decision: fade first, then ask (in the style of `05-decisions.md`)**
+- **Alternatives considered:**
+  - (a) Remove after N idle turns. Rejected: a rule would delete something you consented to, and "no pane without a
+    recorded answer" has a mirror image, "no pane gone without one".
+  - (b) Ask "remove?" after N idle turns, nothing in between. Rejected: one more question, and every idle stretch
+    (a weekend) would cost an answer. The quiet measure in `/stats` counts every question.
+  - (c) Fade only, never remove. Rejected: a tab nobody ever opens is clutter too, and the person cannot get rid of it.
+  - (d) Let a model judge relevance. Rejected: a model only proposes (D4, D6), and growth is deterministic in v1.
+  - (e) Count idle time in minutes instead of turns. Rejected: overnight every pane would fade. Turns measure work.
+- **Chosen:** (c) then (b), as a deterministic rule: fade first, and ask only about a pane that stayed a tab.
+  - Idle for `fadeAfterTurns` turns → fade to a tab. Reversible with one click, no question.
+  - A tab for `askRemoveAfterTurns` more turns → ask once.
+  - Only a recorded yes or never removes.
+  - The two exceptions: the chat never fades, and a pane holding an unanswered proposal never fades.
+- **Reverse if:**
+  - you bring panes back from a tab more often than you leave them as tabs (`pane_touch` with `unfaded` vs
+    `pane_fade` in `metrics.jsonl`): the threshold is too low or turns are the wrong clock;
+  - the removal question gets "n" almost every time: drop the question and keep (c);
+  - tabs pile up and you want them gone without being asked: make "always remove faded panes" an answer (the unused
+    `a`).
+  Then: tune the defaults in `rules.json`, or replace turns with work time from `metrics.jsonl`.
+
+**Deliberately does not**
+- No rule ever deletes a pane, also not a pane added by hand. A hand-written pane entry fades like any other.
+- No fading of the chat, no fading while a proposal is unanswered, no removal question while one is.
+- No re-ordering of panes, no drag, no docking library (D8). A tab keeps its slot.
+- No touch from typing `/why <pane>` or from the "show m-…" link; no touch from focus the page moves by itself.
+- No unfading on a hand edit of `state.json` before the next turn: a proposal written into the file brings its pane
+  back after your next message (or at once after an extraction, which runs the controller).
+- No "always" for the removal question (see QUESTIONS.md).
+- Fading needs `fadeAfterTurns` in `rules.json`. A `.pilot/rules.json` seeded before pilot-v0.8 has none, so nothing
+  fades there until you add it (one line, see README). Old demo fixtures (v0.3–v0.7) behave as before.
+
 ## pilot-v0.7
 
 `/why`: the current workbench explained from the files, each statement with its source. Also a layout fix for narrow

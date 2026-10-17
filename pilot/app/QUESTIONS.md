@@ -66,3 +66,31 @@ class as the old `c`/`r` (one keystroke answers). The brief keeps the v0.3 rule 
 Authorship of hand edits covers `state.json` items and `modules.json` answers. A hand-edited `transcript.jsonl` line
 still shows its `role` as author (no ledger for lines).
 - Blocks: nothing. Options: keep; or log a hash per appended line and mark lines that differ as "you (file edit)".
+
+## 2026-10-17 (v0.8) What do y/n/x mean for "remove the map pane?"
+The brief says: "`n` keeps it as a tab; a removed pane can come back through its growth rule only if its answer was not
+`x`". Read as:
+- `y` removes, and the rule may offer the pane again later (as a new question, once the count has doubled);
+- `x` removes for good;
+- `a` is refused (400; in the empty input it stays text).
+- Blocks: nothing.
+- Options:
+  - keep;
+  - give `a` a meaning ("always remove faded panes without asking"). That would be the first rule that removes without
+    a per-pane answer, so it is not built;
+  - let `y` re-add without asking when the old growth answer was "always" (now it always asks).
+
+## 2026-10-17 (v0.8) Fading is on for new pilot dirs only
+`rules.example.json` now has `fadeAfterTurns: 8` and `askRemoveAfterTurns: 8`. It is copied only when `.pilot/` has no
+`rules.json`, so an existing `.pilot/rules.json` has neither key and nothing fades there until you add them by hand.
+- Blocks: nothing. It matters if the dogfood week runs on a `.pilot/` started before pilot-v0.8.
+- Options:
+  - keep (files are the truth; nothing changes behind your back);
+  - use built-in defaults when the keys are missing;
+  - have the server add the keys once with a system line.
+
+## 2026-10-17 (v0.8) Are 8 and 8 the right defaults?
+They are guesses: a pane fades after 8 untouched messages and is offered for removal after 8 more. The v0.6/v0.7
+fixtures have about 7 messages from you per work session (22 over three sessions), so a pane fades after roughly one
+session without use.
+- Blocks: nothing. Tune after a few days of dogfooding (`pane_fade` vs `pane_touch` with `unfaded` in `metrics.jsonl`).

@@ -20,7 +20,7 @@ function checkCite(c) {
   if (!m) return 'not of the form file[:line] label';
   const [, file, n, label = ''] = m;
   if (!fs.existsSync(path.join(dir, file)) && !/absent/.test(label)) return `${file} does not exist`;
-  if (!n) return /absent|^\(|\(no |×|^panes$|^answers$|^items$|^rules$|^panes |^answers\.|^items |^rules |^$|not valid JSON/.test(label) ? null : `no line number and no reason: "${label}"`;
+  if (!n) return /absent|^\(|\(no |×|^panes$|^removals\.|^answers$|^items$|^rules$|^panes |^answers\.|^items |^rules |^$|not valid JSON/.test(label) ? null : `no line number and no reason: "${label}"`;
   const text = lines(file)[Number(n) - 1];
   if (text === undefined) return `${file} has no line ${n}`;
   const words = label.split(' ');
@@ -29,7 +29,7 @@ function checkCite(c) {
     if (file === 'transcript.jsonl') return o.id === words[0] ? null : `${file}:${n} is ${o.id}, not ${words[0]}`;
     if (o.event !== words[0]) return `${file}:${n} is event ${o.event}, not ${words[0]}`;
     const id = words[1];
-    if (id && ![o.id, o.itemId].includes(id)) return `${file}:${n} has id ${o.id || o.itemId}, not ${id}`;
+    if (id && ![o.id, o.itemId, o.module].includes(id)) return `${file}:${n} has id ${o.id || o.itemId || o.module}, not ${id}`;   // pilot-v0.8: pane events name a module
     return null;
   }
   let re;
@@ -38,6 +38,8 @@ function checkCite(c) {
   else if (/^(panes|rules) (\S+)/.test(label)) re = new RegExp(`"module"\\s*:\\s*"${esc(words[1].replace(/\.rule$/, ''))}"`);
   else if (/^answers\.(\S+)/.test(label)) re = new RegExp(`^\\s*"${esc(label.split(' ')[0].slice(8))}"\\s*:`);
   else if (/^pending/.test(label)) re = /"pending"\s*:/;
+  else if (/^removals\.(\S+)/.test(label)) re = new RegExp(`^\\s*"${esc(label.split(' ')[0].slice(9))}"\\s*:`);   // pilot-v0.8
+  else if (/^(fadeAfterTurns|askRemoveAfterTurns)\b/.test(label)) re = new RegExp(`"${words[0]}"\\s*:`);
   else return `unknown JSON label "${label}"`;
   return re.test(text) ? null : `${file}:${n} does not hold ${label} (it says ${text.trim()})`;
 }

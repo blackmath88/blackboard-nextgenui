@@ -1,0 +1,49 @@
+{
+  "port": 4772,
+  "pilotDir": ".pilot",
+  "stallMs": 20000,
+  "roles": {
+    "chat": {
+      "policy": "fallback",
+      "allowCloudFallback": false,
+      "candidates": [
+        {
+          "name": "frontier",
+          "local": false,
+          "baseUrl": "http://127.0.0.1:5772/v1",
+          "model": "fake-frontier",
+          "timeoutMs": 10000
+        },
+        {
+          "name": "morrow",
+          "local": true,
+          "baseUrl": "http://127.0.0.1:5773/v1",
+          "model": "fake-morrow",
+          "timeoutMs": 10000
+        }
+      ]
+    },
+    "extract": {
+      "policy": "manual",
+      "everyNTurns": 1,
+      "maxItems": 3,
+      "candidates": [
+        {
+          "name": "morrow",
+          "local": true,
+          "baseUrl": "http://127.0.0.1:5773/v1",
+          "model": "fake-morrow",
+          "structured": true,
+          "timeoutMs": 10000
+        }
+      ]
+    },
+    "title": {
+      "policy": "manual",
+      "candidates": []
+    }
+  },
+  "_notes": [
+    "DEMO ONLY (npm run demo -- v0.8). Derived from pilot.config.dev.json with own ports (server 4772, fakes 5772/5773). The extract role runs on the morrow fake. Untested with a real model."
+  ]
+}

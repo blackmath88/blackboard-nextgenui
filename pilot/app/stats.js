@@ -55,7 +55,8 @@ function withProvenance(items, events) {
 // by module + timestamp. An answer without a matching event was written into modules.json by hand.
 function consentFor(module, ans, events) {
   if (!ans) return null;
-  return events.find((e) => e.event === 'consent' && e.module === module && e.answer === ans.answer
+  // pilot-v0.8: removal answers (question "remove") are not growth consent
+  return events.find((e) => e.event === 'consent' && e.question !== 'remove' && e.module === module && e.answer === ans.answer
     && ((ans.consentId && e.id === ans.consentId) || (!ans.consentId && e.ts === ans.at))) || null;
 }
 function paneInfo(modules, rules, events) {
@@ -125,7 +126,7 @@ function continuity(events) {
 }
 
 function consent(events, modules) {
-  const consents = events.filter((e) => e.event === 'consent');
+  const consents = events.filter((e) => e.event === 'consent' && e.question !== 'remove');   // growth answers only
   const adds = events.filter((e) => e.event === 'controller_add');
   const bad = [];
   for (const a of adds) {

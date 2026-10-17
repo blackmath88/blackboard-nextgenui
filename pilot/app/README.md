@@ -1,8 +1,9 @@
-# CLI Pilot v1 (steps P0 to P4 + P5 metrics, iteration pilot-v0.7)
+# CLI Pilot v1 (steps P0 to P4 + P5 metrics, iteration pilot-v0.8)
 
-**Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.7` (`/why`; v0.6: authorship and `/stats`; v0.5: live
-files, two tabs; v0.4: proposals; v0.3: pins and fallback), open the printed URL, follow the "try this" lines. A tagged
-iteration without touching your checkout: `bash pilot/app/scripts/try.sh pilot-v0.7`.
+**Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.8` (panes fade to tabs and are removed only
+with your answer; v0.7: `/why`; v0.6: authorship and `/stats`; v0.5: live files, two tabs; v0.4: proposals; v0.3: pins
+and fallback), open the printed URL, follow the "try this" lines. A tagged iteration without touching your checkout:
+`bash pilot/app/scripts/try.sh pilot-v0.8`.
 **Extraction (since pilot-v0.4) is untested with a real model:** it runs against the fake extractor in `dev/fake-model.js`.
 What changed per iteration: `CHANGELOG.md`; checks: `CHECKS.md`; open questions: `QUESTIONS.md`.
 
@@ -42,10 +43,10 @@ In the page, type a message and press Enter. Lines starting with `/` are command
 | `/model <role> auto` | unpin: back to the role's policy, starting at its first candidate |
 | `/theme light\|dark\|auto` | colour theme of this page (handled in the browser, kept in localStorage); `auto` follows the OS |
 | `/rules` | the growth rules from `.pilot/rules.json` with current counts |
-| `/panes` | panes and your consent answers |
+| `/panes` | panes (faded ones marked), your consent answers and removal answers |
 | `/stats` | the five P5 measures (04-build-plan.md) with thresholds, PASS / NOT YET and the numbers behind each, from `metrics.jsonl` and the files only (also `npm run stats -- <pilotDir>`) |
 | `/why` | why the workbench looks like this: one line per pane (rule, question, your answer) and the items in brief, every statement with its source (`file:line`); from the files only, read-only (since pilot-v0.7) |
-| `/why <pane>` | `index`, `map`, `kanban`, `chat`: the rule, every question, answer and add, the answer on file |
+| `/why <pane>` | `index`, `map`, `kanban`, `chat`: the rule, every question, answer and add, the answer on file; since pilot-v0.8 also fading: last touch, turns since, threshold, what happens next, the removal question |
 | `/why <item id>` | e.g. `/why dec-2`: origin, the message it came from (with a "show" link), the quote, who decided it and when, fields changed by hand |
 | `/help` | list commands |
 
@@ -105,6 +106,8 @@ and the page then reloads everything.
 - `server_start` (with counts) and `turn`
 - `consent` (with `id`) and `controller_add` (with `answerRef` = that id)
 - `controller_ask`, `decide`, `index_jump` (sent by the page via `POST /metric`)
+- pilot-v0.8: `pane_touch`, `pane_fade`, `pane_unfade`, `pane_remove`, `controller_withdraw`; `controller_ask` and
+  `consent` with `question: "remove"` for the removal question
 - `item_write` and `file_edit`
 
 `/stats` and `npm run stats -- <dir>` print the five measures from those events. `<dir>` is resolved against the
@@ -117,6 +120,27 @@ sources: `metrics.jsonl:60 controller_ask`, `transcript.jsonl:5 m-f005` (physica
 index`, `state.json:18 items dec-2` (the entry's line in the file as it is now). What is not recorded is said: "no
 recorded answer", "set by you (file edit), when is not recorded", "the server never wrote it". Narrow layouts: labels
 never break mid-word; the kanban stacks its columns when its body is narrower than 420 px.
+
+**Panes can go (pilot-v0.8).** A pane nobody touched for `fadeAfterTurns` turns (a turn = a message you sent) fades
+to a tab: a slim labelled strip in its place, `▸ kanban  tab · untouched since turn 22`. The other panes take the
+height. Click the tab, or Tab to it and press Enter, and the pane is back at once. Fading is not removal: the pane stays
+in `modules.json` with `"state": "faded"`. After `askRemoveAfterTurns` more turns as a tab the controller asks once:
+"Remove the kanban pane?". `y` removes it (its rule may offer it again once its count has doubled), `n` keeps the tab,
+`x` removes it for good. The answer is recorded like any consent (`removals` in `modules.json`, a `consent` event with
+`question: "remove"`); no rule ever removes a pane.
+- **Touch:** a click, a wheel/touch scroll, or keyboard focus you move into the pane; confirming or rejecting one of its
+  cards; the tab. Only the first touch of a pane per turn is recorded (`lastTouch` in its `modules.json` entry, a
+  `pane_touch` event). Touching a pane whose removal question is open withdraws the question.
+- **Never faded:** the chat, and a pane holding an unanswered proposal (a tab would hide a decision). A proposal that
+  arrives in a faded pane brings it back.
+- **Settings** in `rules.json`: `"fadeAfterTurns": 8, "askRemoveAfterTurns": 8` at the top level (default), or on a
+  rule to override it for that pane. A missing key switches that step off. A `.pilot/rules.json` seeded before
+  pilot-v0.8 has neither; to turn fading on there:
+
+```sh
+cd pilot/app
+node -e 'const f=".pilot/rules.json",fs=require("fs"),r=JSON.parse(fs.readFileSync(f));r.fadeAfterTurns=8;r.askRemoveAfterTurns=8;fs.writeFileSync(f,JSON.stringify(r,null,2))'
+```
 
 The status bar shows the active model per role; `frontier→morrow` means the configured candidate
 failed and the next one answered. Every model attempt is logged to `.pilot/metrics.jsonl`.
@@ -157,13 +181,14 @@ node -e 'const f=".pilot/rules.json",fs=require("fs"),r=JSON.parse(fs.readFileSy
 ## Demos and checks
 
 `npm run demo -- <version>` (`scripts/demo.js`) wipes and seeds a throwaway `.pilot-demo/` from
-`demo/fixtures/<version>/`, starts the fakes and the server on demo ports (v0.3: 4750, 5751, 5752; v0.4: 4754, 5754, 5755; v0.5: 4758, 5758, 5759; v0.6: 4764, 5764, 5765; v0.7: 4768, 5768, 5769), prints the URL
+`demo/fixtures/<version>/`, starts the fakes and the server on demo ports (v0.3: 4750, 5751, 5752; v0.4: 4754, 5754, 5755; v0.5: 4758, 5758, 5759; v0.6: 4764, 5764, 5765; v0.7: 4768, 5768, 5769; v0.8: 4772, 5772, 5773), prints the URL
 and what to try. Ctrl+C stops everything. An unknown version lists the available ones. It never touches `.pilot/`.
 
 `npm run verify` (`scripts/verify-all.sh`) runs every `dev/verify-*.sh` and the browser checks and prints a summary.
 It refuses to start while `pilot/app/.pilot/` exists, because the P0–P2 checks wipe it.
-`dev/verify-v0.3.sh` to `verify-v0.7.sh` use their own ports and dirs and are safe next to a running demo.
-The v0.6 demo fixture is generated by `node dev/make-fixture-v06.js` (synthetic, every line `"fixture": true`).
+`dev/verify-v0.3.sh` to `verify-v0.8.sh` use their own ports and dirs and are safe next to a running demo.
+The v0.6 demo fixture is generated by `node dev/make-fixture-v06.js` (synthetic, every line `"fixture": true`), the v0.8
+one by `node dev/make-fixture-v08.js` (from the v0.7 fixture).
 `node dev/contrast-check.js` checks the palette (WCAG AA, both themes).
 
 The older checks (each starts and stops everything itself and **wipes `.pilot/` first**;
@@ -179,6 +204,7 @@ bash pilot/app/dev/verify-v0.4.sh           # own ports/dirs; proposals; include
 bash pilot/app/dev/verify-v0.5.sh           # own ports/dirs; live files, stale rev, c/r; browser-check.js v05, dev/sse-probe.js
 bash pilot/app/dev/verify-v0.6.sh           # own ports/dirs; authorship, P5 events, /stats, npm run stats; browser-check.js v06
 bash pilot/app/dev/verify-v0.7.sh           # own ports/dirs; /why, cited sources resolved (dev/why-cites.js); browser-check.js v07 (layout)
+bash pilot/app/dev/verify-v0.8.sh           # own ports/dirs; fading, touches, removal consent, /why fading; browser-check.js v08
 ```
 
 To start over by hand, stop the server and delete `pilot/app/.pilot/`.
@@ -188,9 +214,10 @@ To start over by hand, stop the server and delete `pilot/app/.pilot/`.
 | Method | Path | Does |
 |---|---|---|
 | GET | `/` | the page (only files under `public/` are served) |
-| GET | `/state` | `{transcript: last 500 lines, total, models, panes, pending, answers, modulesRev, paneInfo, items (with prov when hand-edited), stateRev, stateError, extracting, fileErrors}`; `?only=state.json,modules.json,…` returns only the parts of those files (plus `extracting`, `fileErrors`) |
+| GET | `/state` | `{transcript: last 500 lines, total, turn, models, panes (faded ones included), faded, pending, pendingKind, answers, removals, modulesRev, paneInfo (with fade), items (with prov when hand-edited), stateRev, stateError, extracting, fileErrors}`; `?only=state.json,modules.json,…` returns only the parts of those files (plus `extracting`, `fileErrors`) |
 | GET | `/events` | Server-Sent Events: `hello {revs, extracting}`, then `change {file, rev[, error]}` per changed file and `status {extracting}` |
 | POST | `/chat` | `{text}`: appends the user line, streams the reply as `text/plain`, appends the assistant line |
 | POST | `/command` | `{text: "/model chat morrow"}` → `{ok, lines}` (`/state.models.<role>` has `active`, `pinned`, `last`, `candidates`, `local`) |
-| POST | `/answer` | `{module: "index", answer: "y"}` (y/n/a/x or yes/no/always/never), or `{itemId: "dec-3", decision: "c"}` (c/r or confirm/reject; proposed items only, records `decidedAt`, `decidedBy: "user"`). Optional `rev` (of `modules.json` / `state.json`): stale → 409 `{stale: true, file, rev}`; a broken file → 409 |
+| POST | `/answer` | `{module: "index", answer: "y"}` (y/n/a/x or yes/no/always/never; the removal question takes y/n/x), or `{itemId: "dec-3", decision: "c"}` (c/r or confirm/reject; proposed items only, records `decidedAt`, `decidedBy: "user"`). Optional `rev` (of `modules.json` / `state.json`): stale → 409 `{stale: true, file, rev}`; a broken file → 409 |
+| POST | `/touch` | `{module, how}` (pilot-v0.8; how: click, focus, scroll, decide, tab): records a touch of a shown pane and brings a faded one back. The first touch of a pane per turn is written; later ones return `changed: false`. No rev. `chat` → 400, a pane not shown → 404 |
 | POST | `/metric` | `{event: "index_jump", target: "<message id>"}` (pilot-v0.6; the page sends it on an index click). Any other event or an unknown id → 400 |
