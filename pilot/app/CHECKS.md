@@ -737,3 +737,12 @@ fading (8/8); the p0–v0.7 checks pass with it. `npm run demo -- v0.3` to `-- v
 3. The brief lists "focus" and "scroll inside it". They are narrowed to focus you moved with a key and to wheel/touchmove,
    because the page re-renders panes (scroll resets, focus restored by script) and would otherwise touch its own panes.
    ITERATIONS.md has the reasoning.
+
+## pilot-v0.8: coordinator re-run (2026-10-17)
+
+Run by the coordinator, not the builder.
+- Scope: only `pilot/app/**` plus one line in the "Pilot iterations" list of `index.html`.
+- `npm run verify`: exit 0; every earlier script passes, plus v0.8.
+- Demos v0.3 to v0.8: `/state` 200 within about 1 s each; no orphan processes.
+- Browser, demo v0.8: sent "what is left for Monday?" → the map faded to a tab with a controller line, and "Remove the kanban pane? (y/n/x)" asked once. `n` was recorded as `consent {question: remove, answer: no}`; the kanban stays in `modules.json` as `faded`. Clicking the map tab brought it back (`pane_touch how: tab, unfaded: true`).
+- An existing `.pilot/rules.json` without `fadeAfterTurns` never fades (CHANGELOG states it; not re-tested by hand).
