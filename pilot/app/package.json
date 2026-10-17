@@ -1,0 +1,11 @@
+{
+  "name": "cli-pilot",
+  "private": true,
+  "description": "CLI Pilot: a local chat that grows into a workbench. No dependencies; package.json only holds npm scripts.",
+  "engines": { "node": ">=20.3" },
+  "scripts": {
+    "start": "node server.js",
+    "demo": "node scripts/demo.js",
+    "verify": "bash scripts/verify-all.sh"
+  }
+}

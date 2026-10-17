@@ -11,9 +11,10 @@ let state = { transcript: [], panes: [], pending: null, answers: {} };
 let shownPanes = '';
 $('brand').insertAdjacentHTML('afterbegin', Pixel.sprite('teletype', 18, 'pilot') + ' ');
 
-function addLine(role, text, model, id) {
+function addLine(role, text, model, id, kind) {
   const p = document.createElement('p');
   p.className = `ln ${role}`;
+  if (kind) p.classList.add(kind);              // system lines: blocked | stall | error
   if (id) p.id = `msg-${id}`;
   const who = document.createElement('span');
   who.className = 'who';
@@ -49,7 +50,7 @@ function addController(line, isLastForModule) {
   } else {
     p.classList.add('done');
     const a = state.answers[line.module];
-    if (isLastForModule && a) { const s = document.createElement('small'); s.className = 'model'; s.textContent = `answered: ${a.answer}`; p.append(s); }
+    if (isLastForModule && a) { const s = document.createElement('small'); s.className = `model ${a.answer}`; s.textContent = `answered: ${a.answer}`; p.append(s); }
   }
 }
 
@@ -59,10 +60,10 @@ function renderLog() {
   state.transcript.forEach((l, i) => { if (l.role === 'controller' && l.module) lastCtl[l.module] = i; });
   state.transcript.forEach((l, i) => {
     if (l.role === 'controller') addController(l, lastCtl[l.module] === i);
-    else addLine(l.role, l.text, l.model, l.id);
+    else addLine(l.role, l.text, l.model, l.id, l.kind);
   });
   count.textContent = `${state.transcript.length} lines`;
-  input.placeholder = state.pending ? 'Press y / n / a / x to answer the question, or type a message' : PLACEHOLDER;
+  input.placeholder = state.pending ? 'Empty input: press y / n / a / x to answer the question, or type a message' : PLACEHOLDER;
 }
 
 // ---- panes: CSS grid templates for 1 to 4 panes, swapped with a View Transition ----
@@ -129,14 +130,22 @@ function renderPanes() {
   else apply();
 }
 
-// Status bar: active model per role; "a→b" when fallback answered with another candidate.
+// Status bar: active model per role; "a→b" when fallback answered with another candidate; "(pinned)" after /model.
 function renderModels(m) {
   models.textContent = Object.entries(m || {}).map(([role, r]) => {
     const name = r.active || 'none';
-    return `${role}: ${r.last && r.last !== name ? `${name}→${r.last}` : name}`;
+    return `${role}: ${r.last && r.last !== name ? `${name}→${r.last}` : name}${r.pinned ? ' (pinned)' : ''}`;
   }).join(' · ');
-  models.title = Object.entries(m || {}).map(([role, r]) => `${role}: ${r.policy}, candidates ${r.candidates.join(', ') || 'none'}`).join('\n');
+  models.title = Object.entries(m || {}).map(([role, r]) => `${role}: ${r.pinned ? 'pinned, no fallback' : r.policy}, candidates ${
+    r.candidates.map((n) => (r.local || []).includes(n) ? `${n} (local)` : n).join(', ') || 'none'}`).join('\n');
 }
+
+// Theme: /theme light|dark|auto, kept in this browser only (localStorage); auto follows the OS.
+function applyTheme(t) {
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  else delete document.documentElement.dataset.theme;
+}
+try { applyTheme(localStorage.getItem('pilot-theme')); } catch { /* storage blocked: auto */ }
 
 async function loadState() {
   state = await (await fetch('/state')).json();
@@ -156,6 +165,14 @@ async function sendAnswer(module, word) {
 
 // Command output is shown locally only; it never goes to a model and is not stored (except /model switches).
 async function runCommand(text) {
+  const [cmd, arg] = text.trim().split(/\s+/);
+  if (cmd === '/theme') {                        // page-only command, never sent to the server
+    const ok = ['light', 'dark', 'auto'].includes(arg);
+    if (ok) { applyTheme(arg); try { localStorage.setItem('pilot-theme', arg); } catch { /* not kept */ } }
+    addLine('out', text).p.classList.add('cmd');
+    addLine('out', ok ? `theme: ${arg}` : 'usage: /theme light|dark|auto').p.classList.toggle('err', !ok);
+    return;
+  }
   const res = await fetch('/command', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
   const out = await res.json();
   await loadState();                             // picks up a /model system line and the new status bar
@@ -163,9 +180,10 @@ async function runCommand(text) {
   for (const l of out.lines || []) addLine('out', l).p.classList.toggle('err', !out.ok);
 }
 
-// Consent keys: a single lowercase y/n/a/x in the empty input answers the pending question.
+// Consent keys: a lowercase y/n/a/x answers the pending question only if the input is empty at keydown.
+// Once anything is typed, every key is text. The buttons always work.
 input.addEventListener('keydown', (e) => {
-  if (!state.pending || input.value !== '' || e.ctrlKey || e.metaKey || e.altKey || !KEYS[e.key]) return;
+  if (!state.pending || input.value !== '' || e.isComposing || e.repeat || e.ctrlKey || e.metaKey || e.altKey || !KEYS[e.key]) return;
   e.preventDefault();
   sendAnswer(state.pending, KEYS[e.key]);
 });

@@ -1,12 +1,14 @@
 {
   "port": 4747,
   "pilotDir": ".pilot",
+  "stallMs": 20000,
   "roles": {
     "chat": {
       "policy": "fallback",
+      "allowCloudFallback": false,
       "candidates": [
-        { "name": "frontier", "baseUrl": "https://api.openai.com/v1", "model": "gpt-6", "keyEnv": "OPENAI_API_KEY", "timeoutMs": 60000 },
-        { "name": "morrow", "baseUrl": "http://nebuchadnezzar:11434/v1", "model": "qwen3:14b", "timeoutMs": 90000 }
+        { "name": "frontier", "local": false, "baseUrl": "https://api.openai.com/v1", "model": "gpt-6", "keyEnv": "OPENAI_API_KEY", "timeoutMs": 60000 },
+        { "name": "morrow", "local": true, "baseUrl": "http://nebuchadnezzar:11434/v1", "model": "qwen3:14b", "timeoutMs": 90000 }
       ]
     },
     "extract": {
@@ -14,7 +16,7 @@
       "everyNTurns": 1,
       "maxItems": 3,
       "candidates": [
-        { "name": "morrow", "baseUrl": "http://nebuchadnezzar:11434/v1", "model": "qwen3:14b", "structured": true, "timeoutMs": 60000 }
+        { "name": "morrow", "local": true, "baseUrl": "http://nebuchadnezzar:11434/v1", "model": "qwen3:14b", "structured": true, "timeoutMs": 60000 }
       ]
     },
     "title": {
@@ -26,6 +28,9 @@
     "Model names and hosts are placeholders. Any OpenAI-compatible endpoint works, including a LiteLLM proxy.",
     "keyEnv names an environment variable; keys never go into this file or the browser.",
     "policy: manual = first candidate until /model switches; fallback = next candidate on error or timeout.",
-    "title with no candidates means the index uses each message's first sentence."
+    "title with no candidates means the index uses each message's first sentence.",
+    "local: true marks a candidate that runs on your own machine or network. After a local candidate fails, fallback never goes to a non-local one unless the role sets allowCloudFallback: true. Missing local counts as non-local.",
+    "/model <role> <name> pins the role (no fallback) until /model <role> auto.",
+    "stallMs: once a reply has started, abort it when no new token arrives for this long (default 20000)."
   ]
 }

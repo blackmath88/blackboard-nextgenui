@@ -219,12 +219,96 @@ Scripted: `bash pilot/app/dev/verify-p2.sh` (curl, 24 checks) and `node pilot/ap
 
 # Open questions and known limits (after P2)
 
-- **Privacy vs. fallback.** After `/model chat morrow` under policy `fallback`, a morrow outage sends
+- ~~**Privacy vs. fallback.**~~ (decided and built in pilot-v0.3: explicit `/model` pins; local candidates never fall back to cloud.) After `/model chat morrow` under policy `fallback`, a morrow outage sends
   the (private) text on to frontier: the concept's day-5 case. Persisting the choice does not help
   here. Options: an explicit `/model` pins the role (no fallback until switched back), or a
   per-candidate "never fall back to" list. Not changed yet; needs a decision.
-- No stall timeout after the first token: an endpoint that hangs mid-stream keeps the request open.
+- ~~No stall timeout after the first token~~ (pilot-v0.3: `stallMs`).
 - `transcript.jsonl` and `metrics.jsonl` are rewritten in full on every append to keep writes atomic;
   fine for a pilot, worth revisiting in P4 if a dogfood week makes the files large.
 - While a question is pending, a message cannot start with lowercase y/n/a/x (see P2 decisions).
 - `dev/browser-check.js` needs Node 22+ (global `WebSocket`) and Google Chrome; the app needs Node 20.3+.
+
+# pilot-v0.3
+
+Hardening (pins, local-only fallback, stall timeout, empty-input consent keys), pastel palette, iteration
+infrastructure. Everything runs against `dev/fake-model.js`; no real model endpoint was contacted.
+
+**Reproduce:** `bash pilot/app/dev/verify-v0.3.sh` (32 checks; one of them runs the 19 browser checks of `browser-check.js v03`, another `contrast-check.js` with 36 PASS lines; ends with
+`ALL v0.3 CHECKS PASSED`, exits non-zero on failure). It uses its own ports (server 4760, fakes 5761/5762; browser
+part 4765/5766/5767 and Chrome 9343; demo part 4950/5951/5952) and its own throwaway dirs (`.pilot-verify-v03/`,
+`.pilot-verify-v03b/`, `.pilot-demo-verify/`), so it never touches `.pilot/` or a running demo.
+**Everything:** `cd pilot/app && npm run verify` runs p0, p1, p2, v0.3 and `browser-check.js all` (p1, p2) and
+prints a summary ending `ALL VERIFY SCRIPTS PASSED` (refuses to start while a `.pilot/` exists, see QUESTIONS.md).
+Last run (Node v25.9.0, Chrome, macOS): all passed.
+
+## Checks
+
+| # | Check | How (in `verify-v0.3.sh` unless noted) |
+|---|---|---|
+| 1 | **Pin blocks fallback.** `/model chat morrow` answers "pinned"; `/state` has `models.chat.pinned: true`; `roles.json.active.chat = morrow`; survives a restart. With morrow down, the turn ends in `system: chat failed: morrow: … (chat is pinned to morrow, no fallback; /model chat auto unpins)`; no `fallback` metric, frontier never called. | section 1 |
+| 2 | **`/model chat auto` restores the policy** from the first candidate (`active: frontier, pinned: false`); with frontier down, morrow answers and `fallback frontier→morrow` is logged. This is also the **cloud→local allowed** check. | section 2 |
+| 3 | **Local→cloud blocked without the flag.** Temp config with chat order [morrow (local), frontier]; morrow down: system line `fallback to frontier blocked: morrow is local` (`kind: blocked`), metric `fallback_blocked {from: morrow, to: frontier}`, frontier never called, the turn ends in `chat failed: morrow`. Same with `local` deleted from frontier (**missing `local` = non-local**). | section 3 |
+| 4 | **Local→cloud allowed with `allowCloudFallback: true`** on the role: frontier answers, `fallback morrow→frontier` logged, nothing blocked. | section 4 |
+| 5 | **Stall after the first token** (temp config `stallMs: 1000`, `fake-model.js --stall-after=3`): the request ends after about 1.2 s (asserted 1.0–2.5 s), the 3 streamed tokens are kept as an `assistant` line (model frontier), then `system: reply stalled: frontier: no new token for 1000 ms; kept the partial reply, no fallback` (`kind: stall`), metric `stall {candidate, stallMs: 1000, chars}`; no fallback, morrow never called. A steady reply (40 ms/token, ~1.5 s total) under the same `stallMs` is not cut. | section 5 |
+| 6 | **Consent key with non-empty input stays text** (headless Chrome, `node dev/browser-check.js v03`): with the question pending, `hello ` + keys y n a x gives `hello ynax`, no `POST /answer`, still pending; a lone space also counts as non-empty; in the empty input `n` answers (`modules.json` answer no); asked again at 8 messages, then the **button works while the input holds `my draft`** and the draft stays. | section 6 |
+| 7 | **Status bar pin** (browser): `chat: frontier` → `/model chat morrow` → `chat: morrow (pinned)` → `/model chat auto` → `chat: frontier` (no "pinned"). | section 6 |
+| 8 | **Palette from CSS variables** (browser): dark page background `#1e1f2b`, status bar lavender; the first brand sprite pixel has `fill="var(--px-d)"` and resolves to `#9a97b0` in dark and to lavender in light; with `prefers-color-scheme: light` emulated the page is `#f4f5fa`; `/theme dark` overrides it, `/theme auto` follows the OS again; `/theme` never reaches the server. | section 6 |
+| 9 | **Contrast passes** (`node dev/contrast-check.js`): parses the token blocks from `public/style.css`, checks 15 text/background pairs per mode (30) at ≥ 4.5:1, that both light blocks are identical, that no pastel is a text colour in light mode, and that no colour literal exists outside the token blocks (also not in `app.js`, `pixel.js`, `index.html`). Lowest ratios: dark `--muted` on panel 5.15:1, light controller label ink on lavender 6.87:1. | section 7 |
+| 10 | **Demo starts and serves `/state` within 30 s** (`DEMO_PORT_SHIFT=200 PILOT_DEMO_DIR=.pilot-demo-verify node scripts/demo.js v0.3`): up in < 1 s; state has chat pinned to morrow, index pending, ≥ 10 seeded lines; URL and "try this" printed; SIGINT leaves no process on its ports; unknown version lists `v0.3` and exits 2. | section 8 |
+| 11 | **Old checks still pass:** `verify-p0.sh`, `verify-p1.sh` (17), `verify-p2.sh` (24), `browser-check.js all` (p1 + p2). | `npm run verify` |
+
+Done by hand (coordinator may repeat): the demo toggle. Under a pty, `m` + Enter stopped the morrow fake; a pinned
+message then ended in `chat failed: morrow: fetch failed (chat is pinned…)`; after `/model chat auto` the next one
+produced `fallback to frontier blocked: morrow is local`; `m` + Enter again brought morrow back and it answered.
+Screenshots of the page in dark and light mode looked as intended (labels as ink on pastel fills in light mode).
+`scripts/try.sh`: the unknown-tag and no-argument paths print the available `pilot-v*` tags (none yet) and exit 2;
+the positive path was run with `TRY_REF=<commit>` (no tags exist yet; the coordinator tags).
+
+## Adapted assertions in earlier checks (deliberate behaviour changes)
+
+- `dev/verify-p1.sh`, before "fallback: frontier stopped": `cmd "/model chat frontier"` → `cmd "/model chat auto"`.
+  Reason: decision A1, `/model chat frontier` now pins frontier, so the following fallback check could never
+  see morrow answer. The assertions themselves are unchanged.
+- `dev/browser-check.js p1`: (a) "status bar shows chat: morrow after /model" accepts `chat: morrow (pinned)`;
+  (b) `/model chat frontier` before stopping frontier → `/model chat auto` (same reason). Consequence: the p1
+  check "status bar after restart shows the persisted choice" now shows an unpinned role; pin persistence across
+  restarts is covered by v0.3 check 1.
+- Wording of the system line on `/model`: `model for chat switched to morrow (pinned)` (P1 greps for the prefix,
+  unchanged assertion).
+
+## Decisions
+
+- **Pins:** a role listed in `roles.json.active` is pinned (so a P1-era `roles.json` reads as pinned, the
+  privacy-safe reading). `/model <role> auto` removes the entry and clears the "a→b" marker. A pinned role tries
+  only its pinned candidate, regardless of policy.
+- **`allowCloudFallback` is per role** (not top level), default false. Blocked candidates are skipped (each
+  block is logged and shown), a later local candidate would still be tried.
+- **Stall vs. timeout:** `timeoutMs` (per candidate) = wait for the first token, may fall back (rule 1 applies);
+  `stallMs` (top level, per-candidate override allowed, default 20000) = gap between tokens after the first,
+  never falls back because a reply never mixes two models.
+- **Consent keys:** P2 already answered only on an empty input at keydown; v0.3 keeps that and adds
+  `isComposing`/`repeat` guards and a clearer placeholder ("Empty input: press y / n / a / x …").
+- **Palette tokens:** palette values exactly as given; role tokens (`--you-fg/-bg`, `--pilot-…`, `--ctl-…`,
+  `--ok-…`, `--bad-…`) give pastel text with no fill in dark mode and ink text on a pastel fill in light mode.
+  Light mode adds panel `#ffffff`, line `#cfd0e0` and a darker secondary `--muted: #5a5873` (6.8:1 on white),
+  because `#9a97b0` on `#f4f5fa` is 2.6:1. Usage changes instead of palette changes: error/blocked/stall lines
+  use `--text` with a rose left border (rose is never text in light mode); answered questions use `--muted`
+  instead of `opacity: .6` (which made contrast unmeasurable); the index jump highlight is an outline instead of
+  a tinted background.
+- **Sprites:** `pixel.js` writes `fill="var(--px-a|d|c|w)"`; the browser resolves them, so sprites follow
+  `/theme` and OS changes live. Chosen over `getComputedStyle` (the brief's example), which would freeze the
+  colours at render time.
+- **Demo v0.3:** fixture transcript of 12 lines (privacy story; assistant lines marked `[fixture]`), chat pinned
+  to morrow, index threshold 10 with the question already pending, and a demo config that lists **morrow first**
+  (privacy-first order) so a morrow outage after `/model chat auto` shows the blocked fallback. The demo terminal
+  accepts `m` + Enter to stop/start the morrow fake.
+
+## Deviations
+
+1. `PILOT_DIR` env override (relative to `pilot/app/`, must stay inside it) for demos and checks.
+2. System lines may carry `kind: blocked | stall | error` (extra field, used for colour only).
+3. The demo config is derived from the dev config with its own ports and morrow first (see Decisions).
+4. `scripts/try.sh` accepts `TRY_REF=<commit>` to test it before tags exist.
+5. `scripts/demo.js` honours `DEMO_PORT_SHIFT` and `PILOT_DEMO_DIR` (used by `verify-v0.3.sh`).
+6. `pilot/app/.gitignore` ignores `.pilot-demo*/` and `.pilot-verify-*/` (the root `.gitignore` is out of scope).

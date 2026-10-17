@@ -1,4 +1,5 @@
-/* Original pixel sprites, 12x12. a = amber, d = dim amber, c = cyan, w = white-ish. */
+/* Original pixel sprites, 12x12. Letters map to CSS custom properties defined in style.css
+   (a = --px-a, d = --px-d, c = --px-c, w = --px-w), so sprites follow the palette and the light/dark theme live. */
 (function (root) {
   const SPRITES = {
     teletype: [
@@ -26,7 +27,7 @@
       '...aaaaaa...', '..a......a..', '.a.cc..cc.a.', '.a.cw..cw.a.', '.a........a.', '.a..dddd..a.',
       '..a......a..', '...aaaaaa...', '..a.a..a.a..', '.a..a..a..a.', '....a..a....', '...aa..aa...']
   };
-  const COL = { a: 'var(--amber)', d: 'var(--dim)', c: 'var(--cyan)', w: 'var(--paper)' };
+  const COL = { a: 'var(--px-a)', d: 'var(--px-d)', c: 'var(--px-c)', w: 'var(--px-w)' };
   function sprite(name, size = 48, label = '') {
     const rows = SPRITES[name];
     let r = '';

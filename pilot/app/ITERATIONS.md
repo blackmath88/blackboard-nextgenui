@@ -1,0 +1,19 @@
+# ITERATIONS
+
+Planned progression (from the coordinator's plan, 2026-10-17). Changes to the plan are appended below with
+date, old plan, new plan and why.
+
+| Tag | Iteration | Notes |
+|---|---|---|
+| pilot-v0.3 | hardening: pins, local-only fallback, stall timeout, empty-input consent keys, pastel palette, demo/verify/try infrastructure | |
+| pilot-v0.4 | proposals (P3) | extraction against a fake extractor until Morrow is reachable |
+| pilot-v0.5 | live files (P4) | |
+| pilot-v0.6 | authorship & metrics, `/stats` | |
+| pilot-v0.7 | `/why` | |
+| pilot-v0.8 | panes can go | |
+| pilot-v0.9 | Enter diffused (behind a flag) | |
+| pilot-v0.10 | frame proposals (behind a flag) | |
+
+## Changes to the plan
+
+(none yet)

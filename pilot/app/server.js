@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CLI Pilot v1 (P0-P2): serves the page, proxies POST /chat to the `chat` role with
+// CLI Pilot (P0-P2 + pilot-v0.3): serves the page, proxies POST /chat to the `chat` role with
 // streaming and per-role candidates/policies, appends lines to .pilot/transcript.jsonl,
 // runs the deterministic growth controller (rules.json -> consent -> modules.json),
 // handles commands via POST /command and answers via POST /answer, logs to .pilot/metrics.jsonl.
@@ -14,10 +14,12 @@ const APP = __dirname;
 const PUBLIC = path.join(APP, 'public');
 const configPath = path.resolve(APP, process.env.PILOT_CONFIG || 'pilot.config.json');
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-const PILOT = path.resolve(APP, config.pilotDir || '.pilot');
+// PILOT_DIR (env, relative to pilot/app/) overrides config.pilotDir, e.g. PILOT_DIR=.pilot-demo for demos.
+const PILOT = path.resolve(APP, process.env.PILOT_DIR || config.pilotDir || '.pilot');
+const STALL_MS = Number(config.stallMs) || 20000;   // max gap between tokens once a reply has started
 const TRANSCRIPT = path.join(PILOT, 'transcript.jsonl');
 const METRICS = path.join(PILOT, 'metrics.jsonl');
-const ROLES = path.join(PILOT, 'roles.json');      // persisted /model choices (see CHECKS.md)
+const ROLES = path.join(PILOT, 'roles.json');      // /model pins: a role listed in `active` is pinned (see CHECKS.md)
 const RULES = path.join(PILOT, 'rules.json');
 const MODULES = path.join(PILOT, 'modules.json');
 const BUILT = ['index'];   // panes this build can show; the controller only evaluates their rules
@@ -59,8 +61,10 @@ function appendJsonl(file, obj) {
   return obj;
 }
 
-function appendLine(role, text, model) {
-  return serial(() => appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts: new Date().toISOString(), role, text, model: model || null }));
+function appendLine(role, text, model, kind) {
+  const line = { id: 'm-' + crypto.randomUUID().slice(0, 8), ts: new Date().toISOString(), role, text, model: model || null };
+  if (kind) line.kind = kind;   // optional on system lines: blocked | stall | error (the page colours them)
+  return serial(() => appendJsonl(TRANSCRIPT, line));
 }
 
 function metric(event, fields) {
@@ -156,18 +160,26 @@ function roleConfig(role) {
   return { ...rc, policy: rc.policy || 'manual', candidates: rc.candidates || [] };
 }
 
-function activeName(role) {
+// The pinned candidate for a role, or null. An explicit `/model <role> <name>` pins; `/model <role> auto` unpins.
+// A saved name that no longer exists in the config is ignored.
+function pinnedName(role) {
   const names = roleConfig(role).candidates.map((c) => c.name);
   let saved;
   try { saved = (readJson(ROLES, {}).active || {})[role]; } catch { saved = null; }
-  return names.includes(saved) ? saved : (names[0] || null);
+  return names.includes(saved) ? saved : null;
 }
 
-// Candidates in the order they are tried: manual = the active one only; fallback = active first, then the rest in config order.
+function activeName(role) {
+  return pinnedName(role) || (roleConfig(role).candidates[0] || {}).name || null;
+}
+
+// Candidates in the order they are tried: pinned or manual = the active one only;
+// fallback = first candidate, then the rest in config order.
 function attemptOrder(role) {
   const rc = roleConfig(role);
   const active = rc.candidates.find((c) => c.name === activeName(role));
   if (!active) return [];
+  if (pinnedName(role)) return [active];
   return rc.policy === 'fallback' ? [active, ...rc.candidates.filter((c) => c !== active)] : [active];
 }
 
@@ -175,13 +187,16 @@ function modelsSummary() {
   const out = {};
   for (const role of Object.keys(config.roles || {})) {
     const rc = roleConfig(role);
-    out[role] = { policy: rc.policy || 'manual', active: activeName(role), last: lastUsed[role] || null, candidates: rc.candidates.map((c) => c.name) };
+    out[role] = { policy: rc.policy || 'manual', active: activeName(role), pinned: !!pinnedName(role), last: lastUsed[role] || null,
+      candidates: rc.candidates.map((c) => c.name), local: rc.candidates.filter((c) => c.local === true).map((c) => c.name),
+      allowCloudFallback: rc.allowCloudFallback === true };
   }
   return out;
 }
 
 // One attempt against one candidate. Streams via onDelta; resolves with the full text.
-// timeoutMs covers the wait for the first delta (a long healthy reply is not cut off).
+// timeoutMs covers the wait for the first delta (a long healthy reply is not cut off);
+// stallMs covers each gap between deltas after the first one (an endpoint that hangs mid-reply is cut off).
 async function callCandidate(candidate, messages, onDelta, signal) {
   const headers = { 'content-type': 'application/json' };
   if (candidate.keyEnv) {
@@ -192,12 +207,19 @@ async function callCandidate(candidate, messages, onDelta, signal) {
   const ms = candidate.timeoutMs || 60000;
   const firstByte = new AbortController();
   const timer = setTimeout(() => firstByte.abort(new Error(`no reply within ${ms} ms`)), ms);
-  const started = () => clearTimeout(timer);
+  const stallMs = Number(candidate.stallMs) || STALL_MS;
+  const stall = new AbortController();
+  let stallTimer = null;
+  const started = () => {
+    clearTimeout(timer);
+    clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => { const e = new Error(`no new token for ${stallMs} ms`); e.stall = true; e.stallMs = stallMs; stall.abort(e); }, stallMs);
+  };
   try {
     const res = await fetch(candidate.baseUrl.replace(/\/$/, '') + '/chat/completions', {
       method: 'POST', headers,
       body: JSON.stringify({ model: candidate.model, messages, stream: true }),
-      signal: AbortSignal.any([firstByte.signal, signal]),
+      signal: AbortSignal.any([firstByte.signal, stall.signal, signal]),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
 
@@ -227,19 +249,29 @@ async function callCandidate(candidate, messages, onDelta, signal) {
     }
     return full;
   } catch (err) {
+    if (stall.signal.aborted && !signal.aborted) throw stall.signal.reason;
     if (firstByte.signal.aborted && !signal.aborted) throw firstByte.signal.reason;
     throw err;
-  } finally { clearTimeout(timer); }
+  } finally { clearTimeout(timer); clearTimeout(stallTimer); }
 }
 
-// Runs a role per its policy. Falls back only while nothing has streamed yet, so a reply never mixes two models.
-// Resolves {text, candidate}; on failure throws with err.partial / err.candidate set.
+// Runs a role per its policy. Falls back only while nothing has streamed yet, so a reply never mixes two models
+// (a stall after the first token therefore never falls back). A pinned role never falls back. After a local
+// candidate (`local: true`) failed, non-local candidates are skipped unless the role sets `allowCloudFallback: true`;
+// a missing `local` counts as non-local. Resolves {text, candidate}; on failure throws with err.partial / err.candidate.
 async function callRole(role, messages, onDelta, signal) {
   const order = attemptOrder(role);
+  const rc = roleConfig(role);
   if (!order.length) throw new Error(`no candidate configured for role "${role}"`);
-  let streamed = '', lastErr;
+  let streamed = '', lastErr, failedLocal = null;
   for (let i = 0; i < order.length; i++) {
     const c = order[i];
+    if (lastErr && failedLocal && c.local !== true && rc.allowCloudFallback !== true) {
+      await metric('fallback_blocked', { role, from: lastErr.candidate.name, to: c.name, reason: `${failedLocal.name} is local` });
+      await appendLine('system', `fallback to ${c.name} blocked: ${failedLocal.name} is local`, null, 'blocked');
+      continue;
+    }
+    if (lastErr) await metric('fallback', { role, from: lastErr.candidate.name, to: c.name, reason: lastErr.reason });
     const t0 = Date.now();
     try {
       const text = await callCandidate(c, messages, (d) => { streamed += d; onDelta(d); }, signal);
@@ -249,12 +281,14 @@ async function callRole(role, messages, onDelta, signal) {
     } catch (err) {
       const msg = String((err && err.message) || err);
       await metric('model_call', { role, candidate: c.name, model: c.model, ok: false, latencyMs: Date.now() - t0, error: msg });
+      if (err && err.stall) await metric('stall', { role, candidate: c.name, stallMs: err.stallMs, chars: streamed.length, latencyMs: Date.now() - t0 });
       lastErr = new Error(`${c.name}: ${msg}`);
-      lastErr.candidate = c; lastErr.partial = streamed;
-      if (streamed || signal.aborted || i === order.length - 1) break;
-      await metric('fallback', { role, from: c.name, to: order[i + 1].name, reason: msg });
+      lastErr.candidate = c; lastErr.partial = streamed; lastErr.reason = msg; lastErr.stall = !!(err && err.stall);
+      if (c.local === true) failedLocal = c;
+      if (streamed || signal.aborted) break;
     }
   }
+  if (lastErr && pinnedName(role) && rc.policy === 'fallback' && !streamed && !signal.aborted) lastErr.message += ` (${role} is pinned to ${lastErr.candidate.name}, no fallback; /model ${role} auto unpins)`;
   throw lastErr;
 }
 
@@ -305,8 +339,8 @@ async function handleChat(req, res) {
   } catch (err) {
     // Keep whatever arrived before the failure, then record the failure as a system line.
     if (err.partial) await appendLine('assistant', err.partial, err.candidate && err.candidate.name);
-    const msg = `chat failed: ${err.message || err}`;
-    await appendLine('system', msg, null);
+    const msg = err.stall ? `reply stalled: ${err.message}; kept the partial reply, no fallback` : `chat failed: ${err.message || err}`;
+    await appendLine('system', msg, null, err.stall ? 'stall' : 'error');
     console.error(msg);
     if (!res.writableEnded) res.write(`\n[${msg}]`);
   }
@@ -317,23 +351,40 @@ async function handleChat(req, res) {
 // ---- commands: never sent to a model, never counted as messages ----
 const HELP = [
   '/model                     show roles, policies and candidates',
-  '/model <role> <candidate>  switch the model for a role (kept across restarts)',
+  '/model <role> <candidate>  pin a role to a candidate: no fallback (kept across restarts)',
+  '/model <role> auto         unpin: back to the role policy, starting at the first candidate',
   '/rules                     rules from .pilot/rules.json with current counts',
   '/panes                     panes and your answers',
+  '/theme light|dark|auto     colour theme of this page (kept in this browser only)',
   '/help                      this list',
 ];
 
 async function runCommand(input) {
   const [cmd, ...args] = input.trim().split(/\s+/);
   if (cmd === '/help') return { ok: true, lines: HELP };
+  if (cmd === '/theme') return { ok: true, lines: ['/theme is handled in the page (it changes only this browser)'] };
   if (cmd === '/model') {
     const summary = modelsSummary();
     if (!args.length) {
       return { ok: true, lines: Object.entries(summary).map(([role, m]) =>
-        `${role}: ${m.active || 'none'} (${m.policy})  candidates: ${m.candidates.join(', ') || 'none'}`) };
+        `${role}: ${m.active || 'none'} (${m.pinned ? 'pinned' : m.policy})  candidates: ${m.candidates.map((n) => m.local.includes(n) ? `${n} [local]` : n).join(', ') || 'none'}`) };
     }
     const [role, name] = args;
     if (!summary[role]) return { ok: false, lines: [`unknown role "${role}". Roles: ${Object.keys(summary).join(', ')}`] };
+    if (name === 'auto') {
+      await serial(() => {
+        const saved = readJson(ROLES, { rev: 0, active: {} });
+        saved.rev = (saved.rev || 0) + 1;
+        saved.active = { ...saved.active };
+        delete saved.active[role];
+        atomicWrite(ROLES, JSON.stringify(saved, null, 2) + '\n');
+      });
+      delete lastUsed[role];
+      const first = activeName(role);
+      await appendLine('system', `model for ${role} unpinned: ${summary[role].policy} policy, starting at ${first || 'none'}`, null);
+      await metric('model_unpin', { role, candidate: first });
+      return { ok: true, lines: [`${role} follows its ${summary[role].policy} policy again, starting at ${first || 'none'}`] };
+    }
     if (!summary[role].candidates.includes(name)) return { ok: false, lines: [`unknown candidate "${name}" for ${role}. Candidates: ${summary[role].candidates.join(', ') || 'none'}`] };
     await serial(() => {
       const saved = readJson(ROLES, { rev: 0, active: {} });
@@ -342,9 +393,9 @@ async function runCommand(input) {
       atomicWrite(ROLES, JSON.stringify(saved, null, 2) + '\n');
     });
     delete lastUsed[role];
-    await appendLine('system', `model for ${role} switched to ${name}`, null);
-    await metric('model_switch', { role, candidate: name });
-    return { ok: true, lines: [`${role} now uses ${name} (${summary[role].policy})`] };
+    await appendLine('system', `model for ${role} switched to ${name} (pinned)`, null);
+    await metric('model_switch', { role, candidate: name, pinned: true });
+    return { ok: true, lines: [`${role} now uses ${name} (pinned: no fallback until /model ${role} auto)`] };
   }
   if (cmd === '/rules') {
     let rules;

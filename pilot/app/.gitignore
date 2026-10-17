@@ -1,2 +1,5 @@
 .pilot/
+.pilot-demo/
+.pilot-demo-*/
+.pilot-verify-*/
 node_modules/

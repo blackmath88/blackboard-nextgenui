@@ -1,0 +1,19 @@
+{
+  "fakes": [
+    {
+      "name": "frontier",
+      "port": 5751
+    },
+    {
+      "name": "morrow",
+      "port": 5752,
+      "toggleKey": "m"
+    }
+  ],
+  "try": [
+    "The status bar shows chat: morrow (pinned) and the index question is pending.",
+    "Type \"ok, now\" in the input: n, a, y stay text because the input is not empty. Clear it and press y to answer.",
+    "Type m + Enter HERE (this terminal) to stop the morrow fake, then send a message: pinned, so no fallback.",
+    "Then /model chat auto and send again: \"fallback to frontier blocked: morrow is local\". m + Enter brings morrow back."
+  ]
+}

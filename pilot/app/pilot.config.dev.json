@@ -1,12 +1,14 @@
 {
   "port": 4747,
   "pilotDir": ".pilot",
+  "stallMs": 20000,
   "roles": {
     "chat": {
       "policy": "fallback",
+      "allowCloudFallback": false,
       "candidates": [
-        { "name": "frontier", "baseUrl": "http://127.0.0.1:5701/v1", "model": "fake-frontier", "timeoutMs": 10000 },
-        { "name": "morrow", "baseUrl": "http://127.0.0.1:5702/v1", "model": "fake-morrow", "timeoutMs": 10000 }
+        { "name": "frontier", "local": false, "baseUrl": "http://127.0.0.1:5701/v1", "model": "fake-frontier", "timeoutMs": 10000 },
+        { "name": "morrow", "local": true, "baseUrl": "http://127.0.0.1:5702/v1", "model": "fake-morrow", "timeoutMs": 10000 }
       ]
     },
     "extract": {
@@ -14,7 +16,7 @@
       "everyNTurns": 1,
       "maxItems": 3,
       "candidates": [
-        { "name": "morrow", "baseUrl": "http://127.0.0.1:5702/v1", "model": "fake-morrow", "structured": true, "timeoutMs": 10000 }
+        { "name": "morrow", "local": true, "baseUrl": "http://127.0.0.1:5702/v1", "model": "fake-morrow", "structured": true, "timeoutMs": 10000 }
       ]
     },
     "title": {
@@ -24,6 +26,7 @@
   },
   "_notes": [
     "DEV ONLY. Both candidates point at dev/fake-model.js on localhost. Start with PILOT_CONFIG=pilot.config.dev.json.",
-    "No keyEnv: the fakes need no key and no real endpoint is ever contacted."
+    "No keyEnv: the fakes need no key and no real endpoint is ever contacted.",
+    "local flags as in pilot.config.json: frontier false, morrow true."
   ]
 }

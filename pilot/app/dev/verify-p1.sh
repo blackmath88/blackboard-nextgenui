@@ -39,7 +39,8 @@ check "commands are not sent or stored as user lines" "$(grep -c '"role":"user",
 
 echo "== restart: /model choice persists"; stop_server; server pilot.config.dev.json
 check "after restart chat active=morrow" "$(curl -s localhost:4747/state | q 'x.models.chat.active==="morrow"')"
-cmd "/model chat frontier" > /dev/null
+# ADAPTED in pilot-v0.3: was "/model chat frontier", which now pins frontier (no fallback). auto restores the policy.
+cmd "/model chat auto" > /dev/null
 
 echo "== fallback: frontier stopped"; kill $FAKE_5701; wait $FAKE_5701 2>/dev/null
 M=$(mcount); chat "frontier is down" > /dev/null

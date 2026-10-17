@@ -1,0 +1,12 @@
+{"id":"m-demo001","ts":"2026-10-17T09:00:47.000Z","role":"user","text":"Let us plan the week for the pilot: dogfood it on one real topic.","model":null}
+{"id":"m-demo002","ts":"2026-10-17T09:01:34.000Z","role":"assistant","text":"[fixture] Good. Pick a topic you would otherwise keep in a notebook, so the panes have something to grow on.","model":"frontier"}
+{"id":"m-demo003","ts":"2026-10-17T09:02:21.000Z","role":"user","text":"The topic is my health insurance claim. That stays local from now on.","model":null}
+{"id":"m-demo004","ts":"2026-10-17T09:03:08.000Z","role":"assistant","text":"[fixture] Understood. Run /model chat morrow: it pins chat to the local model.","model":"frontier"}
+{"id":"m-demo005","ts":"2026-10-17T09:03:55.000Z","role":"system","text":"model for chat switched to morrow (pinned)","model":null}
+{"id":"m-demo006","ts":"2026-10-17T09:04:42.000Z","role":"user","text":"Which documents do I collect first?","model":null}
+{"id":"m-demo007","ts":"2026-10-17T09:05:29.000Z","role":"assistant","text":"[fixture] The invoice, the referral letter and the policy page that lists what is covered.","model":"morrow"}
+{"id":"m-demo008","ts":"2026-10-17T09:06:16.000Z","role":"user","text":"If morrow is down, does any of this go to the cloud?","model":null}
+{"id":"m-demo009","ts":"2026-10-17T09:07:03.000Z","role":"assistant","text":"[fixture] No. chat is pinned to morrow, so a failure stays a failure. Even unpinned, a local candidate never falls back to a cloud one unless the role allows it.","model":"morrow"}
+{"id":"m-demo010","ts":"2026-10-17T09:07:50.000Z","role":"user","text":"Good. Then list the three steps for this week.","model":null}
+{"id":"m-demo011","ts":"2026-10-17T09:08:37.000Z","role":"assistant","text":"[fixture] 1. Collect the documents. 2. Draft the claim letter. 3. Send it on Friday.","model":"morrow"}
+{"id":"m-demo012","ts":"2026-10-17T09:09:24.000Z","role":"controller","text":"10 messages. Scrolling back gets slow. Add an index pane?","model":null,"module":"index"}
