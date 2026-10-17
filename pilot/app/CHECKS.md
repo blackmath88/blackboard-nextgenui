@@ -315,3 +315,15 @@ the positive path was run with `TRY_REF=<commit>` (no tags exist yet; the coordi
 4. `scripts/try.sh` accepts `TRY_REF=<commit>` to test it before tags exist.
 5. `scripts/demo.js` honours `DEMO_PORT_SHIFT` and `PILOT_DEMO_DIR` (used by `verify-v0.3.sh`).
 6. `pilot/app/.gitignore` ignores `.pilot-demo*/` and `.pilot-verify-*/` (the root `.gitignore` is out of scope).
+
+## pilot-v0.3: coordinator re-run (2026-10-17)
+
+Run by the coordinator, not the builder:
+- Scope: diff vs main touches only `pilot/app/**` and the new "Pilot iterations" section of `index.html`.
+- `npm run verify`: exit 0, all scripts passed (p0, p1, p2, v0.3, browser p1+p2+v03).
+- `npm run demo -- v0.3`: `/state` answered 200 after 0.3 s; the page shows `chat: morrow (pinned)` and the pending index question. No orphan processes after stopping it.
+- Consent rule in the browser: typing "ok, any news" with the question pending kept the text in the input; `pending` stayed `index`.
+- Pin: with morrow down and chat pinned, the reply is "chat failed … pinned to morrow, no fallback". After `/model chat auto`: `fallback_blocked {from: morrow, to: frontier, reason: "morrow is local"}` in metrics and a `blocked` system line.
+- Stall: fake with `--stall-after=3`, `stallMs` 1500: reply cut at 1.69 s, partial text kept, `stall` metric logged, no fallback.
+- `dev/contrast-check.js`: all pass; light mode uses `--muted #5a5873` because `#9a97b0` on `#f4f5fa` is 2.60:1. Dark and light screenshots checked: pastels are fills/borders only in light mode; `pixel.js` and `app.js` contain no hard-coded hex colours.
+- Not tested by the coordinator: the `m` + Enter morrow toggle (it needs a real TTY); the same behaviour was tested by stopping the fake directly.
