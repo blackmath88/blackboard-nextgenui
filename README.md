@@ -18,6 +18,7 @@ explainers/
   04-growing-workbench/          grow panes by consent (English)
 pilot/
   cli-pilot-v1/                  concept and build plan for the first real build
+  app/                           the build in progress (local Node server, P0–P2)
 notes/
   summaries/
     generative-ui-shared-state-summary.json   the conversation's session summary
@@ -25,7 +26,7 @@ notes/
 
 Each explainer keeps its own `README.md` with its acts, structure and sources. The explainers and the plan are kept as they were delivered. The only change to the explainers is a small "← Overview" link at the top of each page.
 
-The pilot build itself lives in `pilot/app/` on its own branch and is in progress.
+The pilot build lives in `pilot/app/` and is in progress (steps P0–P2 done, P3–P4 next). See `pilot/app/README.md` for how to run it.
 
 ## How to open
 
