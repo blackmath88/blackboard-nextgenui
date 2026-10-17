@@ -605,3 +605,69 @@ Run by the coordinator, not the builder.
 - Authorship in the browser: every chat line is labelled (you / model + candidate / controller / system), every card shows author, model and who decided it, and every pane bar shows its rule and answer.
 - Hand edit of dec-2's text → `/state` gives `prov.fields: ["text"]`; the card reads "edited by you (file edit): text".
 - Seen, planned for v0.7: at 800 px the 4-pane layout is cramped (the "controller" label breaks mid-word, kanban columns about 6 characters wide).
+
+# pilot-v0.7
+
+`/why` and the layout fix. Everything runs against `dev/fake-model.js`; no real endpoint was contacted.
+
+**Reproduce:** `bash pilot/app/dev/verify-v0.7.sh`. It has 34 checks; one of them runs the 22 checks of
+`browser-check.js v07` (20 + 2 global). It ends with `ALL v0.7 CHECKS PASSED` and exits non-zero on failure.
+- Own ports: server 4800, fakes 5801/5802; browser part 4805/5806/5807 and Chrome 9383; demo part 4968/5968/5969.
+- Own throwaway dirs: `.pilot-verify-v07/`, `.pilot-verify-v07c/`, `.pilot-verify-v07b/`, `.pilot-demo-verify07/`.
+- Screenshots of the layout check: `SHOT=<dir> node dev/browser-check.js v07` writes `v07-<width>.png`.
+
+**Everything:** `cd pilot/app && npm run verify` (p0, p1, p2, v0.3–v0.7, browser p1 + p2; the v03–v07 browser checks
+run inside their verify scripts).
+Last run (Node v25.9.0, Chrome, macOS): all passed, no earlier assertion adapted. `npm run demo -- v0.3` to `-- v0.7`
+each served `/state` within about 1–2 s, and SIGINT left no process behind.
+
+## Citation format
+
+| Source | Cited as | Resolved by `dev/why-cites.js` as |
+|---|---|---|
+| a `metrics.jsonl` event | `metrics.jsonl:60 controller_ask`, `metrics.jsonl:65 consent c-f03`, `metrics.jsonl:18 decide dec-2` | physical line 60 parses as JSON, `event` is the first word, `id`/`itemId` the second |
+| a transcript line | `transcript.jsonl:5 m-f005` | line 5 has `id` m-f005 |
+| a JSON entry | `state.json:18 items dec-2`, `modules.json:14 panes index`, `modules.json:39 answers.index`, `rules.json:9 rules map` | line 18 holds `"id": "dec-2"` (`"module": "index"`, `"index":`, …) |
+| an absence or a count | `modules.json answers.kanban (absent)`, `metrics.jsonl (no consent c-hand)`, `metrics.jsonl decide ×10` | no line number, the reason in the label |
+
+## Checks
+
+| # | Check | How (section of `verify-v0.7.sh`) |
+|---|---|---|
+| 1 | v0.7 fixture: `/why` has one line per pane with rule, count when asked, your answer and the add, exact text and sources for index; the item summary. `/why map` question (count, threshold, text, transcript line), answer, add. `/why index` full history (12 → no, 24 → yes). `/why dec-2`: proposed by morrow, from your message m-f003 (the item's `fromMessage`, not the extract event's m-f004), quote found, confirmed by you with its `decide` line. `/why dec-8` "set by you (file edit), when is not recorded". `/why task-7` "added by you (file edit) at 2026-10-16T18:30:04" citing `metrics.jsonl:131 file_edit task-7`. `/why task-1` column: server "todo", file "done". `/why chat`. Unknown name → 400 listing panes and items. | 1 |
+| 2 | **Every cited source resolves** (`dev/why-cites.js`): `/why`, the four panes and all 17 items; also `lines` equals the formatted `why` statements, every statement cites something, every link names a message in the transcript. | 1, 2, 3 |
+| 3 | **Read-only:** every file byte-identical after 31 explanations (fixture) and after 8 more on live data; no file added. | 1, 3 |
+| 4 | Live data (fresh dir, real turns through the fakes, consent through `/answer`, a confirm): `/why` from the real lines; `/why dec-1` from the real user message, confirmed through the page. | 2 |
+| 5 | Missing or hand-made facts, made while the server runs: a text edit → "text edited by you (file edit) at <ts>" citing its `file_edit`; a hand-added item → "added by you (file edit) at <ts>"; a model item without ledger → "the server never wrote it"; a `fromMessage` not in the transcript → said; a pane entry without an answer → not in `/state.panes`, `/why` "no recorded answer" and "no controller_add event: added by file edit, when is not recorded"; a hand-written yes → shown, "written by file edit, when is not recorded"; a `rules.json` threshold changed later → recorded rule plus "rules.json says messages ≥ 5 now"; broken `state.json` → `/why dec-1` 400 naming the error, `/why` says items cannot be explained, server alive; broken `modules.json` → "cannot explain". `/help` lists `/why`. | 3 |
+| 6 | **Page** (`browser-check.js v07`, v0.7 fixture): typed `/why` renders heading, 6 statements, hint; every statement's sources match `[file:line …]`; `/why map` lines with sources; "show m-f005" scrolls the message into view and flashes it, and logs no `index_jump`; `/why dec-2` text and its "show m-f003"; dec-8 and task-7 missing/recorded facts; "why?" on the kanban bar shows exactly the lines of typed `/why kanban`; every pane bar and card has a "why?" button outside the byline; Tab from the input reaches the index "why?" (18 tabs), Enter shows `/why index`; `c` on the focused "why?" of proposal dec-7 does not confirm it. | 4 |
+| 7 | **Layout** at 800, 1280 and 1600 px, plus 820 and 1000 (where side panes are narrowest), with a controller question made long enough to wrap: no horizontal page scroll; no label (who, controller, chips, times, tags, headings, pane titles, why?, keys) has its text on more than one line; no label sticks out of its pane; the kanban is stacked exactly when its body is under 420 px, otherwise every column is at least 134 px. Measured: 800 → 712 px, 3 columns; 820 → 259 px, stacked; 1000 → 328 px, stacked; 1280/1600 → 436 px, 3 × 140 px. Without the v0.7 CSS the same check fails at every width ("controller" on two lines; at 820 columns of 81 px and chips overflowing). | 4 |
+| 8 | Contrast passes, including "why? button on pane bar", the card/source pair and the `/why` statement pair (both themes). | 4 |
+| 9 | **Demo:** `npm run demo -- v0.7` serves `/state` within about 1 s with map, index and kanban, each with rule and recorded answer; `/why dec-2` answers from the demo's files; the try lines name `/why`, `/why map`, `/why dec-2` and the why? click; Ctrl+C leaves no process. | 5 |
+| 10 | Old checks still passing: p0, p1, p2, v0.3–v0.6, browser p1/p2/v03/v04/v05/v06. | `npm run verify` |
+
+## Decisions
+
+- **`why.js` beside `stats.js`.** Pure: it reads the dir and returns statements. The server adds nothing but the label.
+  So the page, curl and the checks see the same facts, and the "why?" button runs the same command as typing it.
+- **Citations are line numbers as the files are now.** JSONL lines never move (append-only, or a hand edit the person
+  made). JSON entries are found by their key line. Line numbers are physical, so a blank or broken line still counts.
+- **Recorded vs declared.** A time is "recorded" only when an event says it: `consent`, `controller_add`, `decide`,
+  `file_edit`, `item_write`. A `createdAt` or `addedAt` someone wrote into a file is quoted as "the file says …". A
+  missing event is reported, not inferred. "The server was not running" is not said, because the files cannot show it.
+- **The item's message is its `fromMessage`.** The `extract` event names the reply that triggered extraction, but the
+  quote may come from the user line before it (dec-2 is from m-f003, a user line; its extract event names m-f004).
+- **The question line** is the controller transcript line with the same module and timestamp as the `controller_ask`
+  event. The server writes both with one `ts`.
+- **Kanban threshold 420 px** of body width, about 134 px per column. At 1280 px the three columns stay (436 px);
+  narrower layouts stack. Measured instead of a viewport breakpoint, because pane width depends on how many panes
+  there are.
+
+## Deviations
+
+1. The brief asks for checks at 800 px with 3–4 panes. At exactly 800 px the existing `@media (max-width: 800px)`
+   already stacks the panes full width, so nothing was cramped there. The cramped layout appears just above 800 (the
+   coordinator's "800 px" window was probably a little wider than its viewport). The check therefore covers 800, 1280
+   and 1600 as asked, plus 820 and 1000. ITERATIONS.md has the note.
+2. The "show m-…" link reuses the index's scroll-and-flash but not its `index_jump` metric (see Decisions in v0.6:
+   Usefulness counts index use only).
+3. `/why` prints recorded ISO times verbatim. Cards and pane bars stay local time.

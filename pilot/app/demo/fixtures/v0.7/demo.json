@@ -1,0 +1,12 @@
+{
+  "fakes": [
+    { "name": "frontier", "port": 5768 },
+    { "name": "morrow", "port": 5769 }
+  ],
+  "try": [
+    "Open {url} and type /why: one line per pane (rule, the question, your answer) and a summary of the items, each statement with its source in brackets (file:line). Three days of history are synthetic fixture data.",
+    "Type /why map (every question, answer and add, with the question line) and /why dec-2 (proposed by morrow, from your message m-f003, the quote, confirmed by you). Click \"show m-f003\" to scroll to that message.",
+    "Click \"why?\" on a pane bar or a card (or Tab to it and press Enter): the same explanation. /why dec-8 says plainly what was not recorded (\"set by you (file edit), when is not recorded\"); /why task-7 shows a hand edit that was (\"added by you (file edit) at …\").",
+    "Make the window narrow (about 820 px): labels stay whole and the kanban stacks its three columns when its body is narrower than 420 px."
+  ]
+}

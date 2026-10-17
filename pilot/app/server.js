@@ -7,6 +7,7 @@
 // watches .pilot/ (fs.watch, 150 ms debounce) and pushes {file, rev} to the page over SSE (GET /events).
 // pilot-v0.6: authorship (item_write ledger in metrics.jsonl, hand edits shown as "you (file edit)"), the P5 metrics
 // events (server_start, turn, controller_add with answerRef, index_jump via POST /metric) and /stats (stats.js).
+// pilot-v0.7: /why explains the current panes and items from the files only, every statement with its source (why.js).
 // Node 20+, no dependencies. All paths resolve against this file's folder.
 'use strict';
 const http = require('http');
@@ -14,6 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const stats = require('./stats.js');
+const why = require('./why.js');
 
 const APP = __dirname;
 const PUBLIC = path.join(APP, 'public');
@@ -751,6 +753,7 @@ const HELP = [
   '/rules                     rules from .pilot/rules.json with current counts',
   '/panes                     panes and your answers',
   '/stats                     the five P5 measures (04-build-plan.md) from metrics.jsonl and the files, PASS / NOT YET',
+  '/why [pane|item id]        why the workbench looks like this: rules, questions, answers, origins, with sources',
   '/theme light|dark|auto     colour theme of this page (kept in this browser only)',
   '/help                      this list',
 ];
@@ -805,6 +808,11 @@ async function runCommand(input) {
         : ans ? `answered ${ans.answer} at ${ans.count}` : BUILT.includes(r.module) ? 'not asked yet' : 'not built yet';
       return `${r.module}: ${r.metric} ${c[r.metric]} / ${r.threshold}  (${state})`;
     }) };
+  }
+  // pilot-v0.7: read-only; `why` carries the statements with their sources and message ids for the page's links
+  if (cmd === '/why') {
+    const r = why.explain(PILOT, args.join(' '), `${path.relative(APP, PILOT)}/`);
+    return { ok: r.ok, lines: why.format(r.statements), why: r.statements };
   }
   if (cmd === '/stats') return { ok: true, lines: stats.formatStats(stats.computeStats(PILOT), `${path.relative(APP, PILOT)}/`) };
   if (cmd === '/panes') {

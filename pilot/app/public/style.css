@@ -181,3 +181,30 @@ body { margin: 0; background: var(--base); color: var(--text); font: 400 15px/1.
 .ln.out.stat { color: var(--text); border-left: 2px solid var(--line); padding-left: 10px; }
 .ln.out.stat.pass { border-left-color: var(--mint); }
 .ln.out.stat.notyet { border-left-color: var(--rose); }
+
+/* pilot-v0.7: labels never break mid-word. `.ln` allows overflow-wrap: anywhere for long model text, which also let a
+   flex item like the controller label shrink to one letter per line ("contr/oller"). Labels and chips are kept whole:
+   no wrapping inside them, and they do not shrink; the text next to them wraps instead. */
+.ln .who, .ln .model, .ln.controller .who .role, .by, .when, .item .tag, .sub, .pane .bar > span, .why, .key, .go {
+  white-space: nowrap; overflow-wrap: normal; flex: none;
+}
+/* pilot-v0.7: the kanban stacks its three columns when its pane is narrow. Threshold: a kanban body (content box)
+   narrower than 420 px, i.e. columns narrower than about 134 px (about 17 characters of card text). At 1280 px and
+   wider the kanban body is 436 px, so the three columns stay side by side; between 801 and roughly 1200 px they
+   stack. A container query, because the pane's width depends on the layout, not only on the window. */
+.side.kanban .body { container: kanban / inline-size; }
+@container kanban (max-width: 419.98px) {
+  .cols { grid-template-columns: minmax(0, 1fr); }
+  .cols .col + .col { border-top: 1px solid var(--line); padding-top: 4px; }
+  .cols .item .key .w { display: inline; }
+}
+/* pilot-v0.7: "why?" on pane bars and cards; /why output lines with their sources. */
+.why { background: transparent; border: 0; padding: 0 2px; color: var(--muted); font: 400 12px var(--mono); cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); }
+.why:hover { color: var(--text); text-decoration-color: var(--lavender); }
+.item > .why { float: right; margin-left: 6px; }
+.ln.out.why-head { color: var(--text); margin-top: 6px; }
+.ln.out.why-fact { color: var(--text); padding-left: 12px; border-left: 2px solid var(--line); margin-bottom: 4px; }
+.ln.out.why-fact.err { border-left-color: var(--rose); }
+.ln .cite { color: var(--muted); font-size: 11.5px; }
+.go { background: transparent; border: 1px solid var(--line); color: var(--text); font: 400 11.5px var(--mono); padding: 0 6px; cursor: pointer; }
+.go:hover { border-color: var(--sky); }

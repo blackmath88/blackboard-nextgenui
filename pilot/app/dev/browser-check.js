@@ -6,9 +6,10 @@
 // dir .pilot-verify-v04b/. v05 (pilot-v0.5 live files, c/r only on a focused card): ports 4785/5786/5787,
 // Chrome 9363, dir .pilot-verify-v05b/; opens a second tab. v06 (pilot-v0.6 authorship, metrics, /stats): ports
 // 4795/5796/5797, Chrome 9373, dir .pilot-verify-v06b/ seeded from demo/fixtures/v0.6/ (SHOT=<file.png> saves a
-// screenshot).
+// screenshot). v07 (pilot-v0.7 /why and the layout fix): ports 4805/5806/5807, Chrome 9383, dir .pilot-verify-v07b/
+// seeded from demo/fixtures/v0.7/ (SHOT=<dir> saves one screenshot per tested width).
 // Needs Node 22+ (global WebSocket) and Google Chrome. No dependencies.
-// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
+// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|v07|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
 'use strict';
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -561,7 +562,114 @@ async function v06(page) {
   }
 }
 
-const SCENARIOS = { p1, p2, v03, v04, v05, v06 };
+async function v07(page) {
+  const file = (f) => path.join(APP, ENV.dir, f);
+  await stop('server');   // reseed from the v0.7 fixture before the server starts
+  const fix = path.join(APP, 'demo', 'fixtures', 'v0.7');
+  for (const f of fs.readdirSync(fix)) if (!['demo.json', 'pilot.config.json'].includes(f)) fs.copyFileSync(path.join(fix, f), file(f));
+  await startServer();
+  await page.send('Emulation.setTimezoneOverride', { timezoneId: 'UTC' });
+  const waitFor = async (expr, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await page.eval(expr)) return Date.now() - t0; await sleep(15); } return null; };
+  const events = () => fs.readFileSync(file('metrics.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  // the /why lines after the last command echo: [{head, text, cite, go}]
+  const whyOut = `(() => { const all = [...document.querySelectorAll('.ln.out')]; const i = all.map((l) => l.classList.contains('cmd')).lastIndexOf(true);
+    return { cmd: all[i] ? all[i].textContent : null, lines: all.slice(i + 1).filter((l) => l.classList.contains('why-line')).map((l) => ({ head: l.classList.contains('why-head'),
+      text: l.querySelector('.text').textContent, cite: (l.querySelector('.cite') || {}).textContent || null, go: (l.querySelector('.go') || {}).textContent || null })) }; })()`;
+  await page.goto(URL);
+  await waitFor(`document.getElementById('meta').textContent.includes('live')`);
+
+  // /why typed: compact, one line per pane, every statement with its sources
+  await page.submit('/why', 800);
+  let w = await page.eval(whyOut);
+  const facts = w.lines.filter((l) => !l.head);
+  check('/why: heading, a panes line, one line per pane (index, map, kanban), two item lines, a details hint', w.cmd === '/why' && w.lines[0].head
+    && facts.length === 6 && ['index:', 'map:', 'kanban:'].every((p) => facts.some((f) => f.text.startsWith(p))) && w.lines[w.lines.length - 1].head, JSON.stringify(w.lines.map((l) => l.text.slice(0, 30))));
+  check('/why: every statement cites its sources as [file:line …]', facts.every((f) => /^\[(\S+\.jsonl?(:\d+)? [^;\]]+)(; \S+\.jsonl?(:\d+)? [^;\]]+)*\]$/.test(f.cite || '')), facts.map((f) => f.cite).join(' | '));
+  check('/why map line: rule decisions ≥ 2, asked at 2 decisions, you said yes, added by the controller', facts.some((f) => /^map: decisions ≥ 2; asked at 2 decisions \(.*\); you said yes \(.*\); added by the controller/.test(f.text)));
+
+  // /why map: the question line is a link that scrolls to it, without counting as an index jump
+  await page.submit('/why map', 800);
+  w = await page.eval(whyOut);
+  check('/why map: the question, the answer and the add, each cited', w.lines.some((l) => /the controller asked at .*"2 decisions so far\. Add a reasoning map\?"/.test(l.text) && /metrics\.jsonl:\d+ controller_ask; transcript\.jsonl:\d+ m-f005/.test(l.cite))
+    && w.lines.some((l) => /you answered "yes"/.test(l.text) && /consent c-f01/.test(l.cite)) && w.lines.some((l) => /the controller added the pane/.test(l.text) && /controller_add/.test(l.cite)), JSON.stringify(w.lines.map((l) => l.text)));
+  const jumps0 = events().filter((e) => e.event === 'index_jump').length;
+  await page.eval(`[...document.querySelectorAll('.ln.why-fact .go')].filter((b) => b.textContent === 'show m-f005').pop().click()`);
+  check('"show m-f005" scrolls to that message and flashes it', (await waitFor(`document.getElementById('msg-m-f005').classList.contains('flash')
+    && (() => { const r = document.getElementById('msg-m-f005').getBoundingClientRect(), l = document.getElementById('log').getBoundingClientRect(); return r.top >= l.top && r.bottom <= l.bottom; })()`)) !== null);
+  await sleep(300);
+  check('the "show" link is not logged as an index jump (Usefulness stays honest)', events().filter((e) => e.event === 'index_jump').length === jumps0);
+
+  // /why dec-2: origin, message, quote, decision
+  await page.submit('/why dec-2', 800);
+  w = await page.eval(whyOut);
+  const t = w.lines.map((l) => l.text).join('\n');
+  check('/why dec-2: proposed by model morrow, from your message m-f003, the quote is in it, confirmed by you', /proposed by model morrow at 2026-10-14T09:05:44/.test(t) && /from message m-f003 by you/.test(t)
+    && /quote "Decision: the claim stays on local models only\." is in that message/.test(t) && /confirmed by you at 2026-10-14T09:06:32/.test(t), t);
+  check('/why dec-2: a "show m-f003" link', w.lines.some((l) => l.go === 'show m-f003'));
+  await page.submit('/why dec-8', 800);
+  check('/why dec-8: the missing fact is said plainly ("set by you (file edit), when is not recorded")', (await page.eval(whyOut)).lines.some((l) => /status "confirmed" set by you \(file edit\), when is not recorded/.test(l.text)));
+  await page.submit('/why task-7', 800);
+  check('/why task-7: "added by you (file edit) at 2026-10-16T18:30:04" with the file_edit line cited', (await page.eval(whyOut)).lines.some((l) => /^added by you \(file edit\) at 2026-10-16T18:30:04/.test(l.text) && /metrics\.jsonl:\d+ file_edit task-7/.test(l.cite)));
+
+  // the "why?" affordance: the same explanation as the typed command
+  await page.submit('/why kanban', 800);
+  const typed = (await page.eval(whyOut)).lines;
+  await page.eval(`document.querySelector('#pane-kanban .bar .why').click()`); await sleep(800);
+  w = await page.eval(whyOut);
+  check('"why?" on the kanban pane bar shows the same lines as /why kanban', w.cmd === '/why kanban' && JSON.stringify(w.lines) === JSON.stringify(typed), `${w.cmd}, ${w.lines.length} vs ${typed.length} lines`);
+  check('every pane bar and every card has a "why?" button (a real button, outside the byline)', await page.eval(`[...document.querySelectorAll('.side')].every((p) => p.querySelector('.bar > button.why'))
+    && [...document.querySelectorAll('.item')].every((c) => c.querySelector(':scope > button.why') && !c.querySelector('.meta .why'))`));
+  // keyboard: Tab from the input reaches a "why?" button; Enter presses it
+  await page.eval(`document.getElementById('input').focus()`);
+  let tabs = 0;
+  while (tabs < 40 && !(await page.eval(`document.activeElement.classList.contains('why') && document.activeElement.dataset.why === 'index'`))) { await page.key('Tab'); tabs++; }
+  check('Tab reaches the "why?" of the index pane', tabs < 40, `${tabs} tabs`);
+  await page.key('Enter'); await sleep(800);
+  check('Enter on it shows /why index', (await page.eval(whyOut)).cmd === '/why index');
+  // c/r on a focused "why?" inside a proposal never decides it
+  await page.eval(`document.querySelector('.item[data-id="dec-7"] > .why').focus()`);
+  await page.key('c'); await sleep(400);
+  check('"c" on the focused "why?" of proposal dec-7 does not confirm it', JSON.parse(fs.readFileSync(file('state.json'), 'utf8')).items.find((i) => i.id === 'dec-7').status === 'proposed');
+
+  // layout: 800, 1280 and 1600 px wide (plus 820 and 1000, where the side panes are narrowest)
+  const labels = '.ln .who:not(:empty), .ln.controller .who .role, .by, .when, .item .tag, .sub, .pane .bar > span, .why, .key';
+  const measure = `(() => {
+    const brk = []; const over = [];
+    for (const el of document.querySelectorAll(${JSON.stringify(labels)})) {
+      if (!el.offsetParent) continue;
+      // text only (a label may hold a pixel sprite): all its text boxes on one line
+      const tops = new Set(); const tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let n = tw.nextNode(); n; n = tw.nextNode()) { if (!n.textContent.trim()) continue; const r = document.createRange(); r.selectNodeContents(n);
+        for (const x of r.getClientRects()) if (x.width > 0 && x.height > 0) tops.add(Math.round(x.top / 4)); }
+      if (tops.size > 1) brk.push(el.textContent.trim());
+      const pane = el.closest('.pane'); const b = el.getBoundingClientRect(); const p = pane && pane.getBoundingClientRect();
+      if (p && b.width && b.right > p.right + 1) over.push(el.textContent.trim());
+    }
+    const body = document.querySelector('#pane-kanban .body'); const cs = getComputedStyle(body);
+    const content = body.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const cols = [...document.querySelectorAll('#pane-kanban .col')].map((c) => Math.round(c.getBoundingClientRect().width));
+    const stacked = new Set([...document.querySelectorAll('#pane-kanban .col')].map((c) => Math.round(c.getBoundingClientRect().left))).size === 1;
+    return { hscroll: document.documentElement.scrollWidth > window.innerWidth, brk, over, content: Math.round(content), cols, stacked };
+  })()`;
+  // a controller line with a long question, so the label sits next to wrapping text (the v0.6 "contr/oller" case)
+  await page.eval(`(() => { const l = document.querySelector('.ln.controller .text'); if (l) l.firstChild.textContent = l.firstChild.textContent + ' ' + 'and a much longer question that has to wrap over several lines in a narrow chat pane'.repeat(2); })()`);
+  for (const width of [800, 820, 1000, 1280, 1600]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false });
+    await sleep(400);
+    const m = await page.eval(measure);
+    const kanbanOk = m.stacked ? m.content < 420 : m.content >= 420 && m.cols.every((c) => c >= 134);
+    check(`${width} px: no horizontal page scroll; no label breaks or overflows its pane; kanban ${m.stacked ? 'stacked' : `3 columns ${m.cols.join('/')} px`} at ${m.content} px (threshold 420)`,
+      !m.hscroll && !m.brk.length && !m.over.length && kanbanOk, JSON.stringify({ brk: m.brk.slice(0, 5), over: m.over.slice(0, 5), hscroll: m.hscroll }));
+    if (process.env.SHOT) {
+      fs.mkdirSync(process.env.SHOT, { recursive: true });
+      const shot = await page.send('Page.captureScreenshot', { format: 'png' });
+      fs.writeFileSync(path.join(process.env.SHOT, `v07-${width}.png`), Buffer.from(shot.result.data, 'base64'));
+    }
+  }
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+}
+
+const SCENARIOS = { p1, p2, v03, v04, v05, v06, v07 };
 const ENVS = {
   v03: () => {
     const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
@@ -602,6 +710,16 @@ const ENVS = {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v06b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4795/', fakes: [5796, 5797], dir: '.pilot-verify-v06b', config: file, cdp: 9373 };
+  },
+  v07: () => {
+    const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
+    c.port = 4805;
+    c.roles.chat.candidates[0].baseUrl = 'http://127.0.0.1:5806/v1';
+    c.roles.chat.candidates[1].baseUrl = 'http://127.0.0.1:5807/v1';
+    c.roles.extract.candidates[0].baseUrl = 'http://127.0.0.1:5807/v1';
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v07b-')), 'config.json');
+    fs.writeFileSync(file, JSON.stringify(c));
+    return { url: 'http://127.0.0.1:4805/', fakes: [5806, 5807], dir: '.pilot-verify-v07b', config: file, cdp: 9383 };
   },
 };
 

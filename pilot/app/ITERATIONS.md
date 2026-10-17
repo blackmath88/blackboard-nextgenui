@@ -40,3 +40,13 @@ date, old plan, new plan and why.
 - Old plan: v0.7 = /why only.
 - New plan: v0.7 = /why + a layout fix: labels never break mid-word, and below a usable width the kanban stacks its columns instead of squeezing them.
 - Why: coordinator testing of the v0.6 demo at 800 px showed "controll/er" and kanban columns about 6 characters wide. /why adds affordances to the same pane bars, so the fix belongs there.
+
+## 2026-10-17 (v0.7) The cramped layout is just above 800 px, not at 800
+- Old plan: check the layout at 800, 1280 and 1600 px; at 800 px the v0.6 demo shows "controll/er" and kanban columns
+  about 6 characters wide.
+- New plan: unchanged checks at 800, 1280 and 1600 px, plus 820 and 1000 px. The fix does not depend on the window:
+  labels do not wrap or shrink, and a container query stacks the kanban when its body is under 420 px.
+- Why: at exactly 800 px the existing `@media (max-width: 800px)` already stacks every pane full width. Headless Chrome
+  reproduces the bug at 820 px: "contr/oller", kanban columns of 81 px, chips sticking out of their column. The
+  coordinator's 800 px window was probably slightly wider than 800 px of viewport. Checking only 800 would not have
+  caught it.

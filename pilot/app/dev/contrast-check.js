@@ -82,6 +82,9 @@ const PAIRS = [
   ['you author chip on pane bar', '--you-fg', '--you-bg', '--base'],
   ['model author chip on pane bar', '--pilot-fg', '--pilot-bg', '--base'],
   ['controller author chip on pane bar', '--ctl-fg', '--ctl-bg', '--base'],
+  ['why? button on pane bar (pilot-v0.7)', '--muted', '--base'],
+  ['why? button on a card, /why sources on a scanline row (pilot-v0.7)', '--muted', '--scan', '--panel'],
+  ['/why statement and "show m-…" button on a scanline row (pilot-v0.7)', '--text', '--scan', '--panel'],
   ['status bar text on lavender fill', '--onfill', '--lavender'],
   ['hovered key button text on lavender fill', '--onfill', '--lavender'],
 ];

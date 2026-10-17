@@ -4,6 +4,78 @@ P0 to P2 (skeleton, model roles, growth controller with consent and the index pa
 baseline, merged before the numbered iterations started; see `CHECKS.md` (# P0, # P1, # P2). Iterations are
 tagged `pilot-v0.N` by the coordinator; each one is runnable with `npm run demo -- v0.N`.
 
+## pilot-v0.7
+
+`/why`: the current workbench explained from the files, each statement with its source. Also a layout fix for narrow
+side panes. Still untested with a real model (fakes only).
+
+**Adds**
+- **`/why`** prints the whole workbench in compact form:
+  - one line per shown pane: its rule, the count when it was asked, your answer, how it was added;
+  - one line per pane that is not shown but has history (e.g. "answered no at 3");
+  - two summary lines for the items.
+- **`/why <pane>`** (`index`, `map`, `kanban`, `chat`) gives the full history:
+  - the rule recorded with the pane, plus the current `rules.json` rule if it changed since;
+  - every question (count, threshold, the question text and its transcript line), every answer and every add;
+  - the answer on file and whether `metrics.jsonl` has its consent event.
+- **`/why <item id>`** (e.g. `/why dec-2`) gives:
+  - origin: model and extraction run, or a file edit;
+  - the message it came from (author, time) and whether the quote is still in that message;
+  - who decided it and when (through the page or by file edit);
+  - every field changed by hand: what the server wrote and what the file says now.
+- **Every statement cites its source:**
+  - `metrics.jsonl:60 controller_ask` or `transcript.jsonl:5 m-f005` for JSONL files, with physical line numbers;
+  - `modules.json:14 panes index` or `state.json:18 items dec-2` for JSON entries: the line of the entry as the file is now.
+- **Missing facts are said plainly.** A fact is never filled in:
+  - "no recorded answer";
+  - "written by file edit, when is not recorded";
+  - "added by you (file edit) at …" when a `file_edit` event exists, otherwise "when is not recorded";
+  - "the server never wrote it";
+  - "message m-… is not in transcript.jsonl";
+  - "the pane entry has no controller_add event".
+  A broken `state.json` or `modules.json` makes `/why` say so; it does not crash.
+- **`why.js`** (like `stats.js`): pure and read-only. No model, no writes. `/command` returns `lines` (text) and `why`
+  (statements with `cite` and `msg`).
+- **Page:**
+  - A "why?" button on every pane bar and every card runs the same `/why` command. It is a real button: Tab reaches it,
+    Enter presses it.
+  - `c`/`r` act only on the focused card itself, never on a button inside it.
+  - `/why` lines show their sources in muted text. A statement that names a message has a "show m-…" button that
+    scrolls to it. This is not logged as an `index_jump`, so Usefulness in `/stats` stays honest.
+- **Layout fix:**
+  - Labels never break mid-word. Who-labels, the controller label, chips, tags, times, pane titles and buttons do not
+    wrap or shrink; the text next to them wraps instead. The cause was `overflow-wrap: anywhere` on chat lines, which
+    let the controller label shrink to one letter per line.
+  - The kanban stacks its three columns when its body is narrower than 420 px (a container query). Below that a column
+    would be under about 134 px, about 17 characters of card text. Widths, measured with the demo data:
+    | Window | Side panes | Kanban body | Kanban |
+    |---|---|---|---|
+    | 800 px | stacked full width (existing `max-width: 800px` rule) | 712 px | 3 columns |
+    | 820 px | side by side | 259 px | stacked |
+    | 1000 px | side by side | 328 px | stacked |
+    | 1280 and 1600 px (the shell is at most 1280 wide) | side by side | 436 px | 3 columns of 140 px |
+- **Demo `v0.7`:** the v0.6 fixture (index, map and kanban grown through consent), plus one `file_edit` event for task-7.
+  dec-8 has none, so both the recorded and the unrecorded case show.
+- **Dev:** `dev/why-cites.js` resolves every cited source back to its file. `browser-check.js v07` adds layout checks at
+  800, 820, 1000, 1280 and 1600 px. `contrast-check.js` covers the new pairs.
+
+**Why**
+- 01-concept: "every frame says whose it is", and the person can always ask why the screen looks the way it does. This
+  is the Observstory `explain_frame` idea, answered from recorded facts and never guessed. v0.6 recorded the facts;
+  v0.7 makes them answerable.
+- Layout: the coordinator's v0.6 run found "controll/er" and kanban columns about 6 characters wide (ITERATIONS.md,
+  2026-10-17).
+
+**Deliberately does not**
+- No model involvement, no summarising. `/why` lists recorded facts and their sources.
+- No explanation of transcript lines, the status bar or model choice (`/model` and `metrics.jsonl` already say that).
+- No history of hand edits that happened while the server was down beyond "when is not recorded". Only the current
+  file and the server's last write are compared, as in v0.6.
+- Line numbers of JSON entries are found by searching the file as it is now (the entry's `"id"`/`"module"` line). A
+  file reformatted by hand moves them; when the line is not found, the entry path alone is cited.
+- Recorded times are printed verbatim (ISO, as in the files): they are citations. Cards and pane bars keep local time.
+- The "show m-…" link only reaches messages among the last 500 lines the page shows. For older ones it says so.
+
 ## pilot-v0.6
 
 Authorship and metrics, `/stats`. Still untested with a real model (fakes only).

@@ -6,6 +6,8 @@
 // pilot-v0.6: every line, item and pane says who authored it (peach you, sky model, lavender controller); a hand edit
 // of state.json shows as "you (file edit)" (the server compares the file with its own write ledger, see stats.js).
 // Index jumps are reported with POST /metric (the Usefulness measure of /stats).
+// pilot-v0.7: /why (typed, or the "why?" button on a pane bar or a card) shows the server's explanation with its sources;
+// a "show m-…" link scrolls to the message (no index_jump: it is not an index use).
 'use strict';
 const $ = (id) => document.getElementById(id);
 const bench = $('bench'), log = $('log'), form = $('form'), input = $('input');
@@ -135,7 +137,7 @@ function itemCard(it) {
     a.href = it.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = it.text;
     text.append(a);
   } else text.textContent = it.text;
-  el.append(text, itemMeta(it, status, byModel));
+  el.append(whyButton(it.id, `why is ${it.id} here?`), text, itemMeta(it, status, byModel));
   if (status === 'proposed') {
     const keys = document.createElement('span');
     keys.className = 'keys';
@@ -288,12 +290,51 @@ function renderIndex(body) {
 }
 
 function jumpTo(id) {
-  const el = $(`msg-${id}`);
-  if (!el) return;
+  if (!$(`msg-${id}`)) return;
   // Usefulness (P5): the server logs index_jump; fire and forget, a failure never blocks the jump
   fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: 'index_jump', target: id }) }).catch(() => {});
+  scrollToMsg(id);
+}
+function scrollToMsg(id) {
+  const el = $(`msg-${id}`);
+  if (!el) return false;
   el.scrollIntoView({ block: 'center', behavior: reducedMotion.matches ? 'auto' : 'smooth' });
   el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+  return true;
+}
+
+// pilot-v0.7: "why?" on a pane bar or a card runs the same /why command as typing it. A real button, so Tab reaches it
+// and Enter/Space press it; its click does not reach the card (which would focus it).
+function whyButton(target, label) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'why'; b.textContent = 'why?';
+  b.dataset.why = target; b.setAttribute('aria-label', label); b.title = `/why ${target}`;
+  b.addEventListener('click', (e) => { e.stopPropagation(); runCommand(`/why ${target}`).catch((err) => addLine('system', `error: ${err.message}`)); });
+  return b;
+}
+
+// /why output: headings, then one line per statement with its sources ([file:line id; ...]) and, when the statement
+// names a message, a "show m-…" button that scrolls to it.
+function renderWhy(statements, ok) {
+  let first = null;
+  for (const st of statements) {
+    const { p, body } = addLine('out', st.head ? st.text : '');
+    p.classList.add('why-line', st.head ? 'why-head' : 'why-fact');
+    p.classList.toggle('err', !ok);
+    if (!st.head) {
+      body.append(st.text, ' ');
+      const c = document.createElement('small'); c.className = 'cite'; c.textContent = `[${st.cite.join('; ')}]`;
+      body.append(c);
+      if (st.msg) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'go'; b.textContent = `show ${st.msg}`;
+        b.addEventListener('click', () => { if (!scrollToMsg(st.msg)) addLine('out', `${st.msg} is not among the lines shown`).p.classList.add('err'); });
+        body.append(' ', b);
+      }
+    }
+    first = first || p;
+  }
+  if (first) first.scrollIntoView({ block: 'start' });   // long explanations: start at their heading
 }
 
 // Pane bar byline (pilot-v0.6): which rule grew the pane (controller, lavender) and which answer allowed it (you,
@@ -327,6 +368,7 @@ function renderPanes(contentOnly) {
       sec.style.viewTransitionName = `pane-${mod}`;
       sec.setAttribute('aria-label', PANES[mod].title);
       sec.innerHTML = `<div class="bar"><span>${PANES[mod].title}</span></div><div class="body"></div>`;
+      sec.querySelector('.bar').append(whyButton(mod, `why is the ${PANES[mod].title} pane here?`));
       paneByline(sec.querySelector('.bar'), mod);
       PANES[mod].render(sec.querySelector('.body'));
       bench.append(sec);
@@ -447,6 +489,7 @@ async function runCommand(text) {
   const out = await res.json();
   await loadState();                             // picks up a /model system line and the new status bar
   addLine('out', text).p.classList.add('cmd');
+  if (cmd === '/why' && Array.isArray(out.why)) return renderWhy(out.why, out.ok);
   for (const l of out.lines || []) {
     const { p } = addLine('out', l);
     p.classList.toggle('err', !out.ok);
@@ -482,7 +525,8 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === 'Escape' && card) { e.preventDefault(); input.focus(); return; }
-  if ((e.key !== 'c' && e.key !== 'r') || !card || !card.dataset.proposed) return;
+  // pilot-v0.7: only the card itself, not a button inside it (a focused "why?" must never decide a proposal)
+  if ((e.key !== 'c' && e.key !== 'r') || !card || e.target !== card || !card.dataset.proposed) return;
   e.preventDefault();
   sendDecision(card.dataset.id, e.key === 'c' ? 'confirm' : 'reject', card);
 });
