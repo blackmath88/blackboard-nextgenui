@@ -801,3 +801,15 @@ assertion adapted. `browser-check.js v09` passed 4 runs in a row after the test 
    only the latter. Without it, the only way to get rid of an offer on a finished line would be to change the text.
 3. Commands (lines starting with `/`) never get an offer and their Enter is not logged as `enter_send`: Tab must never
    run a command such as `/flag settled-input off`, and `/stats` should time messages only.
+
+## pilot-v0.9: coordinator re-run (2026-10-17)
+
+Run by the coordinator, not the builder.
+- Scope: only `pilot/app/**` plus one line in the "Pilot iterations" list of `index.html`.
+- `npm run verify`: exit 0; every earlier script passes, plus v0.9. Demos v0.3 to v0.9: `/state` 200 within about 1 s each; no orphan processes.
+- Browser, demo v0.9 (flag on in the demo config only):
+  - "Is the letter ready to print?" + a pause showed "send? (Tab to send, keep typing to ignore)". Nothing was sent until Tab: transcript total stayed 100, then 102 after Tab.
+  - "And the envelope is ready." + a pause showed the offer; Enter sent it.
+  - "Then I go to the post office" (no final punctuation) + a pause showed no offer.
+  - `/stats` experiments block matched the session exactly: 3 offers, 1 Tab, 1 Enter while showing, 1 unresolved.
+- Usability note, not fixed: at about 800 px the offer takes roughly half the input row, so the end of the line being typed is cut off where you would read it. Behind a flag; worth a look before anyone measures with it for real.
