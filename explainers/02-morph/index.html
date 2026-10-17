@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Die Oberfläche, die sich selbst umbaut</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="home" href="../../index.html" lang="en">← Overview</a>
+  <h1>Die Oberfläche, die sich selbst umbaut</h1>
+  <p class="lead">Von Engelbarts Ansichten über adaptive Hypermedia und Morphic bis zur Frage, ob ein Sprachmodell entscheiden darf, wie eine Oberfläche aussieht. Gezeigt an den Meilensteinen des Build-Plans.</p>
+  <nav class="acts" aria-label="Akte">
+    <button type="button" data-act="1" aria-pressed="true"><span>1</span>Die Wurzeln</button>
+    <button type="button" data-act="2" aria-pressed="false"><span>2</span>Der Vorschlag</button>
+    <button type="button" data-act="3" aria-pressed="false"><span>3</span>Wem gehört der Rahmen?</button>
+  </nav>
+</header>
+
+<main class="wrap">
+  <section class="intro" id="intro"></section>
+  <div class="tools" id="tools"></div>
+  <div class="grid">
+    <div class="col-main">
+      <div class="stage" id="stage" aria-live="polite"></div>
+      <div class="question" id="question" hidden></div>
+    </div>
+    <aside class="col-side" id="rail">
+      <section class="panel" id="why">
+        <h2>Warum dieser Rahmen?</h2>
+        <p id="reason"></p>
+        <p class="src" id="source"></p>
+        <div class="row"><button type="button" class="btn small" id="back">Zurück</button><span class="muted" id="history"></span></div>
+        <p class="muted" id="counts"></p>
+      </section>
+      <section class="panel" id="signals" hidden>
+        <h2>Signale</h2>
+        <p class="hint">Jedes Signal geht an den Kontrolleur. Nur „wecken" ruft das Modell.</p>
+        <ol id="siglog"></ol>
+      </section>
+      <section class="panel" id="modelPanel" hidden>
+        <h2>Modell</h2>
+        <div class="seg" role="radiogroup" aria-label="Modellquelle">
+          <label><input type="radio" name="src" value="sim" checked> Simulation</label>
+          <label><input type="radio" name="src" value="api"> Eigene API</label>
+        </div>
+        <div id="apiForm" hidden>
+          <label>Basis-URL <input id="base" value="http://localhost:11434/v1" spellcheck="false"></label>
+          <label>Modell <input id="model" value="qwen3:14b" spellcheck="false"></label>
+          <label>Schlüssel (optional) <input id="key" type="password" autocomplete="off"></label>
+          <button type="button" class="btn small" id="test">Verbindung testen</button>
+          <p class="hint">OpenAI-kompatibel: Ollama, Open WebUI, LM Studio, OpenAI. Der Schlüssel bleibt nur in diesem Tab und wird nirgends gespeichert.</p>
+          <details><summary>Systemprompt ansehen</summary><pre id="sysprompt"></pre></details>
+        </div>
+        <p class="status" id="modelStatus"></p>
+      </section>
+    </aside>
+  </div>
+  <section class="open" id="open" hidden></section>
+</main>
+
+<footer class="foot">
+  <p>Quellen der Ideen: Engelbart, NLS (1968); Brusilovsky, adaptive Hypermedia (1996); Maloney und Smith, Morphic in Self (1995); W3C, View Transitions. Simulierte Modellantworten sind als solche markiert.</p>
+</footer>
+
+<script src="js/data.js"></script>
+<script src="js/compiler.js"></script>
+<script src="js/model.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>

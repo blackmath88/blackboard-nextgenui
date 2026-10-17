@@ -1,0 +1,31 @@
+{
+  "port": 4747,
+  "pilotDir": ".pilot",
+  "roles": {
+    "chat": {
+      "policy": "fallback",
+      "candidates": [
+        { "name": "frontier", "baseUrl": "https://api.openai.com/v1", "model": "gpt-6", "keyEnv": "OPENAI_API_KEY", "timeoutMs": 60000 },
+        { "name": "morrow", "baseUrl": "http://nebuchadnezzar:11434/v1", "model": "qwen3:14b", "timeoutMs": 90000 }
+      ]
+    },
+    "extract": {
+      "policy": "manual",
+      "everyNTurns": 1,
+      "maxItems": 3,
+      "candidates": [
+        { "name": "morrow", "baseUrl": "http://nebuchadnezzar:11434/v1", "model": "qwen3:14b", "structured": true, "timeoutMs": 60000 }
+      ]
+    },
+    "title": {
+      "policy": "manual",
+      "candidates": []
+    }
+  },
+  "_notes": [
+    "Model names and hosts are placeholders. Any OpenAI-compatible endpoint works, including a LiteLLM proxy.",
+    "keyEnv names an environment variable; keys never go into this file or the browser.",
+    "policy: manual = first candidate until /model switches; fallback = next candidate on error or timeout.",
+    "title with no candidates means the index uses each message's first sentence."
+  ]
+}

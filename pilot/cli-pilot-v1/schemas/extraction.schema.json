@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "extract role output (closed)",
+  "type": "object",
+  "required": ["items"],
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["kind", "text", "quote"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": { "enum": ["decision", "task", "source"] },
+          "text": { "type": "string", "minLength": 3, "maxLength": 240 },
+          "quote": { "type": "string", "minLength": 3, "maxLength": 300 },
+          "url": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Die Tafel, an der alle schreiben · Hearsay-II nachgebaut</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="home" href="../../index.html" lang="en">← Overview</a>
+  <h1>Die Tafel, an der alle schreiben</h1>
+  <p class="lead">Hearsay-II, Carnegie Mellon, 1971 bis 1976: ein Spracherkenner, in dem unabhängige Wissensquellen an eine gemeinsame Tafel schreiben. Niemand steuert von oben. Hier als kleines, deterministisches Spielzeug nachgebaut.</p>
+  <nav class="acts" aria-label="Akte">
+    <button type="button" data-act="1" aria-pressed="true"><span>1</span>Die Tafel</button>
+    <button type="button" data-act="2" aria-pressed="false"><span>2</span>Wer ist dran?</button>
+    <button type="button" data-act="3" aria-pressed="false"><span>3</span>Ist er fertig?</button>
+  </nav>
+</header>
+
+<main class="wrap">
+  <section class="intro" id="intro" aria-live="polite"></section>
+
+  <div class="grid">
+    <div class="col-main">
+      <div class="board-scroll">
+        <div class="board" id="board" role="group" aria-label="Die Tafel"></div>
+      </div>
+      <p class="detail" id="detail">Klick auf eine Hypothese an der Tafel, um zu sehen, worauf sie sich stützt.</p>
+
+      <div class="question" id="question" hidden></div>
+
+      <div class="controls">
+        <button type="button" class="btn primary" id="step">Schritt</button>
+        <button type="button" class="btn" id="play">Abspielen</button>
+        <button type="button" class="btn ghost" id="reset">Neu starten</button>
+        <label class="strategy" id="strategyWrap">Agenda
+          <select id="strategy">
+            <option value="opportunistisch">opportunistisch</option>
+            <option value="schichtweise">schichtweise</option>
+          </select>
+        </label>
+        <p class="status" id="status" aria-live="polite"></p>
+      </div>
+
+      <section class="log" aria-label="Protokoll">
+        <h2>Protokoll</h2>
+        <ol id="log" reversed></ol>
+      </section>
+    </div>
+
+    <aside class="col-side">
+      <section class="panel">
+        <h2>Agenda</h2>
+        <p class="hint">Wer schreiben will, steht hier an. Die Agenda wählt, wer zuerst darf.</p>
+        <ol class="agenda" id="agenda"></ol>
+      </section>
+      <section class="panel">
+        <h2>Wissensquellen</h2>
+        <ul class="ks" id="ks"></ul>
+      </section>
+    </aside>
+  </div>
+
+  <section class="open" id="open" hidden></section>
+</main>
+
+<footer class="foot">
+  <p>Vereinfacht nach Erman, Hayes-Roth, Lesser und Reddy (1980), „The Hearsay-II Speech-Understanding System". Silben, Güten und Grammatik sind erfunden, die Architektur ist echt.</p>
+</footer>
+
+<script src="js/scenario.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>
