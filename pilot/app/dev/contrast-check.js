@@ -85,6 +85,10 @@ const PAIRS = [
   ['why? button on pane bar (pilot-v0.7)', '--muted', '--base'],
   ['why? button on a card, /why sources on a scanline row (pilot-v0.7)', '--muted', '--scan', '--panel'],
   ['/why statement and "show m-…" button on a scanline row (pilot-v0.7)', '--text', '--scan', '--panel'],
+  // pilot-v0.10: the frame proposal note and the applied-frame line sit on the pane body (panel); lavender is only an edge
+  ['frame proposal text on panel (pilot-v0.10)', '--text', '--panel'],
+  ['frame "suggested by …, not by you", applied-frame line, frame chip on panel (pilot-v0.10)', '--muted', '--panel'],
+  ['frame apply/dismiss key buttons on panel (pilot-v0.10)', '--accent-fg', '--panel'],
   ['status bar text on lavender fill', '--onfill', '--lavender'],
   ['hovered key button text on lavender fill', '--onfill', '--lavender'],
 ];

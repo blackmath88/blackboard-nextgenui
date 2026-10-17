@@ -8,12 +8,16 @@
 // The Observstory idea `explain_frame` ("why does my screen look like this?") applied to this pilot.
 // pilot-v0.8: /why <pane> also explains fading: the last touch, the turns since, the threshold, whether and when it
 // fades (or why it cannot: it holds a proposal), the removal question and its answer; a removed pane says so.
+// pilot-v0.10: /why map and /why kanban also explain a frame (frames.json): the applied one (what it does, which model
+// suggested it after which message, that you applied it and when), an open proposal, the last reset. Only when there is
+// one on file: without frames the explanations are exactly as before.
 // Node 20+, no dependencies. server.js requires it for /why.
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const stats = require('./stats.js');
 const fade = require('./fade.js');
+const frame = require('./frame.js');
 
 const MODULES = ['index', 'map', 'kanban'];   // panes this build can show (server.js BUILT)
 const TITLES = { chat: 'chat', index: 'index', map: 'reasoning map', kanban: 'kanban' };
@@ -95,7 +99,7 @@ function load(dir) {
   const tr = readJsonlNumbered(path.join(dir, 'transcript.jsonl'));
   const me = readJsonlNumbered(path.join(dir, 'metrics.jsonl'));
   ctx.lines = tr.rows; ctx.events = me.rows;
-  for (const [key, file] of [['modules', 'modules.json'], ['state', 'state.json'], ['rules', 'rules.json']]) {
+  for (const [key, file] of [['modules', 'modules.json'], ['state', 'state.json'], ['rules', 'rules.json'], ['frames', 'frames.json']]) {
     const r = readJsonDoc(path.join(dir, file));
     ctx.raw[file] = r.raw;
     ctx[key] = r;
@@ -110,6 +114,7 @@ function load(dir) {
   ctx.items = Array.isArray(s.items) ? s.items.filter((i) => i && typeof i.id === 'string' && typeof i.kind === 'string') : [];
   const r = ctx.rules.doc && typeof ctx.rules.doc === 'object' ? ctx.rules.doc : {};
   ctx.rules.list = Array.isArray(r.rules) ? r.rules : [];
+  ctx.fr = frame.normalize(ctx.frames.doc);   // pilot-v0.10
   return ctx;
 }
 
@@ -229,6 +234,7 @@ function explainPane(ctx, mod) {
   if (!hist.length) out.push({ text: 'no question, answer or add for this pane in metrics.jsonl', cite: ['metrics.jsonl'] });
   out.push(...answerFacts(ctx, mod));
   if (entry && shown(ctx, mod)) out.push(...fadeFacts(ctx, entry));
+  out.push(...frameFacts(ctx, mod));   // pilot-v0.10: only when a frame is on file
   if (entry && !ev(ctx, (e) => e.event === 'controller_add' && e.module === mod).length) {
     out.push({ text: `the pane entry has no controller_add event: added by file edit, when is not recorded${entry.addedAt ? ` (the entry says addedAt ${entry.addedAt})` : ''}`, cite: [paneCite(ctx, mod), 'metrics.jsonl (no controller_add)'] });
   }
@@ -276,6 +282,57 @@ function fadeFacts(ctx, entry) {
     else if (st.removalAsked) out.push({ text: `removal question already asked for this pane (asked once per pane)${rem ? `; your answer: "${rem.answer}" at ${rem.at}` : ''}`, cite: [pc, ...(rem ? [removalCite(ctx, mod)] : [])] });
     else if (st.askRemoveAfter === null) out.push({ text: 'never offered for removal: rules.json sets no askRemoveAfterTurns', cite: ['rules.json (no askRemoveAfterTurns)'] });
     else out.push({ text: `removal question after ${st.askRemoveAfter} turns as a tab (${st.askFrom === 'rule' ? 'this rule' : 'the default'}): ${st.removeDue ? 'due, asked after the next turn' : `at turn ${st.fadedTurn + st.askRemoveAfter}`}; only your answer removes a pane`, cite: [keyCite(ctx, 'askRemoveAfterTurns', mod, st.askFrom)] });
+  }
+  return out;
+}
+
+// ---- pilot-v0.10: frames ----
+// frames.json <section>.<pane>: the line of the pane's key after the section's key
+const frameCite = (ctx, section, mod) => {
+  const raw = ctx.raw['frames.json'] || '';
+  const a = lineOf(raw, new RegExp(`"${section}"\\s*:`));
+  const n = a ? lineOf(raw, new RegExp(`^\\s*"${esc(mod)}"\\s*:`), a) : null;
+  return n ? `frames.json:${n} ${section}.${mod}` : `frames.json ${section}.${mod}`;
+};
+function frameOrigin(ctx, f, mod, section) {
+  const out = [];
+  const prop = ev(ctx, (e) => e.event === 'frame_propose' && e.id === f.id && e.module === mod).pop();
+  if (prop) {
+    const m = f.fromMessage ? msgRow(ctx, f.fromMessage) : null;
+    out.push({ text: `suggested by model ${f.model || prop.obj.candidate} (frame role, model id ${prop.obj.model}) at ${prop.obj.ts}, after message ${f.fromMessage || '?'} (turn ${prop.obj.turn ?? '?'}); allographic: written about your workbench by a model, not by you`,
+      cite: [jl('metrics.jsonl', prop, `frame_propose ${f.id}`), ...(m ? [jl('transcript.jsonl', m, f.fromMessage)] : [])], ...(m ? { msg: f.fromMessage } : {}) });
+  } else {
+    out.push({ text: `the file says it was suggested by ${f.model || '(no model)'}${f.at ? ` at ${f.at}` : ''}, but no frame_propose event matches ${f.id || 'it'}: written by file edit, when is not recorded`,
+      cite: [frameCite(ctx, section, mod), `metrics.jsonl (no frame_propose ${f.id || mod})`] });
+  }
+  return out;
+}
+function frameFacts(ctx, mod) {
+  if (!frame.FRAME_PANES.includes(mod)) return [];
+  if (ctx.frames.error) return [{ text: `cannot explain frames: ${ctx.frames.error} (fix the file by hand)`, cite: ['frames.json (not valid JSON)'] }];
+  const a = ctx.fr.applied[mod], p = ctx.fr.pending[mod], r = ctx.fr.resets[mod];
+  const out = [];
+  if (a && a.intent) {
+    out.push({ text: `frame ${a.id} applied: ${frame.describe(a.intent)}; it only arranges the cards (nothing hidden, no card changed), and only while the frame-proposals experiment is on`, cite: [frameCite(ctx, 'applied', mod)] });
+    out.push(...frameOrigin(ctx, a, mod, 'applied'));
+    const app = ev(ctx, (e) => e.event === 'frame_apply' && e.id === a.id && e.module === mod).pop();
+    if (app) out.push({ text: `applied by you at ${app.obj.ts} (through the page); /frame reset ${mod} puts the pane back in its own order`, cite: [jl('metrics.jsonl', app, `frame_apply ${a.id}`)] });
+    else out.push({ text: `the file says applied by ${a.appliedBy || '(nobody)'}${a.appliedAt ? ` at ${a.appliedAt}` : ''}, but no frame_apply event matches: written by file edit, when is not recorded`, cite: [frameCite(ctx, 'applied', mod), `metrics.jsonl (no frame_apply ${a.id || mod})`] });
+  }
+  if (p && p.intent) {
+    out.push({ text: `open frame proposal ${p.id}: ${frame.describe(p.intent)}; not applied (f in the pane applies it, dismiss drops it)`, cite: [frameCite(ctx, 'pending', mod)] });
+    out.push(...frameOrigin(ctx, p, mod, 'pending'));
+  }
+  if (!a && r) {
+    const row = ev(ctx, (e) => e.event === 'frame_reset' && e.module === mod).pop();
+    out.push({ text: `no frame applied: frame ${r.frame || '?'} was reset by you at ${r.at || '?'}; the pane shows its own order`, cite: [frameCite(ctx, 'resets', mod), ...(row ? [jl('metrics.jsonl', row, `frame_reset ${row.obj.id || mod}`)] : [])] });
+  }
+  const rej = ev(ctx, (e) => e.event === 'frame_reject' && e.module === mod);
+  if (out.length && rej.length) {
+    const WHY = { schema: 'unknown key or value', id: 'unknown or foreign id', empty: 'nothing to do', pane: 'pane not shown or a tab', same: 'same as the applied or open one', stale: 'no longer fitting when applied' };
+    const by = {};
+    for (const r of rej) by[r.obj.reason] = (by[r.obj.reason] || 0) + 1;
+    out.push({ text: `${rej.length} frame suggestion${rej.length === 1 ? '' : 's'} for this pane rejected whole (${Object.entries(by).map(([k, n]) => `${n} ${WHY[k] || k}`).join(', ')}); nothing changed`, cite: [`metrics.jsonl frame_reject ×${rej.length}`] });
   }
   return out;
 }
@@ -410,6 +467,12 @@ function explainFrame(ctx) {
       + `${statusByFile.length ? `, status set by file edit: ${statusByFile.join(', ')}` : ''}${edited.length ? `; other fields edited by file edit: ${edited.join(', ')}` : ''}`,
       cite: [inFile(ctx, 'state.json', /"items"\s*:/, 'items'), `metrics.jsonl decide ×${decides.length}`] });
   } else out.push({ text: 'no items yet', cite: [ctx.state.missing ? 'state.json (absent)' : 'state.json items'] });
+  // pilot-v0.10: frames, only when one is on file
+  const framed = frame.FRAME_PANES.filter((mod) => ctx.fr.applied[mod] || ctx.fr.pending[mod]);
+  if (!ctx.frames.error && framed.length) {
+    out.push({ text: `frames: ${framed.map((mod) => { const a = ctx.fr.applied[mod], p = ctx.fr.pending[mod]; return `${mod} ${[a ? `${a.id} applied by you (suggested by ${a.model || '?'})` : '', p ? `${p.id} proposed by ${p.model || '?'}` : ''].filter(Boolean).join(', ')}`; }).join('; ')}; a frame only arranges cards`,
+      cite: framed.map((mod) => frameCite(ctx, ctx.fr.applied[mod] ? 'applied' : 'pending', mod)) });
+  }
   out.push({ head: true, text: 'details: /why <pane> (index, map, kanban, chat) or /why <item id> (e.g. /why dec-2)' });
   return out;
 }

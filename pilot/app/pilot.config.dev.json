@@ -19,16 +19,23 @@
         { "name": "morrow", "local": true, "baseUrl": "http://127.0.0.1:5702/v1", "model": "fake-morrow", "structured": true, "timeoutMs": 10000 }
       ]
     },
+    "frame": {
+      "policy": "manual",
+      "candidates": [
+        { "name": "morrow", "local": true, "baseUrl": "http://127.0.0.1:5702/v1", "model": "fake-morrow", "structured": true, "timeoutMs": 10000 }
+      ]
+    },
     "title": {
       "policy": "manual",
       "candidates": []
     }
   },
-  "experiments": { "settledInput": false, "settleMs": 1800 },
+  "experiments": { "settledInput": false, "settleMs": 1800, "frameProposals": false },
   "_notes": [
     "DEV ONLY. Both candidates point at dev/fake-model.js on localhost. Start with PILOT_CONFIG=pilot.config.dev.json.",
     "No keyEnv: the fakes need no key and no real endpoint is ever contacted.",
     "local flags as in pilot.config.json: frontier false, morrow true.",
-    "experiments as in pilot.config.json: settledInput off by default."
+    "experiments as in pilot.config.json: settledInput off by default.",
+    "frame (pilot-v0.10) points at the morrow fake like extract; it is never called while experiments.frameProposals is false (the default)."
   ]
 }

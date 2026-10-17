@@ -11,9 +11,12 @@
 // ports 4815/5816/5817, Chrome 9393, dir .pilot-verify-v08b/ seeded from demo/fixtures/v0.8/ (SHOT=<dir> saves screenshots).
 // v09 (pilot-v0.9 settled input behind a flag): ports 4825/5826/5827, Chrome 9403, dir .pilot-verify-v09b/ seeded from
 // demo/fixtures/v0.9/, config with experiments.settledInput false and settleMs 400 (fast; the 1800 default is checked
-// in verify-v0.9.sh).
+// in verify-v0.9.sh). v10 (pilot-v0.10 frame proposals behind a flag): ports 4835/5836/5837, Chrome 9413, dir
+// .pilot-verify-v10b/ seeded from demo/fixtures/v0.10/, the dev config with experiments.frameProposals false (the page
+// switches it on with /flag); the morrow fake answers frame requests with its default --frame=good (SHOT_DIR=<dir> saves
+// screenshots).
 // Needs Node 22+ (global WebSocket) and Google Chrome. No dependencies.
-// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|v07|v08|v09|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
+// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|v07|v08|v09|v10|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
 'use strict';
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -925,7 +928,151 @@ async function v09(page) {
   check('off is kept across a reload (flags.json)', !(await page.eval(`!!document.getElementById('settle')`)) && await page.eval(`document.getElementById('input').placeholder === 'Type a message and press Enter'`));
 }
 
-const SCENARIOS = { p1, p2, v03, v04, v05, v06, v07, v08, v09 };
+async function v10(page) {
+  const file = (f) => path.join(APP, ENV.dir, f);
+  await stop('server');
+  const fix = path.join(APP, 'demo', 'fixtures', 'v0.10');
+  for (const f of fs.readdirSync(fix)) if (!['demo.json', 'pilot.config.json'].includes(f)) fs.copyFileSync(path.join(fix, f), file(f));
+  await startServer();
+  const waitFor = async (expr, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await page.eval(expr)) return Date.now() - t0; await sleep(20); } return null; };
+  const events = () => fs.readFileSync(file('metrics.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const frames = () => { try { return JSON.parse(fs.readFileSync(file('frames.json'), 'utf8')); } catch { return null; } };
+  const idle = () => waitFor(`!document.getElementById('input').disabled && !document.querySelector('.ln.streaming')`, 5000);
+  const send = async (text) => { await page.submit(text, 300); await idle(); };
+  const order = () => page.eval(`[...document.querySelectorAll('#pane-map .chain .item')].map((c) => c.dataset.id).join(',')`);
+  const note = `#pane-map .frame-note`;
+  const noteShown = `!!document.querySelector('${note}')`;
+  const focusCard = (id) => page.eval(`document.querySelector('#pane-map .item[data-id="${id}"]').focus()`);
+  const posts = () => page.net.filter((n) => n.url.endsWith('/frame') && n.method === 'POST').length;
+  await page.goto(URL);
+  await waitFor(`document.getElementById('meta').textContent.includes('live')`);
+  const own = await order();
+  const writes0 = events().filter((e) => e.event === 'item_write').length;
+
+  // ---- off (the shipped default): no frame role call, nothing rendered, f is just a key ----
+  await send('what about keeping the claim local?');
+  await sleep(600);
+  check('flag off: after a turn no frame role call, no frames.json, no note in the map', !events().some((e) => e.role === 'frame' || /^frame_/.test(e.event)) && !frames() && !(await page.eval(noteShown)), own);
+  await focusCard('dec-1'); await page.key('f');
+  check('flag off: f on a map card does nothing (no POST /frame)', posts() === 0 && await order() === own);
+  check('flag off: the status bar does not list the frame role (the old status bar)', !/frame:/.test(await page.status()), await page.status());
+
+  // ---- on: a proposal is a note, nothing changes until you apply it ----
+  await page.submit('/flag frame-proposals on', 800);
+  check('flag on: the status bar lists frame: morrow', /· frame: morrow ·/.test(await page.status()), await page.status());
+  await send('what about keeping the claim local?');
+  const ms = await waitFor(noteShown, 4000);
+  check(`flag on: the next turn yields a proposal note in the map (${ms} ms after the reply)`, ms !== null);
+  const n = await page.eval(`(() => { const n = document.querySelector('${note}'); const cs = getComputedStyle(n); return { text: n.querySelector('.fn-what').textContent, by: n.querySelector('.fn-by').textContent, author: n.dataset.author, style: cs.borderTopStyle, tab: n.tabIndex, keys: [...n.querySelectorAll('button')].map((b) => b.textContent.trim()) }; })()`);
+  check('the note says "model suggests: focus dec-2 · order dec-2, dec-4, src-1, dec-1, …" and "suggested by morrow, not by you", dashed, focusable', n.text === 'model suggests: focus dec-2 · order dec-2, dec-4, src-1, dec-1, …'
+    && n.by === 'suggested by morrow, not by you' && n.author === 'model' && n.style === 'dashed' && n.tab === 0 && n.keys.join('|') === 'f apply|dismiss|why?', JSON.stringify(n));
+  check('a proposal changes nothing: the map keeps its own order, no card is marked', await order() === own && !(await page.eval(`!!document.querySelector('.item.framed')`)));
+  await page.eval(`document.getElementById('input').focus()`); await page.key('f');
+  check('f in the chat input is text, not apply', await page.eval(`document.getElementById('input').value === 'f'`) && posts() === 0 && !!frames().pending.map);
+  await page.eval(`document.getElementById('input').value = ''`);
+  await page.eval(`document.querySelector('${note} button[data-frame-action="apply"]').focus()`); await page.key('f');
+  await sleep(200);
+  check('f on a focused button in the note does not apply (same rule as c/r)', posts() === 0 && !!frames().pending.map);
+  await page.eval(`document.querySelector('${note}').focus()`);
+  check('the note itself takes focus (tabIndex 0, so Tab reaches it)', await page.eval(`document.activeElement === document.querySelector('${note}')`));
+  const shot = async (name) => { if (!process.env.SHOT_DIR) return; const r = await page.send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.SHOT_DIR, name), Buffer.from(r.result.data, 'base64')); };
+  await shot('v10-proposal.png');
+  await page.key('Escape');
+  check('Escape on the note returns to the chat input', await page.eval(`document.activeElement === document.getElementById('input')`));
+
+  // ---- apply with f, focus in the pane ----
+  await focusCard('dec-5'); await page.key('f');
+  await waitFor(`!!document.querySelector('#pane-map .item.framed')`, 3000);
+  const f1 = frames();
+  const applied = await page.eval(`(() => { const l = document.querySelector('#pane-map .frame-applied'); const c = document.querySelector('#pane-map .item.framed'); return { line: l && l.textContent, framed: c && c.dataset.id, chip: c && c.querySelector('.by.frame').textContent, active: document.activeElement.dataset.id, note: !!document.querySelector('${note}') }; })()`);
+  check('f on a card in the map applies it: order dec-2, dec-4, dec-1, dec-8, dec-7, dec-5 (rejected stay hidden)', await order() === 'dec-2,dec-4,dec-1,dec-8,dec-7,dec-5', await order());
+  check('dec-2 is marked "frame focus, suggested by morrow", focus moves to it, the note is gone', applied.framed === 'dec-2' && applied.chip === 'frame focus, suggested by morrow' && applied.active === 'dec-2' && !applied.note, JSON.stringify(applied));
+  await shot('v10-applied.png');
+  check('the frame line says who suggested it and that you applied it', /^frame fr-1: focus dec-2 · order dec-2, dec-4, src-1, dec-1, … · suggested by morrow · applied by you \d\d-\d\d \d\d:\d\d · reset$/.test(applied.line || ''), applied.line);
+  check('recorded: frames.json applied.map (appliedBy user, appliedAt), a frame_apply event, a system line', f1.applied.map && f1.applied.map.appliedBy === 'user' && !!f1.applied.map.appliedAt && !f1.pending.map
+    && events().some((e) => e.event === 'frame_apply' && e.id === 'fr-1' && e.module === 'map' && e.by === 'user'));
+  check('sources follow the frame too (src-1 is in the order)', await page.eval(`[...document.querySelectorAll('#pane-map .items:not(.chain) .item')].map((c) => c.dataset.id).join(',')`) === 'src-1');
+
+  // ---- /why map, reset ----
+  await page.submit('/why map', 900);
+  const why = await page.eval(`[...document.querySelectorAll('.ln.out.why-fact')].map((l) => l.textContent)`);
+  check('/why map explains the applied frame: what it does, suggested by morrow after which message, applied by you, with sources', why.some((l) => /^frame fr-1 applied: focus dec-2/.test(l) && /\[frames\.json:\d+ applied\.map\]/.test(l))
+    && why.some((l) => /^suggested by model morrow \(frame role/.test(l) && /metrics\.jsonl:\d+ frame_propose fr-1/.test(l)) && why.some((l) => /^applied by you at .*frame_apply fr-1/.test(l)), why.filter((l) => /frame/.test(l)).join(' | '));
+  await page.eval(`document.querySelector('#pane-map .frame-applied button').click()`);
+  await waitFor(`!document.querySelector('#pane-map .item.framed')`, 3000);
+  check('reset (the button = /frame reset map): the map is back in its own order, nothing marked, resets.map recorded', await order() === own && !(await page.eval(`!!document.querySelector('#pane-map .frame-applied')`))
+    && frames().resets.map.frame === 'fr-1' && events().some((e) => e.event === 'frame_reset' && e.id === 'fr-1'));
+
+  // ---- dismiss ----
+  await send('should the deadline go in the first paragraph?');
+  await waitFor(noteShown, 4000);
+  const id2 = frames().pending.map && frames().pending.map.id;
+  await page.eval(`document.querySelector('${note} button[data-frame-action="dismiss"]').click()`);
+  await waitFor(`!document.querySelector('${note}')`, 3000);
+  check(`dismiss drops proposal ${id2}: no note, nothing applied, frame_dismiss logged, the order unchanged`, !!id2 && !frames().pending.map && !frames().applied.map && events().some((e) => e.event === 'frame_dismiss' && e.id === id2) && await order() === own);
+
+  // ---- narrow widths with a note showing ----
+  await send('is the registered mail still the plan?');
+  await waitFor(noteShown, 4000);
+  for (const w of [800, 390]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width: w, height: 800, deviceScaleFactor: 1, mobile: false });
+    await sleep(250);
+    const r = await page.eval(`(() => { const n = document.querySelector('${note}').getBoundingClientRect(), p = document.querySelector('#pane-map').getBoundingClientRect(); return { hscroll: document.documentElement.scrollWidth > innerWidth, inPane: n.left >= p.left - 1 && n.right <= p.right + 1, w: Math.round(n.width) }; })()`);
+    check(`${w} px: the note fits its pane, no horizontal scroll`, !r.hscroll && r.inPane, JSON.stringify(r));
+    await shot(`v10-note-${w}.png`);
+  }
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(200);
+
+  // ---- the keyboard path of the demo: real Tab presses from the empty input reach the note, f there applies ----
+  await page.eval(`document.getElementById('input').value = ''; document.getElementById('input').focus()`);
+  const tabs = [];
+  for (let i = 0; i < 12; i++) {
+    await page.key('Tab');
+    const a = await page.eval(`(() => { const a = document.activeElement; return a.classList.contains('frame-note') ? 'NOTE' : (a.dataset.id || a.className || a.tagName); })()`);
+    tabs.push(a);
+    if (a === 'NOTE') break;
+  }
+  check(`real Tab presses from the input reach the note (${tabs.length} presses)`, tabs.at(-1) === 'NOTE', tabs.join(' > '));
+  await page.key('f');
+  await waitFor(`!!document.querySelector('#pane-map .item.framed')`, 3000);
+  check('f on the note (reached with Tab) applies the proposal', await page.eval(`!!document.querySelector('#pane-map .item.framed') && !document.querySelector('${note}')`));
+
+  // ---- the flag off hides frames (kept on file), on shows them again ----
+  const framedOrder = await order();
+  await page.submit('/flag frame-proposals off', 800);
+  await waitFor(`!document.querySelector('#pane-map .item.framed')`, 2000);
+  check('/flag frame-proposals off: the applied frame is not shown (own order), no note; frames.json keeps it', await order() === own && !(await page.eval(noteShown)) && !!frames().applied.map, `${framedOrder} -> ${await order()}`);
+  await page.submit('/flag frame-proposals on', 800);
+  await waitFor(`!!document.querySelector('#pane-map .item.framed')`, 2000);
+  check('on again: the applied frame is back', await order() === framedOrder);
+  await page.submit('/frame reset', 800);
+  await waitFor(`!document.querySelector('#pane-map .item.framed')`, 2000);
+  check('/frame reset: own order again', await order() === own);
+
+  // ---- the kanban: a frame orders each column; the apply button ----
+  editJson('modules.json', (m) => {
+    const map = m.panes.find((p) => p.module === 'map'), kb = m.panes.find((p) => p.module === 'kanban');
+    map.state = 'faded'; map.fadedAt = new Date().toISOString(); map.fadedTurn = 45;
+    delete kb.state; delete kb.fadedAt; delete kb.fadedTurn; kb.lastTouch = { at: new Date().toISOString(), turn: 45, how: 'tab' };
+  });
+  await waitFor(`!!document.querySelector('#pane-kanban .cols') && !!document.querySelector('#pane-map.faded')`, 3000);
+  const col = (c) => page.eval(`[...document.querySelectorAll('#pane-kanban .col.${c} .item')].map((x) => x.dataset.id).join(',')`);
+  const doneBefore = await col('done'), todoBefore = await col('todo');
+  await send('who calls the insurer about the deadline?');
+  const kms = await waitFor(`!!document.querySelector('#pane-kanban .frame-note')`, 4000);
+  check(`map a tab, kanban shown: the proposal comes for the kanban (${kms} ms), none for the map tab`, kms !== null && frames().pending.kanban && !frames().pending.map
+    && await page.eval(`document.querySelector('#pane-kanban .frame-note .fn-what').textContent.startsWith('model suggests: focus task-2')`));
+  await page.eval(`document.querySelector('#pane-kanban .frame-note button[data-frame-action="apply"]').click()`);
+  await waitFor(`!!document.querySelector('#pane-kanban .item.framed')`, 3000);
+  const doneAfter = await col('done');
+  check('the apply button: task-2 marked and first in its column; every column keeps its cards (only the order moves)', await page.eval(`document.querySelector('#pane-kanban .item.framed').dataset.id`) === 'task-2'
+    && doneAfter.split(',')[0] === 'task-2' && doneAfter.split(',').sort().join() === doneBefore.split(',').sort().join() && (await col('todo')).split(',').sort().join() === todoBefore.split(',').sort().join(), `done ${doneBefore} -> ${doneAfter}; todo ${todoBefore} -> ${await col('todo')}`);
+  check('the map tab stayed a tab (a frame never brings a pane back)', await page.eval(`!!document.querySelector('#pane-map.faded')`));
+  check('no frame write touched state.json items or modules.json panes', events().filter((e) => e.event === 'item_write').length === writes0 && JSON.parse(fs.readFileSync(file('modules.json'), 'utf8')).panes.length === 3);
+}
+
+const SCENARIOS = { p1, p2, v03, v04, v05, v06, v07, v08, v09, v10 };
 const ENVS = {
   v03: () => {
     const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
@@ -997,6 +1144,18 @@ const ENVS = {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v09b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4825/', fakes: [5826, 5827], dir: '.pilot-verify-v09b', config: file, cdp: 9403 };
+  },
+  v10: () => {
+    const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
+    c.port = 4835;
+    c.roles.chat.candidates[0].baseUrl = 'http://127.0.0.1:5836/v1';
+    c.roles.chat.candidates[1].baseUrl = 'http://127.0.0.1:5837/v1';
+    c.roles.extract.candidates[0].baseUrl = 'http://127.0.0.1:5837/v1';
+    c.roles.frame.candidates[0].baseUrl = 'http://127.0.0.1:5837/v1';
+    c.experiments = { settledInput: false, settleMs: 1800, frameProposals: false };
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v10b-')), 'config.json');
+    fs.writeFileSync(file, JSON.stringify(c));
+    return { url: 'http://127.0.0.1:4835/', fakes: [5836, 5837], dir: '.pilot-verify-v10b', config: file, cdp: 9413 };
   },
 };
 

@@ -4,6 +4,92 @@ P0 to P2 (skeleton, model roles, growth controller with consent and the index pa
 baseline, merged before the numbered iterations started; see `CHECKS.md` (# P0, # P1, # P2). Iterations are
 tagged `pilot-v0.N` by the coordinator; each one is runnable with `npm run demo -- v0.N`.
 
+## pilot-v0.10
+
+Frame proposals: an experiment behind a flag, never the default. 02-morph's rule, applied to the pilot: a model may only
+*propose* a frame, a closed vocabulary decides what it can say, and you decide whether it applies. The frame is
+allographic paratext (03-rolle-und-kodex): written about your workbench by someone other than you, so it says so. Still
+untested with a real model (fakes only).
+
+**Adds**
+- **The flag.** `experiments.frameProposals` in `pilot.config.json` (default `false`; both shipped configs say so), or
+  `/flag frame-proposals on|off` (kept in `.pilot/flags.json`, wins over the config, like settled-input). `/flag` now
+  prints one line per flag; the settled-input line is unchanged and first. `/state.flags` gains `frameProposals` and
+  `frameSource` (`source` still names the settled-input source).
+- **Off = the old behaviour.** No frame role call, no `frames.json`, no event, no note, cards in their own order, `f`
+  is an ordinary key, and the status bar does not list the frame role (it appears there only while the flag is on).
+  `POST /frame` answers 409 "experiment is off". `/model` lists the role, since it is in the config.
+- **A `frame` role** in the config (both shipped configs: one local candidate `morrow`, `structured: true`; the dev
+  config points it at the morrow fake). It runs after a complete reply, in the background, queued after that turn's
+  extraction (its proposals are cards a frame may name), and only while a map or kanban is shown and not a tab;
+  otherwise there is no call at all. Through `callRole` it obeys pins (`/model frame <name>`), the local-only fallback
+  rule and `stallMs` like every role; a failure or stall logs `frame_error` and writes nothing. `/state.framing` says
+  when a run is queued or running.
+- **The closed FrameIntent** (`schemas/frame-intent.schema.json`, checked by `frame.js`):
+  `{pane: "map" | "kanban", focus?: item id, order?: [item ids], group?: "status" | "author"}`, `additionalProperties:
+  false`. `{}` means "no suggestion" (`frame_none`). On top of the schema the pane must be shown with consent and not a
+  tab, and every id must be a card of that pane that is not rejected; an id twice in `order`, or an intent with nothing
+  to do, is refused. Anything else (an unknown key such as `hide`, `status`, `text`, `add`; an unknown or foreign id;
+  pane `index`; not JSON) rejects the whole intent: `frame_reject {reason, errors}` in `metrics.jsonl`, nothing written.
+  A suggestion equal to the applied or the open one is `frame_reject reason same`.
+- **The hand validator moved to `schema-check.js`** (unchanged), so extraction and frames use the same code, and an
+  unsupported schema keyword still fails at startup.
+- **`.pilot/frames.json`** `{rev, pending: {pane}, applied: {pane}, resets: {pane}}`: one open proposal and one
+  applied frame per pane. A proposal records `id` (`fr-N`), the intent, `author: "model"`, `model` (candidate) and
+  `modelId`, `at`, `fromMessage`, `turn`; an applied frame adds `appliedBy: "user"` and `appliedAt`; a reset records
+  `{at, by: "user", frame}`. Hand-editable like the other JSON files: `rev`, pushed over SSE, a broken file is read as
+  its last good version, shown in `fileErrors` and never written (`POST /frame` 409, `/frame reset` 400, a turn logs
+  `frame_error reason frames`). A frame never writes `modules.json` or `state.json`.
+- **The page.** A proposal is a dashed lavender note at the top of its pane: `model suggests: focus dec-2 · order dec-2,
+  dec-4, src-1, dec-1, …` and, muted, `suggested by morrow, not by you`, with `f apply`, `dismiss` and `why?`. Nothing
+  changes until you apply it:
+  - **`f`** applies it while focus is in that pane (a card, the note itself, or the pane body), never from the chat
+    input, never on a focused button, with the same guards as `c`/`r` (no modifier, not composing, not a repeat). The
+    note is focusable (Tab reaches it, Escape returns to the input). The buttons work too.
+  - **Applied**, the frame only arranges: cards named in `order` come first in that order (the rest keep theirs; it
+    applies to the decision chain, the sources and each kanban column alike), the `focus` card gets a lavender bar and
+    the chip `frame focus, suggested by morrow` and is scrolled to, `group` adds sub-headings. Nothing is hidden, no
+    card or text changes. A muted line at the top says `frame fr-1: … · suggested by morrow · applied by you 10-17 15:54
+    · reset`.
+  - With the flag off an applied frame is not shown (it stays in `frames.json` and comes back when the flag is on).
+- **`POST /frame {pane, id, action: apply|dismiss, rev?}`**: only the page (you) applies or dismisses. Apply checks the
+  intent again against what is on screen now; one that no longer fits (a card was rejected or removed, the pane became
+  a tab) is dropped with 409 and `frame_reject reason stale`. A stale `rev` is 409 `{stale: true}` like the other files.
+  Each step adds a system line and an event: `frame_apply {id, module, intent, by: "user", model, proposedAt}`,
+  `frame_dismiss`.
+- **`/frame`** lists, per pane, the applied frame and the open proposal; **`/frame reset [map|kanban]`** puts a pane
+  (or both) back in its own order (`frame_reset`, a system line, `resets.<pane>`). Reset works with the flag off too: a
+  frame must always be undoable.
+- **`/why map` and `/why kanban`** explain a frame when one is on file: what the applied frame does, which model
+  suggested it after which message (with a "show" link), that you applied it and when, an open proposal, the last
+  reset, how many suggestions for that pane were rejected and why (by recorded reason). Every statement cites `frames.json:N applied.map`,
+  `metrics.jsonl:N frame_propose fr-1`, `frame_apply`, `frame_reset` (resolved by `dev/why-cites.js`, which learned the
+  `frames.json` labels). A frame in the file without a matching event reads "written by file edit, when is not
+  recorded". `/why` (the whole workbench) gets one `frames:` line. Without frames the explanations are as before.
+- **Fake:** `dev/fake-model.js --frame=good|group|none|bad|badid|badkey|wrongpane|malformed`. Frame requests are
+  recognised by `PILOT-FRAME` before the extraction test (both carry `response_format`). `good` frames the first pane
+  with cards: focus = the card sharing most words with your last message, then the rest by score, newest first.
+- **Demo `v0.10`** (`dev/make-fixture-v10.js`, from the v0.9 fixture): the same workbench; `frameProposals: true` and
+  `settledInput: false` in the demo config only (Tab must move focus into the map, not send).
+- **Dev:** `dev/verify-v0.10.sh` (63 checks, one runs `browser-check.js v10` with 32 checks: 30 + 2 global);
+  `contrast-check.js` covers the note, its byline and its keys.
+
+**Why**
+- 02-morph ends on the question of authority: who owns the frame? This build answers it for one small case: the model
+  may say how a pane could be arranged, in a vocabulary that has no word for adding, hiding, changing or deciding, and
+  only your key makes it so. 06-open-questions puts "frame provenance in the UI" at "when panes start re-ordering";
+  they now do, so every frame says who suggested it and who applied it, and `/why` can tell.
+
+**Deliberately does not**
+- No hiding, collapsing, resizing or re-titling; no layout change of the workbench; no frame for the index or the chat.
+- No frame for a pane that is a tab, and a frame never brings one back or keeps one from fading (`fade.js` counts card
+  proposals only).
+- No automatic apply, no "always apply", no learning from what you apply or dismiss.
+- No `everyNTurns` for the frame role (it runs after every reply while the flag is on; see QUESTIONS.md).
+- No `/stats` block for frames yet: the events are in `metrics.jsonl` (`frame_propose`, `frame_reject`, `frame_none`,
+  `frame_error`, `frame_apply`, `frame_dismiss`, `frame_reset`), the five P5 measures are unchanged.
+- Untested with a real model.
+
 ## pilot-v0.9
 
 Enter, diffused: an experiment behind a flag, never the default. The blackboard explainer hands on "how does Enter

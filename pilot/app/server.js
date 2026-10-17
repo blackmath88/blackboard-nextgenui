@@ -14,6 +14,10 @@
 // pilot-v0.9: experiment "settled input" behind a flag (experiments.settledInput in the config, or /flag settled-input
 // on|off, kept in .pilot/flags.json; default off). The page proposes "send?" after a pause on a finished-looking input
 // (public/settle.js) and reports settle_offer / settle_accept / settle_ignore / enter_send via POST /metric.
+// pilot-v0.10: frame proposals behind a flag (experiments.frameProposals, /flag frame-proposals on|off; default off).
+// After a turn the `frame` role may return a FrameIntent (schemas/frame-intent.schema.json, checked by frame.js): how a
+// shown map or kanban presents its cards. It is kept as a proposal in .pilot/frames.json; only you apply it (f in that
+// pane, POST /frame) or dismiss it; /frame reset undoes an applied one. It never touches modules.json or state.json.
 // Node 20+, no dependencies. All paths resolve against this file's folder.
 'use strict';
 const http = require('http');
@@ -23,6 +27,7 @@ const crypto = require('crypto');
 const stats = require('./stats.js');
 const why = require('./why.js');
 const fade = require('./fade.js');
+const frame = require('./frame.js');
 
 const APP = __dirname;
 const PUBLIC = path.join(APP, 'public');
@@ -38,6 +43,7 @@ const RULES = path.join(PILOT, 'rules.json');
 const MODULES = path.join(PILOT, 'modules.json');
 const STATE = path.join(PILOT, 'state.json');      // decisions, tasks, sources (proposed by the model or added by hand)
 const FLAGS = path.join(PILOT, 'flags.json');      // pilot-v0.9: /flag overrides of config.experiments (hand-editable)
+const FRAMES = path.join(PILOT, 'frames.json');    // pilot-v0.10: frame proposals and applied frames (hand-editable)
 const EXTRACTION_SCHEMA = JSON.parse(fs.readFileSync(path.join(APP, 'schemas', 'extraction.schema.json'), 'utf8'));
 const BUILT = ['index', 'map', 'kanban'];   // panes this build can show; the controller only evaluates their rules
 const PORT = Number(config.port) || 4747;
@@ -124,7 +130,7 @@ function readJsonGood(file, fallback) {
 // /flag and hand-editable, overrides it. A broken flags.json reads as its last good version and is never written. ----
 const EXPERIMENTS = config.experiments && typeof config.experiments === 'object' ? config.experiments : {};
 const SETTLE_MS = Math.min(10000, Math.max(300, Number(EXPERIMENTS.settleMs) || 1800));   // pause before the offer
-const FLAG_NAMES = { 'settled-input': 'settledInput' };
+const FLAG_NAMES = { 'settled-input': 'settledInput', 'frame-proposals': 'frameProposals' };   // pilot-v0.10: frame-proposals
 function readFlags() {
   const r = readJsonGood(FLAGS, null);
   const d = r.doc && typeof r.doc === 'object' && !Array.isArray(r.doc) ? r.doc : {};
@@ -133,14 +139,19 @@ function readFlags() {
   if (r.error) out.error = r.error;
   return out;
 }
-// -> {settledInput, settleMs, source}: source names where the value comes from (flags.json, the config, or the default)
+// One flag: [value, source]; source names where the value comes from (flags.json, the config, or the default).
+function flagValue(f, key) {
+  let v = false, source = 'default (off)';
+  if (typeof EXPERIMENTS[key] === 'boolean') { v = EXPERIMENTS[key]; source = `${path.relative(APP, configPath)} experiments.${key}`; }
+  if (typeof f.experiments[key] === 'boolean') { v = f.experiments[key]; source = `${path.relative(APP, PILOT)}/flags.json (/flag)`; }
+  return [v, source];
+}
+// -> {settledInput, settleMs, source, frameProposals, frameSource, rev}: `source` stays the settled-input source (v0.9)
 function flagsSummary() {
   const f = readFlags();
-  const cfgName = path.relative(APP, configPath);
-  let settledInput = false, source = 'default (off)';
-  if (typeof EXPERIMENTS.settledInput === 'boolean') { settledInput = EXPERIMENTS.settledInput; source = `${cfgName} experiments.settledInput`; }
-  if (typeof f.experiments.settledInput === 'boolean') { settledInput = f.experiments.settledInput; source = `${path.relative(APP, PILOT)}/flags.json (/flag)`; }
-  return { settledInput, settleMs: SETTLE_MS, source, rev: f.rev };
+  const [settledInput, source] = flagValue(f, 'settledInput');
+  const [frameProposals, frameSource] = flagValue(f, 'frameProposals');
+  return { settledInput, settleMs: SETTLE_MS, source, frameProposals, frameSource, rev: f.rev };
 }
 
 // ---- growth: deterministic controller over rules.json, consent answers in modules.json ----
@@ -558,37 +569,10 @@ function nextId(doc, kind) {
   return `${PREFIX[kind]}-${max + 1}`;
 }
 
-// ---- validation: a small hand validator for the subset of JSON Schema that extraction.schema.json uses ----
-// (type, required, additionalProperties: false, properties, enum, minLength, maxLength, maxItems, items).
-// Chosen over Ajv: no dependency, and the schema is closed and tiny. An unknown keyword fails loudly at startup.
-const KNOWN = new Set(['$schema', 'title', 'description', 'type', 'required', 'additionalProperties', 'properties', 'enum', 'minLength', 'maxLength', 'maxItems', 'items']);
-(function assertSupported(s) {
-  for (const k of Object.keys(s)) if (!KNOWN.has(k)) throw new Error(`extraction.schema.json uses "${k}", which the hand validator does not support`);
-  if (s.properties) Object.values(s.properties).forEach(assertSupported);
-  if (s.items) assertSupported(s.items);
-})(EXTRACTION_SCHEMA);
-function validate(s, v, at = '$') {
-  const errs = [];
-  const type = Array.isArray(v) ? 'array' : v === null ? 'null' : Number.isInteger(v) ? 'integer' : typeof v;
-  if (s.type && !(s.type === type || (s.type === 'number' && type === 'integer'))) return [`${at}: expected ${s.type}, got ${type}`];
-  if (s.enum && !s.enum.includes(v)) errs.push(`${at}: must be one of ${s.enum.join(', ')}`);
-  if (typeof v === 'string') {
-    if (s.minLength !== undefined && v.length < s.minLength) errs.push(`${at}: shorter than ${s.minLength}`);
-    if (s.maxLength !== undefined && v.length > s.maxLength) errs.push(`${at}: longer than ${s.maxLength}`);
-  }
-  if (type === 'object') {
-    for (const r of s.required || []) if (!(r in v)) errs.push(`${at}: missing "${r}"`);
-    for (const [k, val] of Object.entries(v)) {
-      if (s.properties && s.properties[k]) errs.push(...validate(s.properties[k], val, `${at}.${k}`));
-      else if (s.additionalProperties === false) errs.push(`${at}: unexpected "${k}"`);
-    }
-  }
-  if (type === 'array') {
-    if (s.maxItems !== undefined && v.length > s.maxItems) errs.push(`${at}: ${v.length} items, at most ${s.maxItems} allowed`);
-    if (s.items) v.forEach((x, i) => errs.push(...validate(s.items, x, `${at}[${i}]`)));
-  }
-  return errs;
-}
+// ---- validation: the hand validator (schema-check.js, moved there unchanged in pilot-v0.10) for the subset of JSON
+// Schema that extraction.schema.json uses. An unknown keyword fails loudly at startup.
+const { assertSupported, validate } = require('./schema-check.js');
+assertSupported(EXTRACTION_SCHEMA, 'extraction.schema.json');
 
 // Model output -> {items} or {error, reason}. A ```json fence around the object is tolerated; nothing else is.
 function parseExtraction(text) {
@@ -697,6 +681,176 @@ async function runExtraction(userLine, replyLine) {
   await runController();   // new proposals may cross a map/kanban threshold
 }
 
+// ---- pilot-v0.10: frame proposals (frame.js has the rules; these functions write frames.json, nothing else) ----
+// frames.json {rev, pending: {pane: proposal}, applied: {pane: frame}, resets: {pane: reset}}: one open proposal and one
+// applied frame per pane. A proposal: {id, pane, intent, author: "model", model, modelId, at, fromMessage, turn}; an
+// applied frame is the proposal plus appliedBy "user" and appliedAt. Hand-editable like the other JSON files: a broken
+// one is read as its last good version and never written.
+function readFrames() {
+  const r = readJsonGood(FRAMES, null);
+  const out = frame.normalize(r.doc);
+  if (r.error) out.error = r.error;
+  return out;
+}
+function writeFrames(f) {   // inside the write chain, only after readFrames() said the file is fine; keeps unknown fields
+  let base = {};
+  try { const d = readJson(FRAMES, {}); if (d && typeof d === 'object' && !Array.isArray(d)) base = d; } catch { /* not reached */ }
+  const doc = { ...base, rev: (f.rev || 0) + 1, pending: f.pending, applied: f.applied, resets: f.resets };
+  atomicWrite(FRAMES, JSON.stringify(doc, null, 2) + '\n'); lastGood['frames.json'] = JSON.parse(JSON.stringify(doc));
+  f.rev = doc.rev;
+  return doc.rev;
+}
+// What a frame may refer to now: panes shown with consent, which of them are tabs, the items.
+function frameContext() {
+  const m = readModules(), st = readState();
+  const visible = visiblePanes(m);
+  return { visible, faded: visible.filter((mod) => fade.isFaded(m.panes.find((p) => p.module === mod))), items: st.items, error: m.error || st.error || null };
+}
+function nextFrameId(f) {
+  const nums = metricsEvents().filter((e) => e.event === 'frame_propose').map((e) => e.id)
+    .concat(Object.values(f.pending).map((p) => p && p.id), Object.values(f.applied).map((p) => p && p.id))
+    .map((id) => /^fr-(\d+)$/.exec(String(id))).filter(Boolean).map((x) => Number(x[1]));
+  return `fr-${Math.max(0, ...nums) + 1}`;
+}
+
+let framing = 0;                       // queued + running frame runs (GET /state reports framing: true)
+let frameChain = Promise.resolve();
+
+function frameMessages(userLine, replyLine, panes, items, applied) {
+  const list = (mod) => items.filter((i) => fade.PANE_KINDS[mod].includes(i.kind) && i.status !== 'rejected')
+    .map((i) => `- ${i.id} (${i.kind}, ${i.status || 'confirmed'}${i.kind === 'task' ? `, ${i.column || 'todo'}` : ''}): ${i.text}`).join('\n') || '(no cards)';
+  const shown = panes.map((p) => `${p}:\n${list(p)}`).join('\n\n');
+  const now = panes.map((p) => `- ${p}: ${applied[p] && applied[p].intent ? frame.describe(applied[p].intent) : '(default)'}`).join('\n');
+  return [
+    { role: 'system', content: 'PILOT-FRAME v1\nYou may suggest ONE frame for ONE of the panes below: how that pane presents its cards. Reply with JSON '
+      + 'only: {"pane": "map" | "kanban", "focus": item id, "order": [item ids], "group": "status" | "author"} (focus, order and group are '
+      + 'optional), or {} for no suggestion. Use only the ids listed under that pane. A frame only arranges: it cannot add, remove, '
+      + 'change, confirm or reject cards, and cannot add or remove panes. The person decides whether to apply it.' },
+    { role: 'user', content: `Panes shown:\n${shown}\n\nFrames now:\n${now}\n\nLast user message:\n${userLine.text}\n\nLast assistant message:\n${replyLine.text}` },
+  ];
+}
+
+// After a complete reply, only while the flag is on and a frame role is configured; queued after this turn's
+// extraction (its proposals are cards a frame may name), never awaited by the chat.
+function queueFrame(userLine, replyLine) {
+  if (!flagsSummary().frameProposals || !roleConfig('frame').candidates.length) return;
+  framing++;
+  const after = extractChain;
+  frameChain = Promise.all([after, frameChain]).then(() => runFrame(userLine, replyLine))
+    .catch((err) => { console.error('frame failed:', err); return metric('frame_error', { reason: 'internal', error: String(err.message || err) }); })
+    .catch(() => {})
+    .finally(() => { framing--; });
+}
+
+async function runFrame(userLine, replyLine) {
+  if (!flagsSummary().frameProposals) return;   // switched off meanwhile
+  const ctx = frameContext();
+  const panes = frame.FRAME_PANES.filter((p) => ctx.visible.includes(p) && !ctx.faded.includes(p));
+  if (ctx.error || !panes.length) return;        // nothing a frame could arrange: no model call
+  const cur = readFrames();
+  if (cur.error) { await metric('frame_error', { reason: 'frames', error: cur.error, fromMessage: replyLine.id }); return; }
+  const schema = JSON.parse(JSON.stringify(frame.SCHEMA));
+  delete schema.$schema;
+  const structured = (c) => c.structured === true ? { response_format: { type: 'json_schema', json_schema: { name: 'pilot_frame', schema } } } : {};
+  const t0 = Date.now();
+  let out;
+  try { out = await callRole('frame', frameMessages(userLine, replyLine, panes, ctx.items, cur.applied), () => {}, new AbortController().signal, structured); }
+  catch (err) { await metric('frame_error', { reason: err.stall ? 'stall' : 'model', error: String(err.message || err), fromMessage: replyLine.id }); return; }
+  const base = { candidate: out.candidate.name, model: out.candidate.model, fromMessage: replyLine.id };
+  const parsed = frame.parse(out.text);
+  if (parsed.none) { await metric('frame_none', { ...base, latencyMs: Date.now() - t0 }); return; }
+  if (parsed.error) { await metric('frame_reject', { ...base, reason: parsed.reason, errors: [parsed.error], chars: out.text.length }); return; }
+  const intent = parsed.intent, pane = intent.pane;
+  await serial(() => {
+    const ts = new Date().toISOString();
+    const f = readFrames();   // fresh: you may have applied, dismissed or hand-edited meanwhile
+    if (f.error) { appendJsonl(METRICS, { ts, event: 'frame_error', ...base, reason: 'frames', error: f.error }); return; }
+    const c = frame.check(intent, frameContext());
+    if (!c.ok) { appendJsonl(METRICS, { ts, event: 'frame_reject', ...base, module: pane, reason: c.reason, errors: c.errors, intent }); return; }
+    const dup = [f.applied[pane], f.pending[pane]].find((p) => p && frame.same(p.intent, intent));
+    if (dup) { appendJsonl(METRICS, { ts, event: 'frame_reject', ...base, module: pane, reason: 'same', errors: [`same as ${dup.id} (${dup === f.applied[pane] ? 'applied' : 'proposed'})`], intent }); return; }
+    const id = nextFrameId(f), prev = f.pending[pane];
+    f.pending[pane] = { id, pane, intent, author: 'model', model: out.candidate.name, modelId: out.candidate.model, at: ts, fromMessage: replyLine.id, turn: fade.turnOf(readTranscript()) };
+    const rev = writeFrames(f);
+    appendJsonl(METRICS, { ts, event: 'frame_propose', id, module: pane, intent, ...base, turn: f.pending[pane].turn, rev, latencyMs: Date.now() - t0, ...(prev && prev.id ? { replaces: prev.id } : {}) });
+  });
+}
+
+// POST /frame {pane, id, action: apply|dismiss, rev?}: only you apply or dismiss a proposal. Apply checks it again
+// against what is on screen now (cards or panes may have changed since it was proposed); one that no longer fits is
+// dropped (409). `rev` = the frames.json rev the page last saw; a stale one is 409 {stale: true}.
+function frameAnswer(pane, id, action, seenRev) {
+  return serial(() => {
+    if (!frame.FRAME_PANES.includes(pane)) return { code: 400, body: { error: `pane must be one of ${frame.FRAME_PANES.join(', ')}` } };
+    if (action !== 'apply' && action !== 'dismiss') return { code: 400, body: { error: 'action must be apply or dismiss' } };
+    if (!flagsSummary().frameProposals) return { code: 409, body: { error: 'the frame-proposals experiment is off (/flag frame-proposals on)' } };
+    const f = readFrames();
+    if (f.error) return { code: 409, body: { error: `${f.error}; fix the file by hand first` } };
+    if (seenRev !== undefined && seenRev !== f.rev) return stale('frames.json', seenRev, f.rev);
+    const p = f.pending[pane];
+    if (!p || p.id !== id) return { code: 409, body: { error: `no open frame proposal "${id}" for ${pane}`, pending: p ? p.id : null } };
+    const ts = new Date().toISOString();
+    const who = `suggested by ${p.model || 'a model'}`;
+    if (action === 'dismiss') {
+      delete f.pending[pane];
+      const rev = writeFrames(f);
+      appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `${pane}: frame ${id} dismissed (${who}); nothing changed`, model: null });
+      appendJsonl(METRICS, { ts, event: 'frame_dismiss', id, module: pane, by: 'user', model: p.model || null, rev });
+      return { code: 200, body: { ok: true, pane, id, action, rev } };
+    }
+    const c = p.intent && typeof p.intent === 'object' ? frame.check(p.intent, frameContext()) : { ok: false, reason: 'schema', errors: ['no intent'] };
+    if (!c.ok) {
+      delete f.pending[pane];
+      const rev = writeFrames(f);
+      appendJsonl(METRICS, { ts, event: 'frame_reject', id, module: pane, reason: 'stale', errors: c.errors, rev });
+      return { code: 409, body: { error: `frame ${id} no longer fits (${c.errors.join('; ')}); dropped, nothing changed`, rev } };
+    }
+    const prev = f.applied[pane];
+    f.applied[pane] = { ...p, appliedBy: 'user', appliedAt: ts };
+    delete f.pending[pane];
+    const rev = writeFrames(f);
+    appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `${pane}: frame ${id} applied by you (${who}): ${frame.describe(p.intent)}. /frame reset ${pane} undoes it`, model: null });
+    appendJsonl(METRICS, { ts, event: 'frame_apply', id, module: pane, intent: p.intent, by: 'user', model: p.model || null, proposedAt: p.at || null, rev, ...(prev && prev.id ? { replaces: prev.id } : {}) });
+    return { code: 200, body: { ok: true, pane, id, action, frame: f.applied[pane], rev } };
+  });
+}
+
+// /frame reset [pane]: back to the pane's own order (works with the flag off too: a frame must always be undoable).
+function frameReset(panes) {
+  return serial(() => {
+    const f = readFrames();
+    if (f.error) return { ok: false, lines: [`frames.json is not valid JSON, not changed: ${f.error}`] };
+    const ts = new Date().toISOString(), done = [];
+    for (const pane of panes) {
+      const a = f.applied[pane];
+      if (!a) continue;
+      delete f.applied[pane];
+      f.resets[pane] = { at: ts, by: 'user', frame: a.id || null };
+      done.push([pane, a]);
+    }
+    if (!done.length) return { ok: true, lines: [`nothing to reset: no frame applied${panes.length === 1 ? ` to ${panes[0]}` : ''}`] };
+    const rev = writeFrames(f);
+    for (const [pane, a] of done) {
+      appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `${pane}: frame ${a.id} reset by you; the pane shows its own order again`, model: null });
+      appendJsonl(METRICS, { ts, event: 'frame_reset', id: a.id || null, module: pane, by: 'user', rev });
+    }
+    return { ok: true, lines: done.map(([pane, a]) => `${pane}: frame ${a.id} reset (kept in ${path.relative(APP, PILOT)}/frames.json resets.${pane})`) };
+  });
+}
+function frameLines() {
+  const f = readFrames(), on = flagsSummary().frameProposals;
+  const lines = [];
+  if (!on) lines.push('frame-proposals is off: no frame is proposed or shown (/flag frame-proposals on)');
+  if (f.error) lines.push(`${f.error}: showing the last good version`);
+  for (const pane of frame.FRAME_PANES) {
+    const a = f.applied[pane], p = f.pending[pane];
+    if (a) lines.push(`${pane}: frame ${a.id} applied by you at ${a.appliedAt} (suggested by ${a.model}): ${frame.describe(a.intent)}  (/frame reset ${pane} undoes it)`);
+    if (p) lines.push(`${pane}: frame ${p.id} proposed by ${p.model} at ${p.at}: ${frame.describe(p.intent)}  (f in the ${pane} pane applies it)`);
+    if (!a && !p) lines.push(`${pane}: no frame (its own order)`);
+  }
+  return lines;
+}
+
 // pilot-v0.6: the server's write ledger. Every item the server creates or decides is logged as `item_write` with a
 // copy of the item as written (see stats.js provenance). Hand edits made before this write stay attributed: their
 // fields go along as handFields (except the ones this write sets), an item that came in through the file keeps
@@ -788,7 +942,7 @@ function fileRev(name) {
   if (!name.endsWith('.json')) return { rev: null };
   try {
     const j = JSON.parse(raw);
-    if (name === 'modules.json' || name === 'roles.json' || name === 'flags.json') lastGood[name] = j;   // keep the last good version fresh
+    if (['modules.json', 'roles.json', 'flags.json', 'frames.json'].includes(name)) lastGood[name] = j;   // keep the last good version fresh
     return { rev: j && Number.isInteger(j.rev) ? j.rev : 0 };
   }
   catch (e) { return { rev: null, error: `${name} is not valid JSON: ${e.message}` }; }
@@ -843,7 +997,7 @@ function handleEvents(req, res) {
 // the named files (the page reloads only what changed). extracting and fileErrors are always included.
 function statePayload(only) {
   const want = (f) => !only || only.includes(f);
-  const out = { extracting: extracting > 0 };
+  const out = { extracting: extracting > 0, framing: framing > 0 };
   if (want('transcript.jsonl')) { const lines = readTranscript(); out.transcript = lines.slice(-TAIL); out.total = lines.length; out.turn = fade.turnOf(lines); }
   if (want('modules.json') || want('roles.json')) out.models = modelsSummary();
   let m = null, st = null;
@@ -860,11 +1014,12 @@ function statePayload(only) {
       modulesRev: m.rev, paneInfo, faded: visiblePanes(m).filter((mod) => fade.isFaded(m.panes.find((p) => p.module === mod))) });
   }
   if (want('flags.json')) out.flags = flagsSummary();   // pilot-v0.9
+  if (want('frames.json')) { const f = readFrames(); out.frames = { rev: f.rev, pending: f.pending, applied: f.applied, resets: f.resets }; }   // pilot-v0.10
   // items carry `prov` ({added, fields}) when a part of them came from a hand edit (pilot-v0.6, see stats.js)
   if (want('state.json')) { st = readState(); Object.assign(out, { items: stats.withProvenance(st.items, metricsEvents()), stateRev: st.rev, stateError: st.error || null }); }
   // a broken hand-editable file: the page says "file X is not valid JSON, showing last good version" until fixed
   const fileErrors = {};
-  for (const [f, e] of [['state.json', (st || readState()).error], ['modules.json', (m || readModules()).error], ['roles.json', readJsonGood(ROLES, {}).error], ['flags.json', readFlags().error]]) if (e) fileErrors[f] = e;
+  for (const [f, e] of [['state.json', (st || readState()).error], ['modules.json', (m || readModules()).error], ['roles.json', readJsonGood(ROLES, {}).error], ['flags.json', readFlags().error], ['frames.json', readFrames().error]]) if (e) fileErrors[f] = e;
   out.fileErrors = fileErrors;
   return out;
 }
@@ -965,7 +1120,7 @@ async function handleChat(req, res) {
   await metric('turn', { ok: !!replyLine, lines: after.length, messages: after.filter((l) => l.role === 'user' || l.role === 'assistant').length });
   // Extraction only after a complete reply (not after a failure or a stall), queued before res.end() so
   // GET /state already reports it as running, and never awaited here: it cannot delay the chat reply.
-  if (replyLine) queueExtraction(userLine, replyLine);
+  if (replyLine) { queueExtraction(userLine, replyLine); queueFrame(userLine, replyLine); }   // pilot-v0.10: frame after extraction
   res.end();
 }
 
@@ -980,6 +1135,8 @@ const HELP = [
   '/why [pane|item id]        why the workbench looks like this: rules, questions, answers, origins, with sources',
   '/theme light|dark|auto     colour theme of this page (kept in this browser only)',
   '/flag [settled-input on|off]  experiments (pilot-v0.9): show them, or switch one (kept in flags.json; default off)',
+  '/flag frame-proposals on|off  experiment (pilot-v0.10): the frame role may suggest how a pane shows its cards',
+  '/frame [reset [map|kanban]]  frames (pilot-v0.10): what is proposed and applied per pane; reset undoes an applied frame',
   '/help                      this list',
 ];
 
@@ -1044,24 +1201,35 @@ async function runCommand(input) {
   // pilot-v0.9: experiment flags. Without arguments: each flag, its value and where it comes from.
   if (cmd === '/flag') {
     const fs0 = flagsSummary();
-    const show = () => [`settled-input: ${fs0.settledInput ? 'on' : 'off'}  (from ${fs0.source}; offer after ${fs0.settleMs} ms; Enter always sends)`];
+    const noRole = roleConfig('frame').candidates.length ? '' : '; no frame role in the config, so nothing is proposed';
+    const show = () => [`settled-input: ${fs0.settledInput ? 'on' : 'off'}  (from ${fs0.source}; offer after ${fs0.settleMs} ms; Enter always sends)`,
+      `frame-proposals: ${fs0.frameProposals ? 'on' : 'off'}  (from ${fs0.frameSource}; the frame role only suggests, f applies, /frame reset undoes${noRole})`];
     if (!args.length) return { ok: true, lines: show() };
     const [name, val] = args;
     if (!FLAG_NAMES[name]) return { ok: false, lines: [`unknown flag "${name}". Flags: ${Object.keys(FLAG_NAMES).join(', ')}`] };
     if (val !== 'on' && val !== 'off') return { ok: false, lines: [`usage: /flag ${name} on|off`] };
     const cur = readFlags();
     if (cur.error) return { ok: false, lines: [`flags.json is not valid JSON, not changed: ${cur.error}`] };
-    const on = val === 'on';
+    const on = val === 'on', key = FLAG_NAMES[name];
+    const was = key === 'settledInput' ? fs0.settledInput : fs0.frameProposals;
     await serial(() => {
       const doc = readJson(FLAGS, {}) || {};
       doc.rev = (Number.isInteger(doc.rev) ? doc.rev : 0) + 1;
-      doc.experiments = { ...(doc.experiments && typeof doc.experiments === 'object' ? doc.experiments : {}), [FLAG_NAMES[name]]: on };
+      doc.experiments = { ...(doc.experiments && typeof doc.experiments === 'object' ? doc.experiments : {}), [key]: on };
       atomicWrite(FLAGS, JSON.stringify(doc, null, 2) + '\n');
       lastGood['flags.json'] = doc;
     });
-    await appendLine('system', `experiment ${name} ${val} (/flag)${on ? ': after a pause on a finished-looking input the page offers "send?" (Tab sends, Enter always sends)' : ''}`, null);
-    await metric('flag', { name, value: on, was: fs0.settledInput });
-    return { ok: true, lines: [`settled-input: ${val}  (kept in ${path.relative(APP, PILOT)}/flags.json; /flag ${name} ${on ? 'off' : 'on'} switches back)`] };
+    const effect = { settledInput: ': after a pause on a finished-looking input the page offers "send?" (Tab sends, Enter always sends)',
+      frameProposals: ': after a turn the frame role may suggest how the map or kanban shows its cards; only you apply it (f in that pane)' }[key];
+    await appendLine('system', `experiment ${name} ${val} (/flag)${on ? effect : ''}`, null);
+    await metric('flag', { name, value: on, was });
+    return { ok: true, lines: [`${name}: ${val}  (kept in ${path.relative(APP, PILOT)}/flags.json; /flag ${name} ${on ? 'off' : 'on'} switches back)`] };
+  }
+  // pilot-v0.10: frames per pane; /frame reset [pane] undoes an applied frame
+  if (cmd === '/frame') {
+    if (!args.length) return { ok: true, lines: frameLines() };
+    if (args[0] !== 'reset' || args.length > 2 || (args[1] && !frame.FRAME_PANES.includes(args[1]))) return { ok: false, lines: [`usage: /frame [reset [${frame.FRAME_PANES.join('|')}]]`] };
+    return frameReset(args[1] ? [args[1]] : frame.FRAME_PANES);
   }
   if (cmd === '/stats') return { ok: true, lines: stats.formatStats(stats.computeStats(PILOT), `${path.relative(APP, PILOT)}/`) };
   if (cmd === '/panes') {
@@ -1108,6 +1276,14 @@ const server = http.createServer(async (req, res) => {
       if (at < 0) return sendJson(res, 400, { error: `no message "${target}"` });
       await metric('index_jump', { target, position: at + 1, of: lines.length });
       return sendJson(res, 200, { ok: true });
+    }
+    // pilot-v0.10: apply or dismiss a frame proposal (only you; the frame role only proposes)
+    if (req.method === 'POST' && pathname === '/frame') {
+      let body;
+      try { body = JSON.parse(await readBody(req, 2000)); } catch { return sendJson(res, 400, { error: 'expected JSON {pane, id, action}' }); }
+      const rev = body && body.rev !== undefined && body.rev !== null ? body.rev : undefined;
+      const out = await frameAnswer(body && body.pane, body && body.id, body && body.action, rev);
+      return sendJson(res, out.code, out.body);
     }
     // pilot-v0.8: the page reports an interaction with a pane (a faded pane comes back)
     if (req.method === 'POST' && pathname === '/touch') {

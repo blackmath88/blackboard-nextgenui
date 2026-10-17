@@ -37,6 +37,7 @@ function checkCite(c) {
   else if (/^items$/.test(label)) re = /"items"\s*:/;
   else if (/^(panes|rules) (\S+)/.test(label)) re = new RegExp(`"module"\\s*:\\s*"${esc(words[1].replace(/\.rule$/, ''))}"`);
   else if (/^answers\.(\S+)/.test(label)) re = new RegExp(`^\\s*"${esc(label.split(' ')[0].slice(8))}"\\s*:`);
+  else if (/^(applied|pending|resets)\.(\S+)/.test(label)) re = new RegExp(`^\\s*"${esc(words[0].split('.')[1])}"\\s*:`);   // pilot-v0.10: frames.json
   else if (/^pending/.test(label)) re = /"pending"\s*:/;
   else if (/^removals\.(\S+)/.test(label)) re = new RegExp(`^\\s*"${esc(label.split(' ')[0].slice(9))}"\\s*:`);   // pilot-v0.8
   else if (/^(fadeAfterTurns|askRemoveAfterTurns)\b/.test(label)) re = new RegExp(`"${words[0]}"\\s*:`);

@@ -17,6 +17,13 @@
 // on|off). After a pause of flags.settleMs on an input that looks finished (settle.js), a quiet inline "send?" appears;
 // Tab sends while it shows, Enter always sends, nothing is ever sent without a key. Off: no offer element, no listener
 // acts, Tab and Enter as before. Reports settle_offer / settle_accept / settle_ignore / enter_send (POST /metric).
+// pilot-v0.10: frame proposals, only while state.flags.frameProposals is on (default off; /flag frame-proposals on|off).
+// A proposal from the frame role (state.frames.pending.<pane>) is a dashed lavender note at the top of that pane,
+// "model suggests: focus dec-2 · order …", marked "suggested by <model>, not by you"; f (focus in that pane, not on a
+// button, same guards as c/r) or its apply button applies it (POST /frame), dismiss drops it. An applied frame
+// (state.frames.applied.<pane>) only arranges the cards: order first, focus marked and scrolled to, group sub-headings;
+// nothing is hidden. Its line says who suggested it and that you applied it; reset = /frame reset <pane>.
+// Off: no note, no frame line, cards in their own order, f is just a key.
 'use strict';
 const $ = (id) => document.getElementById(id);
 const bench = $('bench'), log = $('log'), form = $('form'), input = $('input');
@@ -201,13 +208,99 @@ function itemMeta(it, status, byModel) {
 }
 
 function itemsFor(kinds) { return (state.items || []).filter((i) => kinds.includes(i.kind)); }
-function itemList(items, empty) {
+function itemList(items, empty, fr) {
   const box = document.createElement('div');
   box.className = 'items';
-  const shown = items.filter((i) => showRejected || statusOf(i) !== 'rejected');
+  const shown = arrange(items, fr).filter((i) => showRejected || statusOf(i) !== 'rejected');
   if (!shown.length) { const p = document.createElement('p'); p.className = 'empty'; p.textContent = empty; box.append(p); }
-  for (const it of shown) box.append(itemCard(it));
+  let group = null;
+  for (const it of shown) {
+    // pilot-v0.10: an applied frame with group adds a sub-heading per group (presentation only)
+    if (fr && fr.intent.group && groupOf(fr.intent.group, it) !== group) {
+      group = groupOf(fr.intent.group, it);
+      const g = document.createElement('p'); g.className = 'grp'; g.textContent = group; box.append(g);
+    }
+    const card = itemCard(it);
+    if (fr && fr.intent.focus === it.id) {
+      card.classList.add('framed');
+      card.querySelector('.meta').append(' · ', chip('frame', `frame focus, suggested by ${fr.model || 'a model'}`));
+    }
+    box.append(card);
+  }
   return box;
+}
+
+// ---- pilot-v0.10: frames. Proposals are allographic (written by a model about your workbench, not by you): dashed
+// lavender, and they say so. Only an applied frame changes the presentation, and only the order, a marked card and
+// sub-headings. ----
+const frameOn = () => !!(state.flags && state.flags.frameProposals);
+const okIntent = (f, mod) => !!f && f.intent && typeof f.intent === 'object' && f.intent.pane === mod;
+const appliedFrame = (mod) => { const f = frameOn() && state.frames && state.frames.applied[mod]; return okIntent(f, mod) ? f : null; };
+const proposedFrame = (mod) => { const f = frameOn() && state.frames && state.frames.pending[mod]; return okIntent(f, mod) ? f : null; };
+const GROUP_ORDER = { status: ['proposed', 'confirmed', 'rejected'], author: ['you', 'model'] };
+const groupOf = (g, it) => (g === 'status' ? statusOf(it) : it.author === 'model' ? 'model' : 'you');
+// Cards named in order come first, in that order; the others keep theirs (ids that are gone are skipped: the file is
+// hand-editable). group then sorts by group, stable.
+function arrange(items, fr) {
+  if (!fr) return items;
+  const order = Array.isArray(fr.intent.order) ? fr.intent.order : [];
+  const pos = (it) => { const k = order.indexOf(it.id); return k < 0 ? order.length + items.indexOf(it) : k; };
+  let out = items.slice().sort((a, b) => pos(a) - pos(b));
+  const g = GROUP_ORDER[fr.intent.group];
+  if (g) out = out.map((it, i) => [it, i]).sort((a, b) => g.indexOf(groupOf(fr.intent.group, a[0])) - g.indexOf(groupOf(fr.intent.group, b[0])) || a[1] - b[1]).map((x) => x[0]);
+  return out;
+}
+const describeFrame = (intent, max = 4) => {
+  const parts = [];
+  if (intent.focus) parts.push(`focus ${intent.focus}`);
+  if (Array.isArray(intent.order) && intent.order.length) parts.push(`order ${intent.order.slice(0, max).join(', ')}${intent.order.length > max ? ', …' : ''}`);
+  if (intent.group) parts.push(`group by ${intent.group}`);
+  return parts.join(' · ');
+};
+// The proposal note (focusable, so Tab reaches it; f there applies) and the applied-frame line, at the top of a pane body.
+function frameNodes(mod) {
+  const nodes = [];
+  const p = proposedFrame(mod), a = appliedFrame(mod);
+  if (p) {
+    const n = document.createElement('div');
+    n.className = 'frame-note'; n.tabIndex = 0; n.dataset.frame = p.id; n.dataset.author = 'model';
+    n.title = `frame ${p.id}, proposed by the frame role (${p.model || '?'}) at ${p.at || '?'}: ${describeFrame(p.intent, 99)}. Nothing changes until you apply it (f here).`;
+    const what = document.createElement('span'); what.className = 'fn-what'; what.textContent = `model suggests: ${describeFrame(p.intent)}`;
+    const by = document.createElement('small'); by.className = 'fn-by'; by.textContent = `suggested by ${p.model || 'a model'}, not by you`;
+    const keys = document.createElement('span'); keys.className = 'keys';
+    for (const [k, word] of [['f', 'apply'], [null, 'dismiss']]) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'key'; b.dataset.frameAction = word;
+      b.innerHTML = k ? `<kbd>${k}</kbd><span class="w"> ${word}</span>` : `<span class="w">${word}</span>`;
+      b.addEventListener('click', (e) => { e.stopPropagation(); sendFrame(mod, p.id, word, true); });
+      keys.append(b);
+    }
+    n.append(what, ' ', by, ' ', keys, ' ', whyButton(mod, `why is the ${PANES[mod].title} pane framed like this?`));
+    nodes.push(n);
+  }
+  if (a) {
+    const l = document.createElement('small');
+    l.className = 'frame-applied'; l.dataset.frame = a.id;
+    l.title = `frame ${a.id}: ${describeFrame(a.intent, 99)}; suggested by ${a.model || '?'} at ${a.at || '?'}, applied by you at ${a.appliedAt || '?'}`;
+    const r = document.createElement('button');
+    r.type = 'button'; r.className = 'why'; r.textContent = 'reset'; r.title = `/frame reset ${mod}`;
+    r.addEventListener('click', (e) => { e.stopPropagation(); runCommand(`/frame reset ${mod}`).catch((err) => addLine('system', `error: ${err.message}`)); });
+    l.append(`frame ${a.id}: ${describeFrame(a.intent)} · `, chip('frame', `suggested by ${a.model || 'a model'}`), ' · applied by ', chip('you', 'you'), ...(a.appliedAt ? [' ', when(a.appliedAt)] : []), ' · ', r);
+    nodes.push(l);
+  }
+  return nodes;
+}
+async function sendFrame(mod, id, action, fromPane) {
+  const res = await fetch('/frame', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pane: mod, id, action, rev: (state.frames || {}).rev }) });
+  if (!res.ok) await writeFailed(res);
+  await loadState();
+  if (!fromPane) return;
+  // focus stays in the pane: on the framed card after apply, else the pane body (Escape returns to the input)
+  const a = appliedFrame(mod);
+  const card = action === 'apply' && a && a.intent.focus ? bench.querySelector(`#pane-${mod} .item[data-id="${CSS.escape(a.intent.focus)}"]`) : null;
+  const body = bench.querySelector(`#pane-${mod} .body`), to = card || body;
+  if (body) body.scrollTop = 0;   // the frame line at the top stays in view; the marked card is scrolled to if it is lower
+  if (to) { restoring = true; to.focus({ preventScroll: true }); restoring = false; to.scrollIntoView({ block: 'nearest' }); }
 }
 // The pane bar carries a toggle "rejected: n" when there are rejected items of the pane's kinds.
 function rejectedToggle(body, kinds) {
@@ -228,11 +321,12 @@ function rejectedToggle(body, kinds) {
 function heading(text) { const h = document.createElement('h3'); h.className = 'sub'; h.textContent = text; return h; }
 
 function renderMap(body) {
-  const chain = itemList(itemsFor(['decision']), 'No decisions yet. Proposals appear here, dashed, after a turn.');
+  const fr = appliedFrame('map');
+  const chain = itemList(itemsFor(['decision']), 'No decisions yet. Proposals appear here, dashed, after a turn.', fr);
   chain.classList.add('chain');                  // decisions as a chain, in the order they came up (01-concept, day 2)
-  const nodes = [heading('decisions'), chain];
+  const nodes = [...frameNodes('map'), heading('decisions'), chain];
   const sources = itemsFor(['source']);
-  if (sources.length) nodes.push(heading('sources'), itemList(sources, 'No sources shown.'));
+  if (sources.length) nodes.push(heading('sources'), itemList(sources, 'No sources shown.', fr));
   body.replaceChildren(...nodes);
   rejectedToggle(body, PANES.map.kinds);
 }
@@ -244,10 +338,10 @@ function renderKanban(body) {
   for (const col of ['todo', 'doing', 'done']) {
     const c = document.createElement('div');
     c.className = `col ${col}`;
-    c.append(heading(col), itemList(tasks.filter((t) => (t.column || 'todo') === col), col === 'todo' && !tasks.length ? 'No tasks yet.' : '—'));
+    c.append(heading(col), itemList(tasks.filter((t) => (t.column || 'todo') === col), col === 'todo' && !tasks.length ? 'No tasks yet.' : '—', appliedFrame('kanban')));
     cols.append(c);
   }
-  body.replaceChildren(cols);
+  body.replaceChildren(...frameNodes('kanban'), cols);
   rejectedToggle(body, PANES.kanban.kinds);
 }
 
@@ -447,12 +541,14 @@ function renderPanes(contentOnly) {
 }
 
 // Status bar: active model per role; "a→b" when fallback answered with another candidate; "(pinned)" after /model.
+// pilot-v0.10: the frame role is listed only while the frame-proposals experiment is on (off = the old status bar)
 function renderModels(m) {
-  models.textContent = Object.entries(m || {}).map(([role, r]) => {
+  const roles = Object.entries(m || {}).filter(([role]) => role !== 'frame' || frameOn());
+  models.textContent = roles.map(([role, r]) => {
     const name = r.active || 'none';
     return `${role}: ${r.last && r.last !== name ? `${name}→${r.last}` : name}${r.pinned ? ' (pinned)' : ''}`;
   }).join(' · ');
-  models.title = Object.entries(m || {}).map(([role, r]) => `${role}: ${r.pinned ? 'pinned, no fallback' : r.policy}, candidates ${
+  models.title = roles.map(([role, r]) => `${role}: ${r.pinned ? 'pinned, no fallback' : r.policy}, candidates ${
     r.candidates.map((n) => (r.local || []).includes(n) ? `${n} (local)` : n).join(', ') || 'none'}`).join('\n');
 }
 
@@ -470,6 +566,7 @@ const PARTS = { 'transcript.jsonl': ['transcript', 'total'], 'modules.json': ['p
 PARTS['modules.json'].push('paneInfo', 'pendingKind', 'removals', 'faded');   // pilot-v0.6, pilot-v0.8
 PARTS['transcript.jsonl'].push('turn');                                       // pilot-v0.8
 PARTS['flags.json'] = ['flags'];                                              // pilot-v0.9
+PARTS['frames.json'] = ['frames'];                                            // pilot-v0.10
 let reqGen = 0;
 const appliedGen = {};
 const sigs = {};
@@ -477,9 +574,9 @@ const sigOf = {
   log: (s) => [s.total, (s.transcript[s.transcript.length - 1] || {}).id, s.pending, s.pendingKind, JSON.stringify(s.answers), JSON.stringify(s.removals)].join('|'),
   // items too: hand edits keep rev. pilot-v0.8: of the fade status only what the panes show (tab or not, its label), so
   // a touch (lastTouch moves) does not re-render the panes
-  panes: (s) => [(s.panes || []).join(','), (s.faded || []).join(','), s.stateRev, JSON.stringify(s.items), JSON.stringify(s.paneInfo, (k, v) => (k === 'fade'
+  panes: (s) => [(s.panes || []).join(','), (s.faded || []).join(','), JSON.stringify(s.frames), !!(s.flags && s.flags.frameProposals), s.stateRev, JSON.stringify(s.items), JSON.stringify(s.paneInfo, (k, v) => (k === 'fade'
     ? (v && v.faded ? { fadedTurn: v.fadedTurn, lastTouch: v.lastTouch && v.lastTouch.turn, fadeAfter: v.fadeAfter } : null) : v))].join('|'),
-  models: (s) => JSON.stringify(s.models),
+  models: (s) => JSON.stringify(s.models) + !!(s.flags && s.flags.frameProposals),
 };
 async function loadState(files) {
   const gen = ++reqGen;
@@ -672,7 +769,18 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
-  if (e.key === 'Escape' && card) { e.preventDefault(); input.focus(); return; }
+  if (e.key === 'Escape' && (card || (e.target.closest && e.target.closest('.frame-note')))) { e.preventDefault(); input.focus(); return; }
+  // pilot-v0.10: f applies the open frame proposal of the pane that has focus (a card, the note or the pane body; not a
+  // button, never the chat input)
+  if (e.key === 'f') {
+    const sec = e.target && e.target.closest ? e.target.closest('.side[data-pane]') : null;
+    const mod = sec && !sec.classList.contains('faded') ? sec.dataset.pane : null;
+    const p = mod && e.target.tagName !== 'BUTTON' ? proposedFrame(mod) : null;
+    if (!p) return;
+    e.preventDefault();
+    sendFrame(mod, p.id, 'apply', true);
+    return;
+  }
   // pilot-v0.7: only the card itself, not a button inside it (a focused "why?" must never decide a proposal)
   if ((e.key !== 'c' && e.key !== 'r') || !card || e.target !== card || !card.dataset.proposed) return;
   e.preventDefault();

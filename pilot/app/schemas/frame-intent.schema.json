@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "frame role output: a FrameIntent (closed; pilot-v0.10)",
+  "description": "How ONE shown pane presents its cards. Nothing else: no keys for panes, items, status or text exist, so a model cannot ask for them. An empty object {} means no suggestion. Ids are checked against state.json by frame.js (unknown id = rejected whole).",
+  "type": "object",
+  "required": ["pane"],
+  "additionalProperties": false,
+  "properties": {
+    "pane": { "enum": ["map", "kanban"] },
+    "focus": { "type": "string", "minLength": 1, "maxLength": 40 },
+    "order": { "type": "array", "maxItems": 60, "items": { "type": "string", "minLength": 1, "maxLength": 40 } },
+    "group": { "enum": ["status", "author"] }
+  }
+}

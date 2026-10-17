@@ -813,3 +813,69 @@ Run by the coordinator, not the builder.
   - "Then I go to the post office" (no final punctuation) + a pause showed no offer.
   - `/stats` experiments block matched the session exactly: 3 offers, 1 Tab, 1 Enter while showing, 1 unresolved.
 - Usability note, not fixed: at about 800 px the offer takes roughly half the input row, so the end of the line being typed is cut off where you would read it. Behind a flag; worth a look before anyone measures with it for real.
+
+# pilot-v0.10
+
+Frame proposals (experiment behind a flag, default off). Everything runs against `dev/fake-model.js`.
+
+**Reproduce:** `bash pilot/app/dev/verify-v0.10.sh`. It has 63 checks; one of them runs the 32 checks of
+`browser-check.js v10` (30 + 2 global). It ends with `ALL v0.10 CHECKS PASSED` and exits non-zero on failure.
+- Own ports: server 4830; fakes 5831/5832 (chat, extract), 5833 (frame, morrow) and 5834 (frame, frontier, for the pin
+  and fallback checks); browser part 4835/5836/5837 and Chrome 9413; demo part 4978/5983/5984.
+- Own throwaway dirs: `.pilot-verify-v10/`, `.pilot-verify-v10b/`, `.pilot-demo-verify10/`.
+- The server part seeds from `demo/fixtures/v0.10/` with `fadeAfterTurns`/`askRemoveAfterTurns` raised to 100, so its
+  ~16 turns never fade a pane.
+- The fixture is generated: `node dev/make-fixture-v10.js` (deterministic, from `demo/fixtures/v0.9/`).
+
+**Everything:** `cd pilot/app && npm run verify` (p0, p1, p2, v0.3–v0.10, browser p1 + p2; the v03–v10 browser checks
+run inside their verify scripts).
+Last run (Node v25.9.0, Chrome, macOS): `npm run verify` all passed (p0–p2, v0.3–v0.10, browser p1 + p2), no earlier
+assertion adapted (old configs gain a `frame` role that is never called while the flag is off). `npm run demo -- v0.3` to
+`-- v0.10` each served `/state` within about 1 s, and SIGINT left no process behind.
+
+## Definitions
+
+| Term | Definition |
+|---|---|
+| flag | `experiments.frameProposals`: `.pilot/flags.json` if it sets it (`/flag frame-proposals on\|off`), else the config, else off |
+| FrameIntent | `{pane: map\|kanban, focus?: id, order?: [ids], group?: status\|author}`, `schemas/frame-intent.schema.json`, closed; `{}` = no suggestion |
+| fits | the pane is shown with consent and not a tab; every id is a card of that pane (map: decisions, sources; kanban: tasks) and not rejected; no id twice in `order`; at least one of focus, order, group (`frame.check`) |
+| proposal | a FrameIntent that fits, written to `frames.json` `pending.<pane>` with `author: model`, the candidate, `fromMessage`, `turn`; `frame_propose` |
+| rejected whole | not JSON, not schema-valid, or not fitting: `frame_reject {reason: malformed\|schema\|id\|empty\|pane\|same\|stale, errors}`, nothing written |
+| applied | you pressed `f` (focus in that pane) or the apply button: `applied.<pane>` with `appliedBy: user`, `appliedAt`; `frame_apply` |
+| reset | `/frame reset [pane]` (or the reset button): `applied.<pane>` removed, `resets.<pane>` `{at, by: user, frame}`; `frame_reset` |
+
+## Checks
+
+| # | Check | How (section of `verify-v0.10.sh`) |
+|---|---|---|
+| 1 | The FrameIntent table: 29 cases (valid: focus+order, group, order+group, a ```json fence; `{}` = none; not JSON; not an object; no pane; pane index/chat; the unknown keys hide, status, text, add; a number as focus; order not a list; group kind; an empty id; 61 ids; unknown ids; a task in the map; a rejected id; an id twice; nothing to do; a faded kanban; a kanban without consent; a shown kanban) give the documented verdict. The schema has exactly the keys pane, focus, order, group and `additionalProperties: false`. | 1 |
+| 2 | **Off by default:** no `experiments` → off, from the default; `frameProposals: false` → off from the config; both shipped configs ship it false with a local, structured `frame` role. `/flag` keeps the settled-input line unchanged and first, then `frame-proposals: off`. `/help` lists `/frame`. A turn makes no frame call (the frame fake sees nothing), writes no `frames.json`, logs no frame event; `POST /frame` → 409; `/frame` says it is off. | 2 |
+| 3 | **On:** `/flag frame-proposals on` writes `flags.json`, a system line, a `flag` event (was false) and leaves settled-input alone. The next turn yields `fr-1` for the map (focus dec-2, author model, model morrow, fromMessage, turn 39), `model_call role frame`, `frame_propose`; the request carried `response_format`; the prompt listed only the shown, non-faded map and no rejected card. | 3 |
+| 4 | **`POST /frame`:** bad pane or action → 400; stale rev → 409 `{stale, file: frames.json}`; a wrong id → 409. Apply → `applied.map` with `appliedBy`/`appliedAt`, `frame_apply`, a system line naming morrow; apply again → 409. `/frame` lists it. The same suggestion again → `frame_reject same`. Dismiss → `frame_dismiss`, a system line, the applied frame kept. `modules.json` and `state.json` are byte-identical across propose, apply and dismiss. **Re-check on apply:** a proposal whose focus card you then reject by hand → 409 "no longer fits", dropped, `frame_reject stale`. | 4 |
+| 5 | **`/why map`** explains the applied frame (what it does; suggested by model morrow after message m-… at turn 39, allographic; applied by you through the page; 2 suggestions rejected whole); every source of `/why`, `/why map`, `kanban`, `index`, `chat` resolves (`why-cites.js`); `/why` has one `frames:` line. `/frame reset kanban` → nothing to reset; `/frame reset map` → `resets.map`, `frame_reset`, a system line; `/why map` then says it was reset; `/frame reset index` → 400. No `item_write` since the flag went on. | 5 |
+| 6 | **Every rejection mode of the fake** (`bad`, `badid`, `badkey`, `wrongpane`, `malformed`): rejected whole and logged with its reason, `frames.json` unchanged; `none` → `frame_none`. `bad` (unknown key and unknown id) is refused by the schema before any id is looked at. `state.json` and `modules.json` still untouched. | 6 |
+| 7 | **Pins, local-only, stall** (a frame role with local morrow and cloud frontier, policy fallback): morrow down → `fallback_blocked role frame`, `frame_error`, nothing proposed, frontier never asked; `/model frame frontier` → the proposal comes from frontier; pinned frontier down → `frame_error` "pinned", morrow not asked; a frame reply that stalls (`--stall-after=1`, `stallMs` 600) → `stall role frame`, `frame_error stall`, nothing written. | 7 |
+| 8 | **Broken `frames.json`:** in `fileErrors`, the last good proposal kept; `POST /frame` 409, `/frame reset` 400, the file unchanged; a turn logs `frame_error frames`; a repaired edit is read. `fade.status` counts card proposals only. A map faded by hand gets no frame call and stays a tab; with the kanban shown instead (by hand) the proposal is for the kanban (focus task-2, task ids only). `/stats` still has five verdict lines and equals `npm run stats`. | 8 |
+| 9 | **Page off** (`browser-check.js v10`, v0.10 fixture, flag off): after a turn no frame call, no `frames.json`, no note; `f` on a card does nothing; the status bar does not list the frame role (on: `frame: morrow`). | 9 |
+| 10 | **Page on** (`/flag frame-proposals on` in the page): the next turn shows the note within about 0.5 s: `model suggests: focus dec-2 · order dec-2, dec-4, src-1, dec-1, …`, `suggested by morrow, not by you`, dashed, focusable, `f apply \| dismiss \| why?`; the map keeps its own order. `f` in the chat input is text; `f` on a focused button does nothing; Escape on the note returns to the input. `f` on a card applies: order dec-2, dec-4, dec-1, dec-8, dec-7, dec-5, dec-2 marked `frame focus, suggested by morrow` and focused, the frame line `frame fr-1: … · suggested by morrow · applied by you <time> · reset`, sources follow. `/why map` in the page shows the frame with sources. Reset button → own order. Dismiss → no note, nothing applied. At 800 and 390 px the note fits its pane, no horizontal scroll. Real Tab presses from the empty input reach the note (3: the bar's why?, the rejected toggle, the note) and `f` there applies. Flag off hides the applied frame (kept in the file), on shows it again, `/frame reset` restores the order. With the map faded and the kanban shown (by hand) the next proposal is for the kanban; its apply button marks task-2 and puts it first in its column, every column keeps its cards, the map stays a tab. No frame step wrote an item. | 9 |
+| 11 | Contrast passes, including the note text, its byline and its keys (`--text`, `--muted`, `--accent-fg` on `--panel`). | 9 |
+| 12 | **Demo:** `npm run demo -- v0.10` serves `/state` within about 1 s with frame-proposals on (demo config only), settled-input off, the map shown with 6 decisions (+3 rejected, hidden); the next message yields a proposal for the map (focus dec-2, morrow); the try lines name the note, `f`, `/why map`, `/frame reset map`; Ctrl+C leaves no process; the v0.9 fixture is unchanged. | 10 |
+| 13 | Old checks still passing: p0, p1, p2, v0.3–v0.9, browser p1/p2/v03–v09. | `npm run verify` |
+
+## Deviations
+
+1. The brief's demo has "map with 5 decisions". The v0.10 fixture is the v0.9 workbench unchanged: its map shows 6
+   decisions (dec-1, 2, 4, 5, 7, 8) and hides 3 rejected ones. Dropping one would mean editing `state.json` after the
+   fact, which the pilot's own provenance would then show as a hand edit.
+2. The brief leaves `group` open (`group?: ...`). It is a closed enum, `status` or `author`: sub-headings, nothing else
+   (QUESTIONS.md).
+3. "`f` only when focus is in that pane, same rule as c/r": `c`/`r` act on a focused card only. A frame belongs to the
+   pane, not to one card, so `f` works with focus anywhere in that pane (a card, the note, the pane body), with the
+   same guards (never the chat input, never a focused button, no modifier, not composing, not a repeat).
+4. Dismiss has a button, no key (the brief names only `f`).
+5. Besides `good|bad` the fake knows `group`, `none`, `badid`, `badkey`, `wrongpane`, `malformed`, so each rejection
+   path is checked on its own.
+6. "Off = the old behaviour" holds for the page (no note, no frame line, own order, the status bar without the frame
+   role) and the files (no call, no `frames.json`, no event). `/model` and `/state.models` do list the `frame` role
+   while it is off, because it is in the config.

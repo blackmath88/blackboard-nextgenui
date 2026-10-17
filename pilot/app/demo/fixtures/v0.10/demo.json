@@ -1,0 +1,12 @@
+{
+  "fakes": [
+    { "name": "frontier", "port": 5783 },
+    { "name": "morrow", "port": 5784, "args": ["--frame=good"] }
+  ],
+  "try": [
+    "Open {url}. The experiment frame-proposals is ON for this demo only (/flag shows it). Send a message, e.g. \"what about keeping the claim local?\": within about a second the reasoning map shows a dashed lavender note \"model suggests: focus dec-2 · order dec-2, …\", marked \"suggested by morrow, not by you\". Nothing has changed yet.",
+    "Apply it: click a card in the map (or press Tab from the empty input until the dashed note is outlined, 3 presses), then press f; or use the \"apply\" button on the note. The map reorders, dec-2 is marked, and the pane bar says who suggested the frame and that you applied it. \"dismiss\" drops a proposal instead.",
+    "/why map explains the applied frame: who suggested it, from which message, who applied it and when, with sources. /frame lists frames per pane.",
+    "/frame reset map puts the map back in its own order (recorded in {dir}/frames.json). /flag frame-proposals off: no frame is proposed or shown."
+  ]
+}

@@ -16,7 +16,7 @@ const readline = require('readline');
 
 const APP = path.join(__dirname, '..');
 const FIX = path.join(APP, 'demo', 'fixtures');
-const versions = () => (fs.existsSync(FIX) ? fs.readdirSync(FIX).filter((d) => fs.existsSync(path.join(FIX, d, 'demo.json'))).sort() : []);
+const versions = () => (fs.existsSync(FIX) ? fs.readdirSync(FIX).filter((d) => fs.existsSync(path.join(FIX, d, 'demo.json'))).sort((a, b) => a.localeCompare(b, 'en', { numeric: true })) : []);
 const version = process.argv[2];
 if (!version || !versions().includes(version)) {
   console.error(`${version ? `unknown demo version "${version}". ` : ''}usage: npm run demo -- <version>\navailable: ${versions().join(', ') || 'none'}`);

@@ -131,3 +131,31 @@ plain Enter use. Inside the experiment the baseline is `enter_send` with `offerS
 offer, "z.B." and "bzw." are treated as continuing. T = 1800 ms is a guess.
 - Blocks: nothing. Tune with the `/stats` experiments block: many `settle_ignore typed` means T is too short or the
   heuristic too eager; many `enter_send` with an offer showing and a short `offerMs` means the offer comes too late.
+
+## 2026-10-17 (v0.10) What may `group` say?
+The brief writes `group?: ...`. Built as a closed enum: `status` (proposed / confirmed / rejected) or `author` (you /
+model), shown as sub-headings inside each list; nothing is hidden.
+- Blocks: nothing. Options: keep; add `kind` or `column` (the map and kanban already split by those); drop `group`
+  until a real model shows a use for it.
+
+## 2026-10-17 (v0.10) May a frame name a rejected card?
+No: a frame whose focus or order names a rejected card is rejected whole. Rejected cards are hidden behind "rejected: n
+(show)"; a frame that focuses one would bring back, by a model's choice, what you rejected.
+- Blocks: nothing. Options: keep; allow them in `order` only (they are sorted but stay hidden unless you show them).
+
+## 2026-10-17 (v0.10) An applied frame while the flag is off
+With `/flag frame-proposals off` an applied frame is not shown and no proposal is made, but `frames.json` keeps it, and
+it is back when the flag is on again. `/frame reset` works either way.
+- Blocks: nothing. Options: keep (off = exactly the old screen); or reset every applied frame when the flag goes off.
+
+## 2026-10-17 (v0.10) A frame call after every reply
+While the flag is on, the frame role runs after every complete reply (after extraction), whenever a map or kanban is
+shown and not a tab. With a local model that is a second background call per turn.
+- Blocks: nothing. Options: keep; add `everyNTurns` like extract; call it only when the turn changed cards (an
+  extraction proposed something, or you decided one).
+
+## 2026-10-17 (v0.10) No /stats block for frames yet
+`metrics.jsonl` has every frame event (`frame_propose`, `frame_reject` with its reason, `frame_none`, `frame_error`,
+`frame_apply`, `frame_dismiss`, `frame_reset`), but `/stats` does not count them. The five P5 measures are unchanged.
+- Blocks: nothing. Options: add an experiments line "frames: n proposed, n applied, n dismissed, n reset, n rejected"
+  (measured, not judged, like settled input); or wait for a real model, since the fake's apply rate means nothing.

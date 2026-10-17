@@ -227,3 +227,18 @@ body { margin: 0; background: var(--base); color: var(--text); font: 400 15px/1.
 .side .body:focus { outline: none; }
 .side .body:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .ln.controller.fade-note { color: var(--muted); border-left-style: dashed; }
+
+/* pilot-v0.10: frames. A proposal from the frame role is allographic paratext (written about your workbench by a model,
+   not by you): a dashed lavender note at the top of the pane, saying so. Text colours reuse checked pairs (--text and
+   --muted on --panel); lavender is only the edge. An applied frame marks its focus card with a lavender bar on the left
+   (its own border keeps saying its status) and says in a muted line who suggested it and that you applied it. Nothing is hidden. */
+.frame-note { border: 1px dashed var(--lavender); color: var(--text); padding: 4px 8px; margin: 0 0 8px; font-size: 12.5px; overflow-wrap: anywhere; }
+.frame-note:focus { outline: 2px solid var(--focus); outline-offset: 1px; }
+.frame-note .fn-by { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.frame-note .keys { white-space: nowrap; }
+.frame-note .key { padding: 0 8px; font-size: 12px; }
+.frame-applied { display: block; color: var(--muted); font-size: 11.5px; margin: 0 0 6px; overflow-wrap: anywhere; }
+.by.frame { color: var(--muted); border-bottom: 1px dashed var(--lavender); }
+.item.framed { box-shadow: inset 4px 0 0 var(--lavender); padding-left: 12px; }   /* its own border (status) stays */
+.items .grp { margin: 2px 0 4px; color: var(--muted); font-size: 11.5px; text-transform: lowercase; letter-spacing: 0.04em; }
+.items .grp + .item::before { display: none; }

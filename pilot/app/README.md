@@ -1,9 +1,10 @@
-# CLI Pilot v1 (steps P0 to P4 + P5 metrics, iteration pilot-v0.9)
+# CLI Pilot v1 (steps P0 to P4 + P5 metrics, iteration pilot-v0.10)
 
-**Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.9` (experiment: pause on a finished line and
-the input offers "send?", Tab sends, Enter always does; v0.8: panes fade to tabs and are removed only with your answer; v0.7: `/why`; v0.6: authorship and `/stats`; v0.5: live files, two tabs; v0.4: proposals; v0.3: pins
+**Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.10` (experiment: after a turn the model may
+suggest how the map shows its cards, a dashed note "suggested by morrow, not by you"; `f` applies it, `/frame reset`
+undoes it, `/why map` explains it; v0.9: pause on a finished line and the input offers "send?", Tab sends, Enter always does; v0.8: panes fade to tabs and are removed only with your answer; v0.7: `/why`; v0.6: authorship and `/stats`; v0.5: live files, two tabs; v0.4: proposals; v0.3: pins
 and fallback), open the printed URL, follow the "try this" lines. A tagged iteration without touching your checkout:
-`bash pilot/app/scripts/try.sh pilot-v0.9`.
+`bash pilot/app/scripts/try.sh pilot-v0.10`.
 **Extraction (since pilot-v0.4) is untested with a real model:** it runs against the fake extractor in `dev/fake-model.js`.
 What changed per iteration: `CHANGELOG.md`; checks: `CHECKS.md`; open questions: `QUESTIONS.md`.
 
@@ -50,6 +51,9 @@ In the page, type a message and press Enter. Lines starting with `/` are command
 | `/why <item id>` | e.g. `/why dec-2`: origin, the message it came from (with a "show" link), the quote, who decided it and when, fields changed by hand |
 | `/flag` | experiments (pilot-v0.9): each flag, its value and where it comes from |
 | `/flag settled-input on\|off` | switch the settled-input experiment; kept in `.pilot/flags.json`, which wins over the config (default off) |
+| `/flag frame-proposals on\|off` | switch the frame-proposals experiment (pilot-v0.10); kept in `.pilot/flags.json` (default off) |
+| `/frame` | frames per pane (pilot-v0.10): the applied one (who suggested it, when you applied it) and the open proposal |
+| `/frame reset [map\|kanban]` | put a pane (or both) back in its own order; recorded in `.pilot/frames.json` `resets`; works with the flag off too |
 | `/help` | list commands |
 
 **Growth.** After each turn a deterministic controller checks `.pilot/rules.json` (seeded from
@@ -157,6 +161,26 @@ always sends. Nothing is sent without a key. Tab while the offer shows sends ins
 `settle_offer`, `settle_accept`, `settle_ignore`, `enter_send` (numbers only, never the text); `/stats` ends with an
 "experiments" block that counts them and the time from the last keystroke to the send. Off: exactly the old prompt.
 
+**Experiment: frame proposals (pilot-v0.10, off by default).** The model may only *propose* a frame (02-morph); you
+decide. Switch it on with `"experiments": {"frameProposals": true}` or `/flag frame-proposals on`. Then, after each
+complete reply (after extraction), the `frame` role (in the config like every role: pins, local-only fallback and
+`stallMs` apply) may return a FrameIntent for a shown map or kanban, validated against the closed
+`schemas/frame-intent.schema.json` by `frame.js`:
+`{pane: "map" | "kanban", focus?: item id, order?: [item ids], group?: "status" | "author"}`, or `{}` for nothing.
+- An unknown key (there is none for hiding, adding, deciding or changing text), an unknown id, a card of another pane,
+  a rejected card, a pane that is a tab or not consented: the whole intent is rejected and logged (`frame_reject`),
+  nothing is written.
+- A valid one is a proposal in `.pilot/frames.json` (hand-editable, `rev`, SSE, last good version when broken) and a
+  dashed lavender note at the top of its pane: `model suggests: focus dec-2 · order dec-2, dec-4, …`, `suggested by
+  morrow, not by you`. Nothing changes until you apply it.
+- `f` (focus anywhere in that pane: a card, the note, the pane body; never the chat input or a button) or the note's
+  apply button applies it (`POST /frame`); dismiss drops it. Applying checks it again against the cards as they are now.
+- An applied frame only arranges: `order` first, the `focus` card marked ("frame focus, suggested by morrow") and
+  scrolled to, `group` sub-headings. Nothing is hidden or changed. A line says `frame fr-1: … · suggested by morrow ·
+  applied by you <time> · reset`. `/frame reset map` undoes it; `/why map` explains it with sources.
+- Off: no frame call, no file, no note, the cards in their own order, `f` is just a key. An applied frame stays in
+  `frames.json` and shows again when the flag is on.
+
 The status bar shows the active model per role; `frontier→morrow` means the configured candidate
 failed and the next one answered. Every model attempt is logged to `.pilot/metrics.jsonl`.
 
@@ -180,7 +204,9 @@ PILOT_CONFIG=pilot.config.dev.json node server.js
 `--stall-after=<n>` makes a fake stop sending after n tokens while keeping the connection open.
 `--extract=good|malformed|badquote|many|dupes` picks how a fake answers extraction requests (default good:
 sentences starting `Decision:` / `Task:` / `TODO` and URLs in the turn become items); `--extract-delay=<ms>`
-delays only extraction answers. See the header of `dev/fake-model.js`.
+delays only extraction answers. `--frame=good|group|none|bad|badid|badkey|wrongpane|malformed` (pilot-v0.10) picks how it
+answers frame requests (default good: the card sharing most words with your last message is the focus). See the header
+of `dev/fake-model.js`.
 
 To see fallback, stop the `frontier` fake (Ctrl-C) and send another message.
 
@@ -196,14 +222,15 @@ node -e 'const f=".pilot/rules.json",fs=require("fs"),r=JSON.parse(fs.readFileSy
 ## Demos and checks
 
 `npm run demo -- <version>` (`scripts/demo.js`) wipes and seeds a throwaway `.pilot-demo/` from
-`demo/fixtures/<version>/`, starts the fakes and the server on demo ports (v0.3: 4750, 5751, 5752; v0.4: 4754, 5754, 5755; v0.5: 4758, 5758, 5759; v0.6: 4764, 5764, 5765; v0.7: 4768, 5768, 5769; v0.8: 4772, 5772, 5773; v0.9: 4776, 5778, 5779), prints the URL
+`demo/fixtures/<version>/`, starts the fakes and the server on demo ports (v0.3: 4750, 5751, 5752; v0.4: 4754, 5754, 5755; v0.5: 4758, 5758, 5759; v0.6: 4764, 5764, 5765; v0.7: 4768, 5768, 5769; v0.8: 4772, 5772, 5773; v0.9: 4776, 5778, 5779; v0.10: 4778, 5783, 5784), prints the URL
 and what to try. Ctrl+C stops everything. An unknown version lists the available ones. It never touches `.pilot/`.
 
 `npm run verify` (`scripts/verify-all.sh`) runs every `dev/verify-*.sh` and the browser checks and prints a summary.
 It refuses to start while `pilot/app/.pilot/` exists, because the P0–P2 checks wipe it.
-`dev/verify-v0.3.sh` to `verify-v0.9.sh` use their own ports and dirs and are safe next to a running demo.
+`dev/verify-v0.3.sh` to `verify-v0.10.sh` use their own ports and dirs and are safe next to a running demo.
 The v0.6 demo fixture is generated by `node dev/make-fixture-v06.js` (synthetic, every line `"fixture": true`), the v0.8
-one by `node dev/make-fixture-v08.js` (from the v0.7 fixture), the v0.9 one by `node dev/make-fixture-v09.js` (from v0.8).
+one by `node dev/make-fixture-v08.js` (from the v0.7 fixture), the v0.9 one by `node dev/make-fixture-v09.js` (from v0.8),
+the v0.10 one by `node dev/make-fixture-v10.js` (from v0.9).
 `node dev/contrast-check.js` checks the palette (WCAG AA, both themes).
 
 The older checks (each starts and stops everything itself and **wipes `.pilot/` first**;
@@ -221,6 +248,7 @@ bash pilot/app/dev/verify-v0.6.sh           # own ports/dirs; authorship, P5 eve
 bash pilot/app/dev/verify-v0.7.sh           # own ports/dirs; /why, cited sources resolved (dev/why-cites.js); browser-check.js v07 (layout)
 bash pilot/app/dev/verify-v0.8.sh           # own ports/dirs; fading, touches, removal consent, /why fading; browser-check.js v08
 bash pilot/app/dev/verify-v0.9.sh           # own ports/dirs; settled-input flag, heuristic, settle metrics, /stats block; browser-check.js v09
+bash pilot/app/dev/verify-v0.10.sh          # own ports/dirs; frame proposals: closed FrameIntent, apply/dismiss/reset, rejections, pins/stall, /why; browser-check.js v10
 ```
 
 To start over by hand, stop the server and delete `pilot/app/.pilot/`.
@@ -230,10 +258,11 @@ To start over by hand, stop the server and delete `pilot/app/.pilot/`.
 | Method | Path | Does |
 |---|---|---|
 | GET | `/` | the page (only files under `public/` are served) |
-| GET | `/state` | `{transcript: last 500 lines, total, turn, models, panes (faded ones included), faded, pending, pendingKind, answers, removals, modulesRev, paneInfo (with fade), items (with prov when hand-edited), stateRev, stateError, flags (pilot-v0.9: {settledInput, settleMs, source, rev}), extracting, fileErrors}`; `?only=state.json,modules.json,flags.json,…` returns only the parts of those files (plus `extracting`, `fileErrors`) |
+| GET | `/state` | `{transcript: last 500 lines, total, turn, models, panes (faded ones included), faded, pending, pendingKind, answers, removals, modulesRev, paneInfo (with fade), items (with prov when hand-edited), stateRev, stateError, flags (pilot-v0.9: {settledInput, settleMs, source, rev}; pilot-v0.10 adds frameProposals, frameSource), frames (pilot-v0.10: {rev, pending, applied, resets}), extracting, framing, fileErrors}`; `?only=state.json,modules.json,flags.json,…` returns only the parts of those files (plus `extracting`, `fileErrors`) |
 | GET | `/events` | Server-Sent Events: `hello {revs, extracting}`, then `change {file, rev[, error]}` per changed file and `status {extracting}` |
 | POST | `/chat` | `{text}`: appends the user line, streams the reply as `text/plain`, appends the assistant line |
 | POST | `/command` | `{text: "/model chat morrow"}` → `{ok, lines}` (`/state.models.<role>` has `active`, `pinned`, `last`, `candidates`, `local`) |
 | POST | `/answer` | `{module: "index", answer: "y"}` (y/n/a/x or yes/no/always/never; the removal question takes y/n/x), or `{itemId: "dec-3", decision: "c"}` (c/r or confirm/reject; proposed items only, records `decidedAt`, `decidedBy: "user"`). Optional `rev` (of `modules.json` / `state.json`): stale → 409 `{stale: true, file, rev}`; a broken file → 409 |
+| POST | `/frame` | `{pane: "map" \| "kanban", id: "fr-1", action: "apply" \| "dismiss", rev?}` (pilot-v0.10): apply or dismiss the open frame proposal of that pane. Off → 409; a wrong id → 409; a stale `rev` (of `frames.json`) → 409 `{stale: true}`; a proposal that no longer fits the cards → 409, dropped |
 | POST | `/touch` | `{module, how}` (pilot-v0.8; how: click, focus, scroll, decide, tab): records a touch of a shown pane and brings a faded one back. The first touch of a pane per turn is written; later ones return `changed: false`. No rev. `chat` → 400, a pane not shown → 404 |
 | POST | `/metric` | `{event: "index_jump", target: "<message id>"}` (pilot-v0.6; the page sends it on an index click). pilot-v0.9, only while the settled-input flag is on: `settle_offer {offer, cue, chars, words, sinceKeyMs}`, `settle_accept {offerRef, sinceKeyMs, offerMs, chars}`, `settle_ignore {offerRef, how, offerMs}`, `enter_send {offerShowing, offerRef?, sinceKeyMs, chars}` (other fields dropped; one outcome per offer). Any other event or an unknown id → 400 |

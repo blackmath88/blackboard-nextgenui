@@ -3,7 +3,7 @@
 // A tiny fake OpenAI-compatible endpoint: POST /v1/chat/completions,
 // streaming (SSE) and non-streaming, canned replies, no dependencies.
 // Usage: node dev/fake-model.js <port> [name] [--delay=<ms>] [--status=<code>] [--stall-after=<n>]
-//        [--extract=good|malformed|badquote|many|dupes] [--extract-delay=<ms>]
+//        [--extract=good|malformed|badquote|many|dupes] [--extract-delay=<ms>] [--frame=good|bad|...]
 //   e.g. node dev/fake-model.js 5701 frontier
 //   --delay=<ms>     wait before the first byte (to exercise timeouts)
 //   --status=<code>  answer every request with this HTTP error (to exercise fallback)
@@ -21,7 +21,21 @@
 //                    dupes     the first derived item twice (second in capitals with "!") plus "the <title>"
 //                              of the first existing item, i.e. near-duplicates within the batch and of state.json
 //   --extract-delay=<ms> extra wait before answering an extraction request (chat requests are not delayed)
-// Extraction requests never advance the canned chat replies, and each prints one "[extract] ..." log line.
+//   --frame=<mode>   how to answer a frame request (pilot-v0.10): one whose system message contains "PILOT-FRAME"
+//                    (checked before the extraction test, since both carry response_format). Default good. The panes
+//                    and their cards are read from the server's prompt ("Panes shown:"). The first pane with cards is
+//                    framed; each card scores the words it shares with the last user message.
+//                    good      {pane, focus: the best-scoring card, order: focus, then by score, then newest first}
+//                    group     good plus "group": "status"
+//                    none      {} (no suggestion)
+//                    bad       {"pane", "focus": "<prefix>-99", "hide": [<first card>]}: an unknown id AND a key the
+//                              schema does not have (the server must reject it whole)
+//                    badid     good, but focus is "<prefix>-99" (unknown id)
+//                    badkey    good plus "status": {<focus>: "confirmed"} (a key the schema does not have)
+//                    wrongpane good, but pane "index" (not in the closed vocabulary)
+//                    malformed truncated JSON
+// Extraction and frame requests never advance the canned chat replies; each prints one "[extract] ..." or
+// "[frame] ..." log line.
 // Every chat reply starts with "[fake:<name>]" so you can tell instances apart.
 'use strict';
 const http = require('http');
@@ -35,6 +49,8 @@ const stallAfter = opt('stall-after');
 const extractMode = ((process.argv.find((x) => x.startsWith('--extract=')) || '--extract=good').split('=')[1]);
 const extractDelay = opt('extract-delay');
 if (!['good', 'malformed', 'badquote', 'many', 'dupes'].includes(extractMode)) { console.error(`unknown --extract mode "${extractMode}"`); process.exit(1); }
+const frameMode = ((process.argv.find((x) => x.startsWith('--frame=')) || '--frame=good').split('=')[1]);
+if (!['good', 'group', 'none', 'bad', 'badid', 'badkey', 'wrongpane', 'malformed'].includes(frameMode)) { console.error(`unknown --frame mode "${frameMode}"`); process.exit(1); }
 if (!port) { console.error('usage: node dev/fake-model.js <port> [name]'); process.exit(1); }
 
 const CANNED = [
@@ -96,6 +112,40 @@ function extraction(msgs) {
   return JSON.stringify({ items });
 }
 
+// ---- fake frame role (pilot-v0.10; deterministic, derived from the panes and the last user message in the prompt) ----
+const STOP = new Set('a an the to of and or we i you it is are be will for on in at this that with as by our so what about how do does'.split(' '));
+const wordsOf = (t) => new Set(String(t).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w && !STOP.has(w)));
+function framing(msgs) {
+  const u = msgs.filter((m) => m.role === 'user').pop();
+  const c = String(u ? u.content : '');
+  const sec = (h, next) => { const i = c.indexOf(h); if (i < 0) return ''; const from = i + h.length; const j = next ? c.indexOf(next, from) : -1; return c.slice(from, j < 0 ? undefined : j); };
+  const panes = sec('Panes shown:\n', '\n\nFrames now:\n').split('\n\n').map((block) => {
+    const [head, ...rest] = block.split('\n');
+    return { pane: head.replace(/:$/, ''), cards: rest.map((l) => /^- (\S+) \(([^)]*)\): (.*)$/.exec(l)).filter(Boolean).map((m) => ({ id: m[1], text: m[3] })) };
+  }).filter((p) => p.pane);
+  const said = wordsOf(sec('Last user message:\n', '\n\nLast assistant message:\n'));
+  return { panes, said };
+}
+function frameReply(msgs) {
+  if (frameMode === 'malformed') return '{"pane": "map", "focus';
+  if (frameMode === 'none') return '{}';
+  const { panes, said } = framing(msgs);
+  const p = panes.find((x) => x.cards.length);
+  if (!p) return '{}';
+  const score = (card) => [...wordsOf(card.text)].filter((w) => said.has(w)).length;
+  const ranked = p.cards.map((card, i) => ({ id: card.id, s: score(card), i })).sort((a, b) => b.s - a.s || a.i - b.i);
+  const focus = ranked[0].id;
+  const order = [focus, ...ranked.slice(1).sort((a, b) => b.s - a.s || b.i - a.i).map((r) => r.id)];
+  const unknown = `${focus.split('-')[0]}-99`;
+  const out = { pane: p.pane, focus, order };
+  if (frameMode === 'group') out.group = 'status';
+  if (frameMode === 'badid') out.focus = unknown;
+  if (frameMode === 'badkey') out.status = { [focus]: 'confirmed' };
+  if (frameMode === 'wrongpane') out.pane = 'index';
+  if (frameMode === 'bad') return JSON.stringify({ pane: p.pane, focus: unknown, hide: [p.cards[0].id] });
+  return JSON.stringify(out);
+}
+
 http.createServer((req, res) => {
   if (req.method !== 'POST' || req.url !== '/v1/chat/completions') {
     res.writeHead(404, { 'content-type': 'application/json' });
@@ -106,12 +156,14 @@ http.createServer((req, res) => {
   req.on('end', () => {
     let peek = {};
     try { peek = JSON.parse(body); } catch { /* ignore */ }
-    const isExtract = !!peek.response_format || (Array.isArray(peek.messages) && peek.messages.some((m) => m.role === 'system' && String(m.content).includes('PILOT-EXTRACT')));
-    setTimeout(() => respond(req, res, body, isExtract), delay + (isExtract ? extractDelay : 0));
+    const sys = (tag) => Array.isArray(peek.messages) && peek.messages.some((m) => m.role === 'system' && String(m.content).includes(tag));
+    const isFrame = sys('PILOT-FRAME');   // pilot-v0.10: before the extraction test (both carry response_format)
+    const isExtract = !isFrame && (!!peek.response_format || sys('PILOT-EXTRACT'));
+    setTimeout(() => respond(req, res, body, isExtract, isFrame), delay + (isExtract ? extractDelay : 0));
   });
-}).listen(port, '127.0.0.1', () => console.log(`[dev] fake model "${name}" on http://127.0.0.1:${port}/v1${delay ? ` (delay ${delay} ms)` : ''}${failStatus ? ` (always HTTP ${failStatus})` : ''}${stallAfter ? ` (stalls after ${stallAfter} tokens)` : ''} (extract: ${extractMode}${extractDelay ? `, +${extractDelay} ms` : ''})`));
+}).listen(port, '127.0.0.1', () => console.log(`[dev] fake model "${name}" on http://127.0.0.1:${port}/v1${delay ? ` (delay ${delay} ms)` : ''}${failStatus ? ` (always HTTP ${failStatus})` : ''}${stallAfter ? ` (stalls after ${stallAfter} tokens)` : ''} (extract: ${extractMode}${extractDelay ? `, +${extractDelay} ms` : ''}; frame: ${frameMode})`));
 
-function respond(req, res, body, isExtract) {
+function respond(req, res, body, isExtract, isFrame) {
   if (failStatus) {
     res.writeHead(failStatus, { 'content-type': 'application/json' });
     return res.end(JSON.stringify({ error: { message: `[fake:${name}] forced error ${failStatus}` } }));
@@ -122,7 +174,10 @@ function respond(req, res, body, isExtract) {
   const lastUser = [...msgs].reverse().find((m) => m.role === 'user');
   const echo = lastUser ? String(lastUser.content).slice(0, 60) : '';
   let reply;
-  if (isExtract) {
+  if (isFrame) {
+    reply = frameReply(msgs);
+    console.log(`[frame] mode=${frameMode} response_format=${reqJson.response_format ? 'yes' : 'no'} reply=${reply}`);
+  } else if (isExtract) {
     reply = extraction(msgs);
     let n = 0; try { n = JSON.parse(reply).items.length; } catch { n = 'malformed'; }
     console.log(`[extract] mode=${extractMode} response_format=${reqJson.response_format ? 'yes' : 'no'} items=${n}`);
@@ -137,7 +192,7 @@ function respond(req, res, body, isExtract) {
       choices: [{ index: 0, message: { role: 'assistant', content: reply }, finish_reason: 'stop' }] }));
   }
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
-  const words = isExtract ? reply.match(/[\s\S]{1,40}/g) || [] : reply.split(/(?<= )/);
+  const words = isExtract || isFrame ? reply.match(/[\s\S]{1,40}/g) || [] : reply.split(/(?<= )/);
   let i = 0;
   const chunk = (delta, finish) => `data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created, model,
     choices: [{ index: 0, delta, finish_reason: finish || null }] })}\n\n`;
