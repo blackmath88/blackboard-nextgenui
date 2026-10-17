@@ -1,0 +1,29 @@
+{
+  "port": 4747,
+  "pilotDir": ".pilot",
+  "roles": {
+    "chat": {
+      "policy": "fallback",
+      "candidates": [
+        { "name": "frontier", "baseUrl": "http://127.0.0.1:5701/v1", "model": "fake-frontier", "timeoutMs": 10000 },
+        { "name": "morrow", "baseUrl": "http://127.0.0.1:5702/v1", "model": "fake-morrow", "timeoutMs": 10000 }
+      ]
+    },
+    "extract": {
+      "policy": "manual",
+      "everyNTurns": 1,
+      "maxItems": 3,
+      "candidates": [
+        { "name": "morrow", "baseUrl": "http://127.0.0.1:5702/v1", "model": "fake-morrow", "structured": true, "timeoutMs": 10000 }
+      ]
+    },
+    "title": {
+      "policy": "manual",
+      "candidates": []
+    }
+  },
+  "_notes": [
+    "DEV ONLY. Both candidates point at dev/fake-model.js on localhost. Start with PILOT_CONFIG=pilot.config.dev.json.",
+    "No keyEnv: the fakes need no key and no real endpoint is ever contacted."
+  ]
+}
