@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beyond the Scroll</title>
+<meta name="description" content="Four explainers and one build plan on who decides the form of an AI interface, where its state lives, and who holds authority over it.">
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="assets/index.css">
+</head>
+<body>
+<a class="skip" href="#path">Skip to the explainers</a>
+
+<header class="masthead">
+  <p class="byline">blackmath88 · with Claude · October 2026</p>
+  <h1>Beyond the scroll</h1>
+  <p class="lead">One conversation about AI interfaces, kept as four explainers and a build plan. Each piece answers one question and hands the next one on.</p>
+</header>
+
+<main>
+  <section id="problem" aria-labelledby="problem-h">
+    <h2 id="problem-h">The problem</h2>
+    <p>Chat became the default interface for working with language models. It is good for curiosity and bad for ongoing work. State disappears. Nothing is noticed unless you ask. Every answer is a new entry in the scroll.</p>
+    <p>In October 2026 OpenAI shipped Intelligent UI: interfaces generated per answer. That raised the question this collection follows. <strong>Who decides the form of an interface, where does its state live, and who holds authority over it?</strong></p>
+  </section>
+
+  <section id="what" aria-labelledby="what-h">
+    <h2 id="what-h">What this is</h2>
+    <p>Four explainers and one build plan, made in a single conversation between a human (Miro, <a href="https://github.com/blackmath88">blackmath88</a>) and Claude. Each explainer answers one question and ends with the next one open.</p>
+  </section>
+
+  <section id="path" aria-labelledby="path-h">
+    <h2 id="path-h">The path</h2>
+    <p class="note">Read top to bottom. The open question at the end of each piece is where the next one starts.</p>
+
+    <ol class="thread">
+      <li class="step">
+        <article class="card">
+          <h3><a href="explainers/01-blackboard/index.html">Blackboard</a></h3>
+          <p class="subtitle" lang="de">Die Tafel, an der alle schreiben</p>
+          <p class="asks"><span class="k">Answers</span> How does a language model “listen”? Shown through Hearsay-II, the 1970s speech recogniser where independent knowledge sources write to a shared blackboard.</p>
+          <p class="meta">German UI · three acts · runs offline</p>
+        </article>
+        <p class="handoff"><span class="k">Hands on</span> How does the Enter key disappear?</p>
+      </li>
+
+      <li class="step">
+        <article class="card">
+          <h3><a href="explainers/02-morph/index.html">Morph</a></h3>
+          <p class="subtitle" lang="de">Die Oberfläche, die sich selbst umbaut</p>
+          <p class="asks"><span class="k">Answers</span> Can the interface reshape itself semantically? From Engelbart’s NLS through adaptive hypermedia and Morphic to a model that may only propose a frame.</p>
+          <p class="meta">German UI · three acts · simulation, or your own OpenAI-compatible API</p>
+        </article>
+        <p class="handoff"><span class="k">Hands on</span> Where does the view end and authority begin?</p>
+      </li>
+
+      <li class="step">
+        <article class="card">
+          <h3><a href="explainers/03-rolle-und-kodex/index.html">Rolle und Kodex</a></h3>
+          <p class="subtitle">Scroll and codex</p>
+          <p class="asks"><span class="k">Answers</span> What separates an answer-shaped interface from a workspace-shaped one? Three architectures compared on one scenario: OpenAI Intelligent UI, OpenUI, and a workbench whose state belongs to the project.</p>
+          <p class="meta">German UI · three acts · ends on a north star</p>
+        </article>
+        <p class="handoff"><span class="k">Hands on</span> What would prove it on real work?</p>
+      </li>
+
+      <li class="step">
+        <article class="card">
+          <h3><a href="explainers/04-growing-workbench/index.html">The Growing Workbench</a></h3>
+          <p class="subtitle">Pixel terminal</p>
+          <p class="asks"><span class="k">Answers</span> What if the interface starts as a chat and grows panels by consent? A replay of a real conversation in which a controller asks before adding each pane.</p>
+          <p class="meta">English UI · three acts · runs offline</p>
+        </article>
+        <p class="handoff"><span class="k">Hands on</span> How do panes go away?</p>
+      </li>
+
+      <li class="step step-last">
+        <article class="card card-plan">
+          <h3><a href="pilot/cli-pilot-v1/README.md">CLI Pilot v1</a></h3>
+          <p class="subtitle">Concept and build plan</p>
+          <p class="asks">The plan to build it for real: concept, architecture, prior art, a six-step build plan, decisions, open questions, and JSON schemas. Markdown only, no code yet.</p>
+          <p class="meta">English · <a href="https://github.com/blackmath88/blackboard-nextgenui/tree/main/pilot/cli-pilot-v1">read it rendered on GitHub</a></p>
+        </article>
+      </li>
+    </ol>
+  </section>
+
+  <section id="method" aria-labelledby="method-h">
+    <h2 id="method-h">Method</h2>
+    <dl class="method">
+      <dt>Look back first</dt>
+      <dd>Every problem is traced to an older domain that already solved part of it: speech recognition, infrastructure, hypertext, book history, IDEs.</dd>
+      <dt>Explain, then simulate</dt>
+      <dd>Each explainer is deterministic and runs offline. Simulations are labelled as such.</dd>
+      <dt>Evidence labels</dt>
+      <dd>Claims carry their source type: announcement, third-party analysis, depends on host, or our design.</dd>
+      <dt>End open</dt>
+      <dd>Each piece hands its unsolved problem to the next.</dd>
+      <dt>Plan in chat, build elsewhere</dt>
+      <dd>The conversation produced concepts and explainers. Real builds go to a coding agent.</dd>
+    </dl>
+  </section>
+
+  <section id="meta" aria-labelledby="meta-h">
+    <h2 id="meta-h">Meta</h2>
+    <p>This repository is an example of its own subject: a conversation that outgrew chat and had to become a structured place. What you are reading is the workbench the scroll turned into.</p>
+    <p>Each piece was co-authored with an AI and reviewed by a human. That authorship is stated here rather than hidden.</p>
+    <p>The conversation kept its own apparatus: a <a href="notes/summaries/generative-ui-shared-state-summary.json">session summary</a> in JSON, with findings, positions taken, prior art, open questions and sources.</p>
+  </section>
+</main>
+
+<footer class="thesis" aria-labelledby="thesis-h">
+  <h2 id="thesis-h" class="visually-hidden">Thesis</h2>
+  <blockquote>
+    <p>Language may become the universal input. It does not have to become the universal interface.</p>
+  </blockquote>
+  <p class="source">From the paratext project, <a href="https://github.com/blackmath88/paratext-demo">github.com/blackmath88/paratext-demo</a></p>
+</footer>
+
+<script src="assets/index.js" defer></script>
+</body>
+</html>
