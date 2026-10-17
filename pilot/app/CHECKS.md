@@ -422,7 +422,7 @@ on failure.
 **Everything:** `cd pilot/app && npm run verify` (p0, p1, p2, v0.3, v0.4, v0.5, browser p1 + p2; v03/v04/v05
 browser checks run inside their verify scripts).
 Last run (Node v25.9.0, Chrome, macOS): all passed. `npm run demo -- v0.3`, `-- v0.4` and `-- v0.5` each served
-`/state` within 1 s, and SIGINT to the process group left no process behind.
+`/state` in about 1 s (timed with 1 s resolution), and SIGINT to the process group left no process behind.
 
 ## P4 "done when" (04-build-plan.md)
 
@@ -464,7 +464,8 @@ In `dev/browser-check.js v04`, each marked `ADAPTED in pilot-v0.5` in the code:
    - "r on the focused card rejects it"
 6. "hand edit of state.json shows after the next state load" (it sent `/panes` first) → "shows without any action".
 
-The v0.4 shell checks needed no change: requests without `rev` are still accepted.
+`browser-check.js v04` now has 29 checks (27 + 2 global; it had 25). `verify-v0.4.sh` still counts it as 1 of its
+61. The v0.4 shell checks needed no change: requests without `rev` are still accepted.
 
 ## Decisions
 
@@ -483,8 +484,8 @@ The v0.4 shell checks needed no change: requests without `rev` are still accepte
   chat to the cloud.
 - **Outline = focus.** The arrow target (newest proposal) is not outlined until it has focus, so nothing on screen
   suggests that a key in the input would act on it.
-- **Page reload granularity:** one `/state?only=<files>` request per event batch. Areas are re-rendered only when
-  their content signature changed, so scroll and focus survive unrelated events. A focused card keeps focus across
+- **Page reload granularity:** one `/state?only=<file>` request per `change` event. Files the page does not render
+  (e.g. `metrics.jsonl`) cost none. Areas are re-rendered only when their content signature changed, so scroll and focus survive unrelated events. A focused card keeps focus across
   re-renders.
 
 ## Deviations
