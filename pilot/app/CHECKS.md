@@ -594,3 +594,14 @@ question part (`.text`). Same assertion, same count.
 2. The assistant label changed from `pilot` to `model` (the model name follows it). Command output lines (`/stats`,
    `/rules`, …) have no author label: they are not stored and nobody authored them.
 3. `/state` gained `paneInfo` and per-item `prov`. Without them it returns what it did before.
+
+## pilot-v0.6: coordinator re-run (2026-10-17)
+
+Run by the coordinator, not the builder.
+- Scope: only `pilot/app/**` plus one line in the "Pilot iterations" list of `index.html`.
+- `npm run verify`: exit 0; every earlier script passes, plus v0.6.
+- Demos v0.3 to v0.6: `/state` 200 within about 1 s each; no orphan processes.
+- `/stats` in demo v0.6 and `npm run stats -- .pilot-demo` print the same report. It marks fixture data as such, shows 3 PASS / 2 NOT YET with the numbers behind each, and names what files cannot measure.
+- Authorship in the browser: every chat line is labelled (you / model + candidate / controller / system), every card shows author, model and who decided it, and every pane bar shows its rule and answer.
+- Hand edit of dec-2's text → `/state` gives `prov.fields: ["text"]`; the card reads "edited by you (file edit): text".
+- Seen, planned for v0.7: at 800 px the 4-pane layout is cramped (the "controller" label breaks mid-word, kanban columns about 6 characters wide).

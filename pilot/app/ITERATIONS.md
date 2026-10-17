@@ -35,3 +35,8 @@ date, old plan, new plan and why.
 - Why: the brief asks for a fallback to the refresh-after-action when SSE is unavailable. Without the poll, proposals
   from a background extraction would not appear in such a tab until the next action.
 
+
+## 2026-10-17 (coordinator) v0.7 also fixes the cramped 4-pane layout
+- Old plan: v0.7 = /why only.
+- New plan: v0.7 = /why + a layout fix: labels never break mid-word, and below a usable width the kanban stacks its columns instead of squeezing them.
+- Why: coordinator testing of the v0.6 demo at 800 px showed "controll/er" and kanban columns about 6 characters wide. /why adds affordances to the same pane bars, so the fix belongs there.
