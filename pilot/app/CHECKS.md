@@ -396,3 +396,13 @@ Done by hand: the demo in the Browser pane (light theme): one message → dashed
 1. `/answer` also accepts `{itemId, decision}`; decisions add a system line to the transcript.
 2. Consent answers now record the count of the rule's metric (bug fix; only changes map/kanban, index unchanged).
 3. `dev/fake-model.js` ignores its own chat echo `(you said: "…")` when extracting, so it does not re-propose.
+
+## pilot-v0.4: coordinator re-run (2026-10-17)
+
+Run by the coordinator, not the builder. Still untested with a real model (Morrow unreachable).
+- Scope: only `pilot/app/**` plus one new line in the "Pilot iterations" list of `index.html`.
+- `npm run verify`: exit 0; every earlier script passes (p0, p1, p2, v0.3, browser p1/p2/v03), plus v0.4.
+- `npm run demo -- v0.3` and `-- v0.4`: `/state` 200 in under 1 s each; no orphan processes after stopping.
+- Browser, demo v0.4: sent "Decision: … Task: …"; about 2 s later dec-4 appeared dashed with "model · morrow" and the kanban question asked. `c` confirmed dec-4 (`decidedBy: user`, `decidedAt` set, mint); `y` added the kanban with task-2/task-3 dashed and the hand-added task-1 solid, "you". No text on the page fell below 4.5:1 (computed in the page, opacity included).
+- Own fake runs (separate dir and ports): `--extract=badquote` kept 2 of 3 and logged `extract_drop reason: quote`; `malformed` wrote no state and logged `extract_error malformed`; `many` (5 items) wrote nothing and logged `extract_error schema`.
+- Known risk carried into v0.5: `c`/`r` from the empty chat input decide a proposal on the first keystroke of a message starting with c or r (see QUESTIONS.md). Fixed in v0.5.

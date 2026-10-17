@@ -20,3 +20,8 @@ date, old plan, new plan and why.
   without reload after a background extraction, so the page polls `/state` every 300 ms while `extracting` is true
   (and only re-renders when something changed). Why: the alternative was SSE now, which is v0.5's job; the poll is
   removed or replaced when v0.5 pushes file changes.
+
+## 2026-10-17 (coordinator) v0.5 also fixes accidental c/r
+- Old plan: v0.5 = live files only.
+- New plan: v0.5 = live files + `c`/`r` act only when keyboard focus is on a proposal (Tab/arrow into a pane), never from the chat input.
+- Why: coordinator testing of v0.4 confirmed that a message starting with "c" or "r" typed into the empty input decides a proposal at once. That breaks "models only propose, the person decides on purpose". It is small, so it rides along with v0.5 rather than taking its own tag.
