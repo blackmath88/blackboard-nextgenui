@@ -48,8 +48,9 @@ async function openBrowser() {
   const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending[i] = r; ws.send(JSON.stringify({ id: i, method, params })); });
   for (const m of ['Network.enable', 'Runtime.enable', 'Page.enable']) await send(m);
   await send('Emulation.setFocusEmulationEnabled', { enabled: true });
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   const page = {
-    net, errors,
+    net, errors, send,
     async goto(url) { await send('Page.navigate', { url }); await sleep(700); },
     async eval(expr) {
       const r = await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
@@ -99,7 +100,56 @@ async function p1(page) {
   start('f1', ['dev/fake-model.js', '5701', 'frontier']); await sleep(300);
 }
 
-const SCENARIOS = { p1 };
+function editJson(file, fn) {
+  const f = path.join(APP, '.pilot', file);
+  const j = JSON.parse(fs.readFileSync(f, 'utf8')); fn(j);
+  fs.writeFileSync(f, JSON.stringify(j, null, 2));
+}
+
+async function p2(page) {
+  editJson('rules.json', (r) => { r.rules.find((x) => x.module === 'index').threshold = 4; });
+  await page.goto(URL);
+  await page.eval(`(() => { const o = document.startViewTransition && document.startViewTransition.bind(document); window.__vt = 0;
+    if (o) document.startViewTransition = (cb) => { window.__vt++; return o(cb); }; })()`);
+  await page.submit('first message');
+  check('no question below the threshold', await page.eval(`document.querySelectorAll('.ln.controller').length === 0`));
+  await page.submit('second message');
+  check('controller asks at the threshold with y/n/a/x buttons', await page.eval(`document.querySelectorAll('.ln.controller.pending .key').length === 4`),
+    await page.eval(`(document.querySelector('.ln.controller') || {}).textContent || 'none'`));
+  check('only the chat pane before an answer (n1)', await page.eval(`document.getElementById('bench').className === 'bench n1'`));
+
+  await page.eval(`document.getElementById('input').focus()`);
+  await page.key('y'); await sleep(900);
+  check('y adds the index pane (n2 layout)', await page.eval(`!!document.getElementById('pane-index') && document.getElementById('bench').className === 'bench n2'`));
+  check('the y keystroke was not typed into the input', await page.eval(`document.getElementById('input').value === ''`));
+  check('pane change used a View Transition', await page.eval(`window.__vt === 1 || !document.startViewTransition`), `calls: ${await page.eval('window.__vt')}`);
+  const mods = JSON.parse(fs.readFileSync(path.join(APP, '.pilot', 'modules.json'), 'utf8'));
+  check('modules.json records the answer yes and the pane', mods.answers.index.answer === 'yes' && mods.panes[0].module === 'index');
+
+  for (let i = 3; i <= 8; i++) await page.submit(`message number ${i} to fill the terminal`, 1500);
+  const inView = `(() => { const log = document.getElementById('log').getBoundingClientRect(); const el = document.querySelector('.ln.user').getBoundingClientRect();
+    return el.top >= log.top && el.bottom <= log.bottom; })()`;
+  check('first message is scrolled out of view before the click', !(await page.eval(inView)));
+  await page.eval(`document.querySelector('#pane-index .idx button').click()`); await sleep(900);
+  check('clicking the first index entry scrolls the chat to that message', await page.eval(inView));
+  check('the target line is highlighted', await page.eval(`document.querySelector('.ln.user').classList.contains('flash')`));
+
+  // 3 and 4 panes, with reduced motion: no View Transition, instant swap.
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  const now = new Date().toISOString();
+  editJson('modules.json', (m) => { m.panes.push({ module: 'map', addedAt: now, atCount: 0 }); m.answers.map = { answer: 'yes', at: now, count: 0 }; });
+  await page.submit('/panes', 600);
+  check('3 panes use the n3 template', await page.eval(`document.getElementById('bench').className === 'bench n3' && !!document.getElementById('pane-map')`));
+  editJson('modules.json', (m) => { m.panes.push({ module: 'kanban', addedAt: now, atCount: 0 }); m.answers.kanban = { answer: 'yes', at: now, count: 0 }; });
+  await page.submit('/panes', 600);
+  check('4 panes use the n4 template', await page.eval(`document.getElementById('bench').className === 'bench n4' && document.querySelectorAll('.pane').length === 4`));
+  check('reduced motion: panes swapped without a View Transition', await page.eval(`window.__vt === 1 || !document.startViewTransition`), `calls: ${await page.eval('window.__vt')}`);
+  const layout = await page.eval(`[...document.querySelectorAll('.pane')].map(p => { const r = p.getBoundingClientRect(); return p.id + ':' + Math.round(r.left) + ',' + Math.round(r.top) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height); }).join(' | ')`);
+  check('n4: chat on the left, three side panes stacked on the right', await page.eval(`(() => { const [c, ...s] = [...document.querySelectorAll('.pane')].map(p => p.getBoundingClientRect());
+    return s.every(r => r.left > c.right - 1) && s[0].top < s[1].top && s[1].top < s[2].top; })()`), layout);
+}
+
+const SCENARIOS = { p1, p2 };
 
 (async () => {
   const which = process.argv[2] || 'all';

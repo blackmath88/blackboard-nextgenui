@@ -64,7 +64,7 @@ Reproduce everything with `bash pilot/app/dev/verify-p0.sh` (wipes `.pilot/` fir
 ## Deferred (by design, later steps)
 
 - ~~P0 uses only `roles.chat.candidates[0]`~~ (done in P1).
-- `rules.json` is not seeded into `.pilot/` yet (P2).
+- ~~`rules.json` is not seeded into `.pilot/` yet~~ (done in P2).
 - `rev` is not tracked for the transcript yet (P4); appends are atomic full rewrites.
 - No `/events`, SSE to the browser, `fs.watch`, extraction or proposals.
 - `pixel.js` is copied from the workbench; one sprite (`teletype`) is used as the title-bar icon.
@@ -133,4 +133,98 @@ server with the dev config and wipe `.pilot/` first. Last run: all passed.
 
 ## Deferred
 
-- `/rules` and `/panes` come with P2. The `extract` role is configured and shown, but not called until P3.
+- ~~`/rules` and `/panes` come with P2~~ (done). The `extract` role is configured and shown, but not called until P3.
+
+# P2 Growth
+
+Scripted: `bash pilot/app/dev/verify-p2.sh` (curl, 25 checks) and `node pilot/app/dev/browser-check.js p2`
+(headless Chrome, 16 checks). Both wipe `.pilot/` and use the dev config. Last run: all passed;
+`verify-p0.sh` and `verify-p1.sh` still pass on the P2 code.
+
+## Done when
+
+- [x] **At the message threshold, the controller asks exactly once.** With the index threshold set to 4,
+  the 4th message (2 turns) produces one `controller` line ("4 messages. Scrolling back gets slow. Add
+  an index pane?", `{n}` filled in) and `modules.json.pending = "index"`. Two more turns, a server
+  restart and another turn: still exactly one controller line for `index`. Two `POST /chat` fired in
+  parallel across the threshold also produce exactly one question (controller runs inside the same
+  serialized write chain as the transcript).
+- [x] **`y` adds the index; `x` (never) survives a server restart and is never asked again.**
+  Browser: pressing `y` in the empty input adds the index pane (`bench n1` → `bench n2`), the keystroke
+  is not typed into the input, and `modules.json` records `answers.index = {answer: "yes", at, count}`
+  plus `panes[0] = {module: "index", addedAt, atCount}`. curl: after `POST /answer {module: "index",
+  answer: "x"}` and a restart, five more turns (20 messages, more than twice the threshold) bring no new
+  question; `/state` shows no pane and nothing pending.
+- [x] **Editing a threshold in `rules.json` takes effect on the next turn without restart.** Start with
+  the seeded threshold 12, one turn (2 messages, no question), edit `.pilot/rules.json` to 4 while the
+  server runs, next turn asks. The controller reads `rules.json` on every turn.
+- [x] **Clicking an index entry scrolls the chat to that message.** Browser: after 8 turns the first
+  user line lies outside the log pane's bounding rect; clicking index entry 01 brings it inside the
+  rect and highlights it (`flash`).
+
+## Other P2 checks
+
+- `rules.json` is seeded verbatim from `rules.example.json` on first run (`cmp`); never overwritten.
+- `n` (no): asked at 4 messages, answered `n`; no question at 6; asked again at 8 (count doubled).
+- `a` (always): pane added. If the pane is later removed from `modules.json` by hand, the next turn
+  re-adds it without asking and writes a controller line "… Added the index pane (you said always)".
+- No pane without a recorded answer: a `map` pane added to `modules.json.panes` by hand without an
+  answer is not returned by `/state` and not shown.
+- Malformed `rules.json`: the turn still completes; the controller is skipped and `controller_error`
+  is logged to `metrics.jsonl`. `/rules` reports the parse error.
+- `POST /answer` with nothing pending → 409; with an unknown answer → 400.
+- Every `modules.json` write bumps `rev`. Metrics: `controller_ask`, `consent`, `controller_add`.
+- Layouts: with `map` and `kanban` added by hand (with answers), the page uses the `n3` and `n4`
+  templates; in `n4` chat is on the left and the three side panes stack on the right (bounding rects
+  checked at 1280×800). Below 800 px width the panes stack vertically.
+- View Transitions: adding the index called `document.startViewTransition` once; with
+  `prefers-reduced-motion: reduce` emulated, the n3/n4 swaps happened without a transition (instant).
+  The initial page load never animates.
+- Visual check: screenshots of the pending question and of the 2-pane layout looked as intended.
+
+## Decisions
+
+- **Consent keys follow the spec**, which overrides the coordinator's suggested "a = ask later":
+  `02-architecture.md` and `modules.schema.json` define `[y] yes [n] no [a] always [x] never`.
+  - `yes`: add the pane now. If it is later removed by hand, the controller may ask again.
+  - `no`: ask again once the count reaches twice the count at the time of the answer (`afterNo`).
+  - `always`: add the pane now; if it is ever missing again, re-add without asking.
+  - `never`: the rule is silenced permanently.
+- **Key handling:** while a question is pending, a single lowercase `y`/`n`/`a`/`x` typed into the
+  *empty* input answers it (the placeholder says so). Any other first character types normally, an
+  uppercase letter types normally, and the four buttons on the question can be clicked instead.
+  Trade-off: a message starting with lowercase "y", "n", "a" or "x" cannot be typed while a question is
+  pending without first typing something else.
+- **One question at a time:** while `pending` is set, the controller asks nothing else.
+- **Only `index` is evaluated** (`BUILT = ['index']`); `decisions`, `tasks` and `sources` counts are 0
+  until P3. `messages` counts `user` and `assistant` lines only (not system, controller or commands).
+- The answer is also written as a short `system` line ("index: yes, pane added") so the transcript
+  reads as a complete record.
+- `map` and `kanban` panes render a placeholder ("Arrives in P3") if they are ever shown by hand edit.
+
+## Deviations
+
+1. `pilot/app/rules.example.json` is a verbatim copy of `schemas/rules.example.json`, used to seed
+   `.pilot/rules.json` (the spec path is outside the repo).
+2. Controller lines in `transcript.jsonl` carry an extra `module` field (`{id, ts, role, text, model,
+   module}`) so the page can attach the y/n/a/x keys to the right question.
+3. New dev-only `dev/verify-p2.sh`; `dev/browser-check.js` gained the `p2` scenario.
+4. `/rules` and `/panes` are implemented now (they belong to the brief's command list).
+
+## Deferred
+
+- `rev` checks on writes (stale `rev` rejected) and live updates of hand edits are P4; today a hand
+  edit shows up on the next page reload, turn or command.
+- Reasoning map and kanban content, decision/task/source counts: P3.
+
+# Open questions and known limits (after P2)
+
+- **Privacy vs. fallback.** After `/model chat morrow` under policy `fallback`, a morrow outage sends
+  the (private) text on to frontier: the concept's day-5 case. Persisting the choice does not help
+  here. Options: an explicit `/model` pins the role (no fallback until switched back), or a
+  per-candidate "never fall back to" list. Not changed yet; needs a decision.
+- No stall timeout after the first token: an endpoint that hangs mid-stream keeps the request open.
+- `transcript.jsonl` and `metrics.jsonl` are rewritten in full on every append to keep writes atomic;
+  fine for a pilot, worth revisiting in P4 if a dogfood week makes the files large.
+- While a question is pending, a message cannot start with lowercase y/n/a/x (see P2 decisions).
+- `dev/browser-check.js` needs Node 22+ (global `WebSocket`) and Google Chrome; the app needs Node 20.3+.

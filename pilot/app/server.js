@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// CLI Pilot v1 (P0-P1): serves the page, proxies POST /chat to the `chat` role with
+// CLI Pilot v1 (P0-P2): serves the page, proxies POST /chat to the `chat` role with
 // streaming and per-role candidates/policies, appends lines to .pilot/transcript.jsonl,
-// handles /model and /help via POST /command, logs model calls to .pilot/metrics.jsonl.
+// runs the deterministic growth controller (rules.json -> consent -> modules.json),
+// handles commands via POST /command and answers via POST /answer, logs to .pilot/metrics.jsonl.
 // Node 20+, no dependencies. All paths resolve against this file's folder.
 'use strict';
 const http = require('http');
@@ -17,6 +18,9 @@ const PILOT = path.resolve(APP, config.pilotDir || '.pilot');
 const TRANSCRIPT = path.join(PILOT, 'transcript.jsonl');
 const METRICS = path.join(PILOT, 'metrics.jsonl');
 const ROLES = path.join(PILOT, 'roles.json');      // persisted /model choices (see CHECKS.md)
+const RULES = path.join(PILOT, 'rules.json');
+const MODULES = path.join(PILOT, 'modules.json');
+const BUILT = ['index'];   // panes this build can show; the controller only evaluates their rules
 const PORT = Number(config.port) || 4747;
 const HOST = '127.0.0.1';
 const TAIL = 500;      // lines returned by GET /state
@@ -24,6 +28,7 @@ const HISTORY = 40;    // user/assistant lines sent to the model
 
 if (path.relative(APP, PILOT).startsWith('..')) throw new Error(`pilotDir must stay inside ${APP}`);
 fs.mkdirSync(PILOT, { recursive: true });
+if (!fs.existsSync(RULES)) atomicWrite(RULES, fs.readFileSync(path.join(APP, 'rules.example.json')));
 
 // ---- .pilot/ files: atomic writes (temp file in .pilot/, then rename), serialized ----
 let writeChain = Promise.resolve();
@@ -64,6 +69,83 @@ function metric(event, fields) {
 
 function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return fallback; throw e; }
+}
+
+// ---- growth: deterministic controller over rules.json, consent answers in modules.json ----
+const ANSWERS = { y: 'yes', n: 'no', a: 'always', x: 'never', yes: 'yes', no: 'no', always: 'always', never: 'never' };
+
+function readModules() {
+  const m = readJson(MODULES, null) || {};
+  return { rev: m.rev || 0, panes: m.panes || [], answers: m.answers || {}, pending: m.pending || null };
+}
+function writeModules(m) { m.rev = (m.rev || 0) + 1; atomicWrite(MODULES, JSON.stringify(m, null, 2) + '\n'); }
+
+// Visible panes: only those with a recorded yes/always answer (a hand-added pane without one stays hidden).
+function visiblePanes(m) {
+  return m.panes.map((p) => p.module).filter((mod, i, a) => a.indexOf(mod) === i && ['yes', 'always'].includes((m.answers[mod] || {}).answer));
+}
+
+function counts(lines) {
+  return { messages: lines.filter((l) => l.role === 'user' || l.role === 'assistant').length, decisions: 0, tasks: 0, sources: 0 };  // items arrive in P3
+}
+
+// When a rule may ask: count >= threshold, not answered never, and after "no" only once the count has doubled.
+function ruleDue(rule, n, m) {
+  if (!BUILT.includes(rule.module) || m.panes.some((p) => p.module === rule.module)) return false;
+  const ans = m.answers[rule.module];
+  if (ans && ans.answer === 'never') return false;
+  const need = ans && ans.answer === 'no' ? Math.max(rule.threshold, 2 * ans.count) : rule.threshold;
+  return n >= need;
+}
+
+// Runs after every turn, inside the write chain. Reads rules.json fresh each time. At most one question at a time.
+function runController() {
+  return serial(() => {
+    let rules;
+    try { rules = readJson(RULES, { rules: [] }).rules || []; }
+    catch (err) { appendJsonl(METRICS, { ts: new Date().toISOString(), event: 'controller_error', error: `rules.json: ${err.message}` }); return; }
+    const m = readModules();
+    if (m.pending) return;
+    const c = counts(readTranscript());
+    for (const rule of rules) {
+      const n = c[rule.metric];
+      if (typeof n !== 'number' || typeof rule.threshold !== 'number' || !ruleDue(rule, n, m)) continue;
+      const ts = new Date().toISOString();
+      if ((m.answers[rule.module] || {}).answer === 'always') {   // consent already given for good
+        m.panes.push({ module: rule.module, addedAt: ts, atCount: n });
+        writeModules(m);
+        appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'controller', text: `${n} ${rule.metric}. Added the ${rule.module} pane (you said always).`, model: null, module: rule.module });
+        appendJsonl(METRICS, { ts, event: 'controller_add', module: rule.module, count: n, answer: 'always' });
+        return;
+      }
+      const text = String(rule.ask || `Add the ${rule.module} pane?`).replace('{n}', n);
+      appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'controller', text, model: null, module: rule.module });
+      m.pending = rule.module;
+      writeModules(m);
+      appendJsonl(METRICS, { ts, event: 'controller_ask', module: rule.module, metric: rule.metric, count: n, threshold: rule.threshold });
+      return;
+    }
+  });
+}
+
+// POST /answer {module, answer}: records the answer; yes/always add the pane.
+function answer(module, raw) {
+  const ans = ANSWERS[String(raw || '').toLowerCase()];
+  return serial(() => {
+    if (!ans) return { code: 400, body: { error: 'answer must be y/n/a/x or yes/no/always/never' } };
+    const m = readModules();
+    if (!module || m.pending !== module) return { code: 409, body: { error: `no pending question for "${module}"`, pending: m.pending } };
+    const ts = new Date().toISOString();
+    const n = counts(readTranscript()).messages;
+    m.answers[module] = { answer: ans, at: ts, count: n };
+    if ((ans === 'yes' || ans === 'always') && !m.panes.some((p) => p.module === module)) m.panes.push({ module, addedAt: ts, atCount: n });
+    m.pending = null;
+    writeModules(m);
+    const effect = { yes: 'pane added', always: 'pane added; will not ask again', no: 'will ask again when the count has doubled', never: 'will never ask again' }[ans];
+    appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'system', text: `${module}: ${ans}, ${effect}`, model: null });
+    appendJsonl(METRICS, { ts, event: 'consent', module, answer: ans, count: n });
+    return { code: 200, body: { ok: true, module, answer: ans } };
+  });
 }
 
 // ---- model roles: candidates, policy, active choice (persisted in .pilot/roles.json) ----
@@ -228,6 +310,7 @@ async function handleChat(req, res) {
     console.error(msg);
     if (!res.writableEnded) res.write(`\n[${msg}]`);
   }
+  await runController();
   res.end();
 }
 
@@ -235,6 +318,8 @@ async function handleChat(req, res) {
 const HELP = [
   '/model                     show roles, policies and candidates',
   '/model <role> <candidate>  switch the model for a role (kept across restarts)',
+  '/rules                     rules from .pilot/rules.json with current counts',
+  '/panes                     panes and your answers',
   '/help                      this list',
 ];
 
@@ -261,6 +346,24 @@ async function runCommand(input) {
     await metric('model_switch', { role, candidate: name });
     return { ok: true, lines: [`${role} now uses ${name} (${summary[role].policy})`] };
   }
+  if (cmd === '/rules') {
+    let rules;
+    try { rules = readJson(RULES, { rules: [] }).rules || []; } catch (err) { return { ok: false, lines: [`rules.json is not valid JSON: ${err.message}`] }; }
+    const c = counts(readTranscript()), m = readModules();
+    return { ok: true, lines: rules.map((r) => {
+      const ans = m.answers[r.module];
+      const state = m.panes.some((p) => p.module === r.module) ? 'pane shown' : m.pending === r.module ? 'asking now'
+        : ans ? `answered ${ans.answer} at ${ans.count}` : BUILT.includes(r.module) ? 'not asked yet' : 'not built yet (P3)';
+      return `${r.module}: ${r.metric} ${c[r.metric]} / ${r.threshold}  (${state})`;
+    }) };
+  }
+  if (cmd === '/panes') {
+    const m = readModules();
+    const lines = ['chat (always)', ...m.panes.map((p) => `${p.module} added ${p.addedAt} at ${p.atCount} messages`)];
+    for (const [mod, a] of Object.entries(m.answers)) lines.push(`answer ${mod}: ${a.answer} (${a.at}, count ${a.count})`);
+    if (m.pending) lines.push(`pending question: ${m.pending}`);
+    return { ok: true, lines };
+  }
   return { ok: false, lines: [`unknown command "${cmd}". Try /help`] };
 }
 
@@ -269,7 +372,15 @@ const server = http.createServer(async (req, res) => {
     const { pathname } = new URL(req.url, `http://${HOST}`);
     if (req.method === 'GET' && pathname === '/state') {
       const lines = readTranscript();
-      return sendJson(res, 200, { transcript: lines.slice(-TAIL), total: lines.length, models: modelsSummary() });
+      const m = readModules();
+      return sendJson(res, 200, { transcript: lines.slice(-TAIL), total: lines.length, models: modelsSummary(),
+        panes: visiblePanes(m), pending: m.pending, answers: m.answers });
+    }
+    if (req.method === 'POST' && pathname === '/answer') {
+      let body;
+      try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'expected JSON {module, answer}' }); }
+      const out = await answer(body.module, body.answer);
+      return sendJson(res, out.code, out.body);
     }
     if (req.method === 'POST' && pathname === '/command') {
       let text;
