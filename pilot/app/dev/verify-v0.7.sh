@@ -41,9 +41,10 @@ rm -rf $C; mkdir $C
 for f in demo/fixtures/v0.7/*; do case $(basename $f) in demo.json|pilot.config.json) ;; *) cp $f $C/ ;; esac; done
 server $C
 W=$(why "")
-check "/why: one line per shown pane with its rule, the count when asked, your answer and the add" "$(has '^  index: messages ≥ 12; asked at 24 messages \(2026-10-15T14:14:22.000Z\); you said yes \(2026-10-15T14:14:33.000Z\); added by the controller  \[modules.json:14 panes index.rule; metrics.jsonl:60 controller_ask; transcript.jsonl:33 m-f033; metrics.jsonl:65 consent c-f03; metrics.jsonl:66 controller_add\]$' "$W" && has '^  map: decisions ≥ 2; asked at 2 decisions' "$W" && has '^  kanban: tasks ≥ 3; asked at 6 tasks .*you said always' "$W" && echo true)"
+check "/why: one line per shown pane with its rule, the count when asked, your answer and the add" "$(has '^  index: messages ≥ 12; asked at 24 messages \(2026-10-15T14:14:22.000Z\); you said yes \(2026-10-15T14:14:33.000Z\); added by the controller  \[modules.json:14 panes index.rule; rules.json:[0-9]+ rules index; metrics.jsonl:60 controller_ask; transcript.jsonl:33 m-f033; metrics.jsonl:65 consent c-f03; metrics.jsonl:66 controller_add\]$' "$W" && has '^  map: decisions ≥ 2; asked at 2 decisions' "$W" && has '^  kanban: tasks ≥ 3; asked at 6 tasks .*you said always' "$W" && echo true)"
 check "/why: items summary (16 by a model, task-7 by file edit; dec-8 status by file edit; task-1, task-2 edited)" "$(has '^  17 items: 16 proposed by a model \(extraction\), 1 added by you \(file edit\): task-7' "$W" && has 'status set by file edit: dec-8; other fields edited by file edit: task-1, task-2' "$W" && echo true)"
 W=$(why map)
+check "/why map: the rule recorded with the pane, citing the pane entry and rules.json" "$(has '^  rule recorded with the pane: decisions ≥ 2 \(rules.json says the same now\)  \[modules.json:5 panes map.rule; rules.json:[0-9]+ rules map\]$' "$(why map)" && echo true)"
 check "/why map: the question with its count, threshold and text, the answer, the add, each with its line" "$(has '^  the controller asked at 2026-10-14T09:05:44.000Z: 2 decisions reached the threshold 2, "2 decisions so far. Add a reasoning map\?"  \[metrics.jsonl:12 controller_ask; transcript.jsonl:5 m-f005\]$' "$W" && has '^  you answered "yes" at 2026-10-14T09:05:52.000Z \(count 2\)  \[metrics.jsonl:13 consent c-f01\]$' "$W" && has 'the controller added the pane at .* allowed by your answer "yes" \(c-f01\)' "$W" && echo true)"
 W=$(why index)
 check "/why index: the full history (asked at 12, no; asked at 24, yes)" "$(has 'asked at 2026-10-14T09:23:17.000Z: 12 messages' "$W" && has 'you answered "no" at 2026-10-14T09:23:25' "$W" && has 'asked at 2026-10-15T14:14:22.000Z: 24 messages' "$W" && has 'you answered "yes" at 2026-10-15T14:14:33' "$W" && echo true)"
@@ -105,7 +106,7 @@ editjs modules.json 's.answers.kanban={answer:"yes",at:"2026-10-17T09:00:01.000Z
 W=$(why kanban)
 check "a hand-written yes (no consent event): shown, and /why says 'written by file edit, when is not recorded'" "$(state | q 'x.panes.includes("kanban")' | grep -q true && has 'answer on file: "yes" \(says 2026-10-17T09:00:01.000Z\), but no consent event matches it: written by file edit, when is not recorded' "$W" && echo true)"
 editjs rules.json 's.rules.find(x=>x.module==="index").threshold=5' $DIR
-check "rules.json changed after the pane was added: the recorded rule and 'rules.json says messages ≥ 5 now'" "$(W=$(why index); has 'rule recorded with the pane: messages ≥ 2' "$W" && has 'rules.json says messages ≥ 5 now' "$W" && echo true)"
+check "rules.json changed after the pane was added: the recorded rule and 'rules.json says messages ≥ 5 now'" "$(W=$(why index); has 'rule recorded with the pane: messages ≥ 2  \[' "$W" && has 'rules.json says messages ≥ 5 now' "$W" && echo true)"
 node dev/why-cites.js http://127.0.0.1:4800 $DIR > $T/cites3.txt; RC=$?
 check "every source cited after the hand edits resolves ($(tail -1 $T/cites3.txt))" "$( [ $RC -eq 0 ] && echo true)"
 [ $RC -ne 0 ] && head -20 $T/cites3.txt

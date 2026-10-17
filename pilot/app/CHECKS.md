@@ -610,7 +610,7 @@ Run by the coordinator, not the builder.
 
 `/why` and the layout fix. Everything runs against `dev/fake-model.js`; no real endpoint was contacted.
 
-**Reproduce:** `bash pilot/app/dev/verify-v0.7.sh`. It has 34 checks; one of them runs the 22 checks of
+**Reproduce:** `bash pilot/app/dev/verify-v0.7.sh`. It has 35 checks; one of them runs the 22 checks of
 `browser-check.js v07` (20 + 2 global). It ends with `ALL v0.7 CHECKS PASSED` and exits non-zero on failure.
 - Own ports: server 4800, fakes 5801/5802; browser part 4805/5806/5807 and Chrome 9383; demo part 4968/5968/5969.
 - Own throwaway dirs: `.pilot-verify-v07/`, `.pilot-verify-v07c/`, `.pilot-verify-v07b/`, `.pilot-demo-verify07/`.
@@ -634,7 +634,7 @@ each served `/state` within about 1–2 s, and SIGINT left no process behind.
 
 | # | Check | How (section of `verify-v0.7.sh`) |
 |---|---|---|
-| 1 | v0.7 fixture: `/why` has one line per pane with rule, count when asked, your answer and the add, exact text and sources for index; the item summary. `/why map` question (count, threshold, text, transcript line), answer, add. `/why index` full history (12 → no, 24 → yes). `/why dec-2`: proposed by morrow, from your message m-f003 (the item's `fromMessage`, not the extract event's m-f004), quote found, confirmed by you with its `decide` line. `/why dec-8` "set by you (file edit), when is not recorded". `/why task-7` "added by you (file edit) at 2026-10-16T18:30:04" citing `metrics.jsonl:131 file_edit task-7`. `/why task-1` column: server "todo", file "done". `/why chat`. Unknown name → 400 listing panes and items. | 1 |
+| 1 | v0.7 fixture: `/why` has one line per pane with rule, count when asked, your answer and the add, exact text and sources for index; the item summary. The rule is cited twice: as recorded with the pane (`modules.json`) and in `rules.json` while the two agree (when `rules.json` changed later, the change is its own statement). `/why map` question (count, threshold, text, transcript line), answer, add. `/why index` full history (12 → no, 24 → yes). `/why dec-2`: proposed by morrow, from your message m-f003 (the item's `fromMessage`, not the extract event's m-f004), quote found, confirmed by you with its `decide` line. `/why dec-8` "set by you (file edit), when is not recorded". `/why task-7` "added by you (file edit) at 2026-10-16T18:30:04" citing `metrics.jsonl:131 file_edit task-7`. `/why task-1` column: server "todo", file "done". `/why chat`. Unknown name → 400 listing panes and items. | 1 |
 | 2 | **Every cited source resolves** (`dev/why-cites.js`): `/why`, the four panes and all 17 items; also `lines` equals the formatted `why` statements, every statement cites something, every link names a message in the transcript. | 1, 2, 3 |
 | 3 | **Read-only:** every file byte-identical after 31 explanations (fixture) and after 8 more on live data; no file added. | 1, 3 |
 | 4 | Live data (fresh dir, real turns through the fakes, consent through `/answer`, a confirm): `/why` from the real lines; `/why dec-1` from the real user message, confirmed through the page. | 2 |

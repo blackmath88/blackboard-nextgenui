@@ -122,8 +122,10 @@ function ruleFacts(ctx, mod, entry) {
   const idx = ctx.rules.list.findIndex((r) => r && r.module === mod);
   const now = idx >= 0 ? ctx.rules.list[idx] : null;
   if (entry && entry.rule && entry.rule.metric) {
-    out.push({ text: `rule recorded with the pane: ${entry.rule.metric} ≥ ${entry.rule.threshold ?? '?'}`, cite: [paneCite(ctx, mod) + '.rule'] });
-    if (now && (now.metric !== entry.rule.metric || now.threshold !== entry.rule.threshold)) {
+    const same = now && now.metric === entry.rule.metric && now.threshold === entry.rule.threshold;
+    out.push({ text: `rule recorded with the pane: ${entry.rule.metric} ≥ ${entry.rule.threshold ?? '?'}${same ? ' (rules.json says the same now)' : ''}`,
+      cite: [paneCite(ctx, mod) + '.rule', ...(same ? [ruleCite(ctx, mod)] : [])] });
+    if (now && !same) {
       out.push({ text: `rules.json says ${now.metric} ≥ ${now.threshold} now (changed after the pane was added)`, cite: [ruleCite(ctx, mod)] });
     }
   } else if (now) {
@@ -261,7 +263,7 @@ function explainFrame(ctx) {
       const said = crow ? `you said ${crow.obj.answer} (${crow.obj.ts})` : `answer "${ans.answer}" written by file edit (no consent event)`;
       const added = add ? `added by the controller${add.obj.answer === 'always' && crow && add.obj.ts !== crow.obj.ts ? ` at ${add.obj.ts} (always)` : ''}` : 'added by file edit (no controller_add)';
       out.push({ text: `${mod}: ${rule}; ${asked}; ${said}; ${added}`,
-        cite: [paneCite(ctx, mod) + '.rule', ...(ask ? [jl('metrics.jsonl', ask, 'controller_ask')] : []), ...(q ? [jl('transcript.jsonl', q, q.obj.id)] : []),
+        cite: [paneCite(ctx, mod) + '.rule', ...(ctx.rules.list.some((r) => r && r.module === mod && entry.rule && r.metric === entry.rule.metric && r.threshold === entry.rule.threshold) ? [ruleCite(ctx, mod)] : []), ...(ask ? [jl('metrics.jsonl', ask, 'controller_ask')] : []), ...(q ? [jl('transcript.jsonl', q, q.obj.id)] : []),
           crow ? jl('metrics.jsonl', crow, `consent ${crow.obj.id || ''}`.trim()) : answerCite(ctx, mod), ...(add ? [jl('metrics.jsonl', add, 'controller_add')] : [])],
         ...(q ? { msg: q.obj.id } : {}) });
     } else if (entry || ans || ctx.pending === mod) {
