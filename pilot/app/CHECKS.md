@@ -879,3 +879,14 @@ assertion adapted (old configs gain a `frame` role that is never called while th
 6. "Off = the old behaviour" holds for the page (no note, no frame line, own order, the status bar without the frame
    role) and the files (no call, no `frames.json`, no event). `/model` and `/state.models` do list the `frame` role
    while it is off, because it is in the config.
+
+## pilot-v0.10: coordinator re-run (2026-10-17)
+
+Run by the coordinator, not the builder.
+- Scope: only `pilot/app/**` plus one line in the "Pilot iterations" list of `index.html`.
+- `npm run verify`: exit 0; every earlier script passes, plus v0.10. Demos v0.3 to v0.10: `/state` 200 within about 1 s each; no orphan processes.
+- Browser, demo v0.10 (flag on in the demo config only):
+  - Sent "what about keeping the claim local?" → a dashed note "model suggests: focus dec-2 · order …", "suggested by morrow, not by you". Card order and `state.json` items were unchanged.
+  - "apply" reordered the map (dec-2 first); items stayed byte-identical.
+  - `/why map` named the frame, the model, the message, who applied it and when, each with a source.
+  - `/frame reset map` restored the original order and kept the reset in `frames.json`.
