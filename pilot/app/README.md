@@ -1,9 +1,9 @@
-# CLI Pilot v1 (steps P0 to P4 + P5 metrics, iteration pilot-v0.8)
+# CLI Pilot v1 (steps P0 to P4 + P5 metrics, iteration pilot-v0.9)
 
-**Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.8` (panes fade to tabs and are removed only
-with your answer; v0.7: `/why`; v0.6: authorship and `/stats`; v0.5: live files, two tabs; v0.4: proposals; v0.3: pins
+**Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.9` (experiment: pause on a finished line and
+the input offers "send?", Tab sends, Enter always does; v0.8: panes fade to tabs and are removed only with your answer; v0.7: `/why`; v0.6: authorship and `/stats`; v0.5: live files, two tabs; v0.4: proposals; v0.3: pins
 and fallback), open the printed URL, follow the "try this" lines. A tagged iteration without touching your checkout:
-`bash pilot/app/scripts/try.sh pilot-v0.8`.
+`bash pilot/app/scripts/try.sh pilot-v0.9`.
 **Extraction (since pilot-v0.4) is untested with a real model:** it runs against the fake extractor in `dev/fake-model.js`.
 What changed per iteration: `CHANGELOG.md`; checks: `CHECKS.md`; open questions: `QUESTIONS.md`.
 
@@ -48,6 +48,8 @@ In the page, type a message and press Enter. Lines starting with `/` are command
 | `/why` | why the workbench looks like this: one line per pane (rule, question, your answer) and the items in brief, every statement with its source (`file:line`); from the files only, read-only (since pilot-v0.7) |
 | `/why <pane>` | `index`, `map`, `kanban`, `chat`: the rule, every question, answer and add, the answer on file; since pilot-v0.8 also fading: last touch, turns since, threshold, what happens next, the removal question |
 | `/why <item id>` | e.g. `/why dec-2`: origin, the message it came from (with a "show" link), the quote, who decided it and when, fields changed by hand |
+| `/flag` | experiments (pilot-v0.9): each flag, its value and where it comes from |
+| `/flag settled-input on\|off` | switch the settled-input experiment; kept in `.pilot/flags.json`, which wins over the config (default off) |
 | `/help` | list commands |
 
 **Growth.** After each turn a deterministic controller checks `.pilot/rules.json` (seeded from
@@ -109,6 +111,8 @@ and the page then reloads everything.
 - pilot-v0.8: `pane_touch`, `pane_fade`, `pane_unfade`, `pane_remove`, `controller_withdraw`; `controller_ask` and
   `consent` with `question: "remove"` for the removal question
 - `item_write` and `file_edit`
+- pilot-v0.9, only while the experiment is on: `settle_offer`, `settle_accept`, `settle_ignore`, `enter_send`; `flag`
+  on every `/flag` switch
 
 `/stats` and `npm run stats -- <dir>` print the five measures from those events. `<dir>` is resolved against the
 directory you ran npm from; the default is `pilot/app/.pilot`. Both are read-only. Definitions (work session, hour of
@@ -142,6 +146,16 @@ in `modules.json` with `"state": "faded"`. After `askRemoveAfterTurns` more turn
 cd pilot/app
 node -e 'const f=".pilot/rules.json",fs=require("fs"),r=JSON.parse(fs.readFileSync(f));r.fadeAfterTurns=8;r.askRemoveAfterTurns=8;fs.writeFileSync(f,JSON.stringify(r,null,2))'
 ```
+
+**Experiment: Enter, diffused (pilot-v0.9, off by default).** D9 keeps Enter in v1; this is the experiment behind a
+flag. Switch it on with `"experiments": {"settledInput": true}` in `pilot.config.json` or `/flag settled-input on`
+(kept in `.pilot/flags.json`, hand-editable, wins over the config). Then, after `settleMs` (default 1800) without a
+change to the input, on a line that looks finished (ends in `.` `!` `?`, or is a question; not on `...`, `,`, `e.g.`,
+an open bracket, a command; the cases are in `public/settle.js` and CHANGELOG.md # pilot-v0.9), a quiet
+`send? (Tab to send, keep typing to ignore)` appears next to the input. Tab sends, typing or Escape drops it, Enter
+always sends. Nothing is sent without a key. Tab while the offer shows sends instead of moving focus. The page logs
+`settle_offer`, `settle_accept`, `settle_ignore`, `enter_send` (numbers only, never the text); `/stats` ends with an
+"experiments" block that counts them and the time from the last keystroke to the send. Off: exactly the old prompt.
 
 The status bar shows the active model per role; `frontier→morrow` means the configured candidate
 failed and the next one answered. Every model attempt is logged to `.pilot/metrics.jsonl`.
@@ -182,14 +196,14 @@ node -e 'const f=".pilot/rules.json",fs=require("fs"),r=JSON.parse(fs.readFileSy
 ## Demos and checks
 
 `npm run demo -- <version>` (`scripts/demo.js`) wipes and seeds a throwaway `.pilot-demo/` from
-`demo/fixtures/<version>/`, starts the fakes and the server on demo ports (v0.3: 4750, 5751, 5752; v0.4: 4754, 5754, 5755; v0.5: 4758, 5758, 5759; v0.6: 4764, 5764, 5765; v0.7: 4768, 5768, 5769; v0.8: 4772, 5772, 5773), prints the URL
+`demo/fixtures/<version>/`, starts the fakes and the server on demo ports (v0.3: 4750, 5751, 5752; v0.4: 4754, 5754, 5755; v0.5: 4758, 5758, 5759; v0.6: 4764, 5764, 5765; v0.7: 4768, 5768, 5769; v0.8: 4772, 5772, 5773; v0.9: 4776, 5778, 5779), prints the URL
 and what to try. Ctrl+C stops everything. An unknown version lists the available ones. It never touches `.pilot/`.
 
 `npm run verify` (`scripts/verify-all.sh`) runs every `dev/verify-*.sh` and the browser checks and prints a summary.
 It refuses to start while `pilot/app/.pilot/` exists, because the P0–P2 checks wipe it.
-`dev/verify-v0.3.sh` to `verify-v0.8.sh` use their own ports and dirs and are safe next to a running demo.
+`dev/verify-v0.3.sh` to `verify-v0.9.sh` use their own ports and dirs and are safe next to a running demo.
 The v0.6 demo fixture is generated by `node dev/make-fixture-v06.js` (synthetic, every line `"fixture": true`), the v0.8
-one by `node dev/make-fixture-v08.js` (from the v0.7 fixture).
+one by `node dev/make-fixture-v08.js` (from the v0.7 fixture), the v0.9 one by `node dev/make-fixture-v09.js` (from v0.8).
 `node dev/contrast-check.js` checks the palette (WCAG AA, both themes).
 
 The older checks (each starts and stops everything itself and **wipes `.pilot/` first**;
@@ -206,6 +220,7 @@ bash pilot/app/dev/verify-v0.5.sh           # own ports/dirs; live files, stale 
 bash pilot/app/dev/verify-v0.6.sh           # own ports/dirs; authorship, P5 events, /stats, npm run stats; browser-check.js v06
 bash pilot/app/dev/verify-v0.7.sh           # own ports/dirs; /why, cited sources resolved (dev/why-cites.js); browser-check.js v07 (layout)
 bash pilot/app/dev/verify-v0.8.sh           # own ports/dirs; fading, touches, removal consent, /why fading; browser-check.js v08
+bash pilot/app/dev/verify-v0.9.sh           # own ports/dirs; settled-input flag, heuristic, settle metrics, /stats block; browser-check.js v09
 ```
 
 To start over by hand, stop the server and delete `pilot/app/.pilot/`.
@@ -215,10 +230,10 @@ To start over by hand, stop the server and delete `pilot/app/.pilot/`.
 | Method | Path | Does |
 |---|---|---|
 | GET | `/` | the page (only files under `public/` are served) |
-| GET | `/state` | `{transcript: last 500 lines, total, turn, models, panes (faded ones included), faded, pending, pendingKind, answers, removals, modulesRev, paneInfo (with fade), items (with prov when hand-edited), stateRev, stateError, extracting, fileErrors}`; `?only=state.json,modules.json,…` returns only the parts of those files (plus `extracting`, `fileErrors`) |
+| GET | `/state` | `{transcript: last 500 lines, total, turn, models, panes (faded ones included), faded, pending, pendingKind, answers, removals, modulesRev, paneInfo (with fade), items (with prov when hand-edited), stateRev, stateError, flags (pilot-v0.9: {settledInput, settleMs, source, rev}), extracting, fileErrors}`; `?only=state.json,modules.json,flags.json,…` returns only the parts of those files (plus `extracting`, `fileErrors`) |
 | GET | `/events` | Server-Sent Events: `hello {revs, extracting}`, then `change {file, rev[, error]}` per changed file and `status {extracting}` |
 | POST | `/chat` | `{text}`: appends the user line, streams the reply as `text/plain`, appends the assistant line |
 | POST | `/command` | `{text: "/model chat morrow"}` → `{ok, lines}` (`/state.models.<role>` has `active`, `pinned`, `last`, `candidates`, `local`) |
 | POST | `/answer` | `{module: "index", answer: "y"}` (y/n/a/x or yes/no/always/never; the removal question takes y/n/x), or `{itemId: "dec-3", decision: "c"}` (c/r or confirm/reject; proposed items only, records `decidedAt`, `decidedBy: "user"`). Optional `rev` (of `modules.json` / `state.json`): stale → 409 `{stale: true, file, rev}`; a broken file → 409 |
 | POST | `/touch` | `{module, how}` (pilot-v0.8; how: click, focus, scroll, decide, tab): records a touch of a shown pane and brings a faded one back. The first touch of a pane per turn is written; later ones return `changed: false`. No rev. `chat` → 400, a pane not shown → 404 |
-| POST | `/metric` | `{event: "index_jump", target: "<message id>"}` (pilot-v0.6; the page sends it on an index click). Any other event or an unknown id → 400 |
+| POST | `/metric` | `{event: "index_jump", target: "<message id>"}` (pilot-v0.6; the page sends it on an index click). pilot-v0.9, only while the settled-input flag is on: `settle_offer {offer, cue, chars, words, sinceKeyMs}`, `settle_accept {offerRef, sinceKeyMs, offerMs, chars}`, `settle_ignore {offerRef, how, offerMs}`, `enter_send {offerShowing, offerRef?, sinceKeyMs, chars}` (other fields dropped; one outcome per offer). Any other event or an unknown id → 400 |

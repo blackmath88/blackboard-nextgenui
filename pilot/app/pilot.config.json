@@ -24,6 +24,7 @@
       "candidates": []
     }
   },
+  "experiments": { "settledInput": false, "settleMs": 1800 },
   "_notes": [
     "Model names and hosts are placeholders. Any OpenAI-compatible endpoint works, including a LiteLLM proxy.",
     "keyEnv names an environment variable; keys never go into this file or the browser.",
@@ -31,6 +32,7 @@
     "title with no candidates means the index uses each message's first sentence.",
     "local: true marks a candidate that runs on your own machine or network. After a local candidate fails, fallback never goes to a non-local one unless the role sets allowCloudFallback: true. Missing local counts as non-local.",
     "/model <role> <name> pins the role (no fallback) until /model <role> auto.",
-    "stallMs: once a reply has started, abort it when no new token arrives for this long (default 20000)."
+    "stallMs: once a reply has started, abort it when no new token arrives for this long (default 20000).",
+    "experiments (pilot-v0.9): settledInput false = Enter only (the default, D9). true = after settleMs (default 1800) of no typing on an input that looks finished, the page offers \"send?\" (Tab sends, Enter always sends). /flag settled-input on|off overrides it in .pilot/flags.json."
   ]
 }

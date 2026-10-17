@@ -24,9 +24,11 @@
       "candidates": []
     }
   },
+  "experiments": { "settledInput": false, "settleMs": 1800 },
   "_notes": [
     "DEV ONLY. Both candidates point at dev/fake-model.js on localhost. Start with PILOT_CONFIG=pilot.config.dev.json.",
     "No keyEnv: the fakes need no key and no real endpoint is ever contacted.",
-    "local flags as in pilot.config.json: frontier false, morrow true."
+    "local flags as in pilot.config.json: frontier false, morrow true.",
+    "experiments as in pilot.config.json: settledInput off by default."
   ]
 }

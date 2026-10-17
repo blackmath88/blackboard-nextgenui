@@ -9,8 +9,11 @@
 // screenshot). v07 (pilot-v0.7 /why and the layout fix): ports 4805/5806/5807, Chrome 9383, dir .pilot-verify-v07b/
 // seeded from demo/fixtures/v0.7/ (SHOT=<dir> saves one screenshot per tested width). v08 (pilot-v0.8 panes can go):
 // ports 4815/5816/5817, Chrome 9393, dir .pilot-verify-v08b/ seeded from demo/fixtures/v0.8/ (SHOT=<dir> saves screenshots).
+// v09 (pilot-v0.9 settled input behind a flag): ports 4825/5826/5827, Chrome 9403, dir .pilot-verify-v09b/ seeded from
+// demo/fixtures/v0.9/, config with experiments.settledInput false and settleMs 400 (fast; the 1800 default is checked
+// in verify-v0.9.sh).
 // Needs Node 22+ (global WebSocket) and Google Chrome. No dependencies.
-// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|v07|v08|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
+// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|v07|v08|v09|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
 'use strict';
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -795,7 +798,134 @@ async function v08(page) {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
 }
 
-const SCENARIOS = { p1, p2, v03, v04, v05, v06, v07, v08 };
+// pilot-v0.9: settled input. Off (the config default here): exactly the old prompt. On (/flag): the offer after a pause on
+// a finished-looking input, Tab sends only while it shows, Enter always sends, every offer has at most one outcome.
+async function v09(page) {
+  const file = (f) => path.join(APP, ENV.dir, f);
+  await stop('server');
+  const fix = path.join(APP, 'demo', 'fixtures', 'v0.9');
+  for (const f of fs.readdirSync(fix)) if (!['demo.json', 'pilot.config.json'].includes(f)) fs.copyFileSync(path.join(fix, f), file(f));
+  await startServer();
+  const T = 400;
+  const waitFor = async (expr, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await page.eval(expr)) return Date.now() - t0; await sleep(15); } return null; };
+  const raw = () => fs.readFileSync(file('metrics.jsonl'), 'utf8');
+  const events = () => raw().trim().split('\n').map((l) => JSON.parse(l));
+  const settle = () => events().filter((e) => /^(settle_|enter_send$)/.test(e.event));
+  const users = () => fs.readFileSync(file('transcript.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((l) => l.role === 'user').map((l) => l.text);
+  // the page reports by fetch without waiting: poll metrics.jsonl until the event is written
+  const waitEv = async (pred, ms = 2000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const e = settle().filter(pred).at(-1); if (e) return e; await sleep(20); } return null; };
+  const offerShown = `(() => { const o = document.getElementById('settle'); return !!o && !o.hidden && o.getBoundingClientRect().width > 0; })()`;
+  const idle = () => waitFor(`!document.getElementById('input').disabled && document.activeElement === document.getElementById('input') && !document.querySelector('.ln.streaming')`, 5000);
+  const clear = () => page.eval(`document.getElementById('input').value = ''`);
+  const typeSlow = async (text) => { await page.eval(`document.getElementById('input').focus()`); for (const ch of text) { await page.send('Input.insertText', { text: ch }); await sleep(20); } };
+  const activeIsInput = () => page.eval(`document.activeElement === document.getElementById('input')`);
+  await page.goto(URL);
+  await waitFor(`document.getElementById('meta').textContent.includes('live')`);
+
+  // ---- off: exactly today's prompt ----
+  check('flag off (config default): no offer element, the old placeholder', await page.eval(`!document.getElementById('settle') && document.getElementById('input').placeholder === 'Type a message and press Enter'`));
+  await typeSlow('Is the envelope ready?');
+  await sleep(3 * T);
+  check('off: a finished sentence and a long pause show no offer', !(await page.eval(offerShown)) && !(await page.eval(`!!document.getElementById('settle')`)));
+  await page.key('Tab');
+  check('off: Tab moves focus out of the input as before (into a pane)', !(await activeIsInput()) && await page.eval(`!!document.activeElement.closest('.side')`), await page.eval(`document.activeElement.className || document.activeElement.tagName`));
+  await page.eval(`document.getElementById('input').focus()`);
+  await page.key('Enter'); await idle();
+  check('off: Enter sends; no settle event and no enter_send logged', users().at(-1) === 'Is the envelope ready?' && settle().length === 0);
+
+  // ---- on ----
+  await page.submit('/flag settled-input on', 800);
+  check('/flag settled-input on: kept in flags.json; the offer element exists, hidden; the placeholder names Tab', JSON.parse(fs.readFileSync(file('flags.json'), 'utf8')).experiments.settledInput === true
+    && await page.eval(`!!document.getElementById('settle') && document.getElementById('settle').hidden && /pause, then Tab/.test(document.getElementById('input').placeholder)`));
+  const n0 = users().length;
+  await clear(); await typeSlow('Is the stamp on it?');
+  await sleep(T / 2);
+  check(`a pause shorter than T (${T} ms) shows no offer`, !(await page.eval(offerShown)));
+  const ms = await waitFor(offerShown, 2000);
+  check(`after T the quiet offer appears ("send? (Tab to send, keep typing to ignore)", ${ms} ms after the check)`, ms !== null
+    && await page.eval(`document.getElementById('settle').textContent === 'send? (Tab to send, keep typing to ignore)' && document.getElementById('input').getAttribute('aria-describedby') === 'settle'`));
+  const o1 = await waitEv((e) => e.event === 'settle_offer');
+  let ev;
+  check('settle_offer logged with cue question, length and word count, never the text', o1 && o1.event === 'settle_offer' && o1.cue === 'question' && o1.chars === 19 && o1.words === 5 && o1.sinceKeyMs >= T - 20 && !raw().includes('stamp on it'), JSON.stringify(o1));
+  await sleep(1500);
+  check('nothing is sent without a key (1.5 s with the offer showing)', users().length === n0 && await page.eval(offerShown));
+  await page.key('Tab'); await idle(); await waitEv((e) => e.event === 'settle_accept');
+  ev = settle();
+  check('Tab sends while the offer shows (settle_accept with the offer id, time since the last keystroke), focus stays in the input', users().at(-1) === 'Is the stamp on it?'
+    && ev.some((e) => e.event === 'settle_accept' && e.offerRef === o1.offer && e.sinceKeyMs >= T) && !ev.some((e) => e.event === 'enter_send') && await activeIsInput());
+  check('Tab-to-send is not a pane touch', !events().some((e) => e.event === 'pane_touch' && e.ts > o1.ts));
+
+  await typeSlow('this is not done,');
+  await sleep(3 * T);
+  check('an unfinished line ("…,") gets no offer', !(await page.eval(offerShown)));
+  await clear();
+
+  await typeSlow('Fine, I will check.');
+  await waitFor(offerShown, 2000);
+  await typeSlow(' Then');
+  check('keep typing: the offer goes at once and settle_ignore (typed) is logged', !(await page.eval(offerShown)) && !!(await waitEv((e) => e.event === 'settle_ignore' && e.how === 'typed')));
+  const seenOffers = new Set(settle().filter((e) => e.event === 'settle_offer').map((e) => e.offer));
+  await typeSlow(' we go.');
+  await waitFor(offerShown, 2000);
+  const o2 = await waitEv((e) => e.event === 'settle_offer' && !seenOffers.has(e.offer));
+  await page.key('Enter'); await idle(); await waitEv((e) => e.event === 'enter_send' && e.offerShowing);
+  ev = settle();
+  check('Enter while an offer shows sends (enter_send offerShowing true, that offer)', users().at(-1) === 'Fine, I will check. Then we go.'
+    && ev.some((e) => e.event === 'enter_send' && e.offerShowing === true && e.offerRef === o2.offer));
+
+  await typeSlow('quick one.');
+  await page.key('Enter'); await idle(); await waitEv((e) => e.event === 'enter_send' && !e.offerShowing);
+  ev = settle();
+  check('Enter before any offer sends at once (enter_send offerShowing false, no offer)', users().at(-1) === 'quick one.' && ev.at(-1).event === 'enter_send' && ev.at(-1).offerShowing === false && !ev.at(-1).offerRef);
+
+  await typeSlow('Escape this one.');
+  await waitFor(offerShown, 2000);
+  await page.key('Escape');
+  check('Escape drops the offer (settle_ignore escape), the text stays', !(await page.eval(offerShown)) && !!(await waitEv((e) => e.event === 'settle_ignore' && e.how === 'escape')) && await page.eval(`document.getElementById('input').value === 'Escape this one.'`));
+  await page.key('Tab');
+  check('without an offer Tab moves focus as before, flag on', !(await activeIsInput()));
+  await clear();
+
+  await typeSlow('/stats.');
+  await sleep(3 * T);
+  check('a command gets no offer', !(await page.eval(offerShown)));
+  await clear();
+  const before = settle().length;
+  await page.submit('/stats', 900);
+  const out = await page.eval(`[...document.querySelectorAll('.ln.out')].map((l) => l.textContent)`);
+  check('/stats: an experiments block with offers, Tab, ignored, Enter with and without an offer, times', out.some((l) => /^experiments \(measured, not judged/.test(l))
+    && out.some((l) => /^ *4 offers "send\?": 1 accepted with Tab, 2 ignored \(1 kept typing, 1 Escape\), 1 sent with Enter while showing, 0 unresolved/.test(l))
+    && out.some((l) => /^ *2 sent with Enter: 1 while an offer showed, 1 without one/.test(l)) && out.some((l) => /^ *last keystroke to send \(median, n\): Tab \d+\.\d s \(1\)/.test(l)), out.slice(-6).join(' | '));
+  check('/stats still has exactly five verdict lines (experiments are not judged)', await page.eval(`document.querySelectorAll('.ln.out.stat').length`) === 5);
+  check('a command is not an enter_send', settle().length === before);
+  const offers = settle().filter((e) => e.event === 'settle_offer');
+  check('every offer has at most one outcome', offers.every((o) => settle().filter((e) => e.offerRef === o.offer).length <= 1));
+
+  // ---- narrow: the offer fits, no horizontal scroll ----
+  for (const w of [800, 390]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width: w, height: 800, deviceScaleFactor: 1, mobile: false });
+    await sleep(200);
+    await clear(); await typeSlow('Is the layout still fine here?');
+    await waitFor(offerShown, 2000);
+    const r = await page.eval(`(() => { const o = document.getElementById('settle').getBoundingClientRect(), i = document.getElementById('input').getBoundingClientRect(); return { hscroll: document.documentElement.scrollWidth > innerWidth, right: Math.round(o.right), w: innerWidth, input: Math.round(i.width) }; })()`);
+    check(`${w} px: the offer is on screen, the input keeps room, no horizontal scroll`, !r.hscroll && r.right <= r.w && r.input >= 120, JSON.stringify(r));
+    await page.key('Escape'); await clear();
+  }
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+
+  // ---- off again ----
+  await page.submit('/flag settled-input off', 800);
+  await typeSlow('Is it off now?');
+  await sleep(3 * T);
+  check('/flag settled-input off: the offer element is gone, no offer after a pause, the old placeholder', !(await page.eval(`!!document.getElementById('settle')`)) && !(await page.eval(offerShown)));
+  await page.goto(URL);
+  await waitFor(`document.getElementById('meta').textContent.includes('live')`);
+  await typeSlow('Still off after a reload?');
+  await sleep(3 * T);
+  check('off is kept across a reload (flags.json)', !(await page.eval(`!!document.getElementById('settle')`)) && await page.eval(`document.getElementById('input').placeholder === 'Type a message and press Enter'`));
+}
+
+const SCENARIOS = { p1, p2, v03, v04, v05, v06, v07, v08, v09 };
 const ENVS = {
   v03: () => {
     const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
@@ -856,6 +986,17 @@ const ENVS = {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v08b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4815/', fakes: [5816, 5817], dir: '.pilot-verify-v08b', config: file, cdp: 9393 };
+  },
+  v09: () => {
+    const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
+    c.port = 4825;
+    c.roles.chat.candidates[0].baseUrl = 'http://127.0.0.1:5826/v1';
+    c.roles.chat.candidates[1].baseUrl = 'http://127.0.0.1:5827/v1';
+    c.roles.extract.candidates[0].baseUrl = 'http://127.0.0.1:5827/v1';
+    c.experiments = { settledInput: false, settleMs: 400 };
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v09b-')), 'config.json');
+    fs.writeFileSync(file, JSON.stringify(c));
+    return { url: 'http://127.0.0.1:4825/', fakes: [5826, 5827], dir: '.pilot-verify-v09b', config: file, cdp: 9403 };
   },
 };
 

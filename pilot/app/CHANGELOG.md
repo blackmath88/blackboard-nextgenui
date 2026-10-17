@@ -4,6 +4,84 @@ P0 to P2 (skeleton, model roles, growth controller with consent and the index pa
 baseline, merged before the numbered iterations started; see `CHECKS.md` (# P0, # P1, # P2). Iterations are
 tagged `pilot-v0.N` by the coordinator; each one is runnable with `npm run demo -- v0.N`.
 
+## pilot-v0.9
+
+Enter, diffused: an experiment behind a flag, never the default. The blackboard explainer hands on "how does Enter
+disappear?". This iteration tries one answer: the input notices that you have stopped and that the line looks finished,
+and offers to send it. It never sends by itself. D9 stands: the chat keeps its Enter key, the flag is off unless you
+switch it on. Still untested with a real model (fakes only; the experiment uses no model at all).
+
+**Adds**
+- **The flag.** `experiments.settledInput` in `pilot.config.json` (default `false`; both shipped configs say so), or
+  `/flag settled-input on|off`:
+  - `/flag` writes `.pilot/flags.json` `{rev, experiments: {settledInput}}`. That file wins over the config and
+    survives restarts; `/flag` alone shows the value and where it comes from (flags.json, the config, or the default).
+  - Each switch adds a system line ("experiment settled-input on (/flag) …") and a `flag` event. A system line is not
+    a turn.
+  - `flags.json` is hand-editable like the other JSON files: it carries a `rev`, a broken one is read as its last good
+    version, shown in `fileErrors`, and never written (`/flag` answers 400). Its changes are pushed over SSE, so a
+    second tab follows (`/state.flags`, `GET /state?only=flags.json`).
+  - `experiments.settleMs` (config only): the pause T before the offer, default 1800 ms, clamped to 300–10000.
+- **Off = exactly today's behaviour.** No offer element is rendered, the settle listeners return at once, Tab moves focus
+  and Enter sends as before, the placeholder is unchanged. `POST /metric` refuses settle events (400). Nothing new is
+  logged.
+- **On: the settled-input signal, deterministic, no model** (`public/settle.js`, the same file the page loads and the
+  node checks require):
+  - "last keystroke" = the last change of the input's value (the `input` event, so pasting and IME text count too);
+  - after T ms without a change, while the input has focus and is not disabled, the page asks `looksFinished(text)`;
+  - if it says yes, a quiet inline proposal appears next to the input: `send? (Tab to send, keep typing to ignore)`.
+    It is muted text with the dashed lavender edge that proposals use, its title says "proposed by the settled-input
+    heuristic of this page (no model)", and the input points at it with `aria-describedby`;
+  - **Tab** sends while it shows (the same submit path as Enter). Shift+Tab and Tab without an offer move focus as before;
+  - **keep typing** (any change of the value) drops it at once; **Escape** drops it and keeps the text;
+  - **Enter** sends at any time, offer or not: the override;
+  - focus leaving the input drops it silently; the flag switched off removes the element.
+  Nothing is ever sent without a key press.
+- **The heuristic (`looksFinished`), documented case by case** (the verify table has 24 cases):
+  - finished, cue `punct` or `question`: the trimmed line ends in `.` `!` `?`, also before closing `) ] " ' ” ’ »`
+    (`Send it now.  `, `(see the map).`, `He said "done."`, `Is that it?)`);
+  - finished, cue `question`: no final mark, but it starts with a question word (what, how, why, when, where, who,
+    which, can, could, should, would, will, is, are, do, does, did, have, has, may, might, must, …), has at least 4
+    words and does not end on a dangling word (and, or, the, to, of, with, …): `what is left for Monday`;
+  - not finished: trailing off (`wait...`, `I was thinking…`); ending in `,` `:` `;` `-`; an abbreviation that usually
+    continues (`e.g.`, `i.e.`, `vs.`, `cf.`, `approx.`, `incl.`); a list number (`Step 3.`); a URL with a full stop
+    (`see https://x.org.`); an open bracket or code span (`use \`npm run`, `is it (really?`); a command (starts with
+    `/`: commands never get an offer and are not counted); shorter than 2 words and 6 characters (`?`, `yes.`, `ok`);
+  - English only.
+- **Measure, don't judge** (`POST /metric`, only while the flag is on):
+  - `settle_offer {offer, cue, chars, words, sinceKeyMs}`: the offer appeared. `offer` is an id `so-…`;
+  - `settle_accept {offerRef, sinceKeyMs, offerMs, chars}`: sent with Tab;
+  - `settle_ignore {offerRef, how: typed|escape, offerMs}`: kept typing, or Escape;
+  - `enter_send {offerShowing, offerRef?, sinceKeyMs, chars}`: sent with Enter, with or without an offer showing;
+  - the server keeps only these fields (numbers rounded, enums checked) and adds `settleMs` and `turn`. **Never any
+    text:** an ignored offer was a draft nobody sent;
+  - one offer has at most one outcome (accept, ignore, or Enter while showing); a second one is 400, also after a
+    restart (checked against `metrics.jsonl`). An offer without an outcome (blur, reload, flag off) is "unresolved".
+- **`/stats` (and `npm run stats`) get an "experiments" block** after the five measures: the flag in `flags.json` and how
+  often `/flag` switched it; offers and their outcomes (Tab, kept typing, Escape, Enter while showing, unresolved);
+  Enter sends with and without an offer; the median time from the last keystroke to the send for Tab, Enter with an
+  offer and Enter without one (with n); the pause T used. No threshold, no PASS / NOT YET: the five verdict lines stay
+  the only ones, and `/stats` still prints exactly what `npm run stats` prints (it reads the dir only).
+- **Demo `v0.9`** (`dev/make-fixture-v09.js`, from the v0.8 fixture): the same workbench, fading thresholds raised to 20
+  so nothing fades or asks during the demo, and `experiments.settledInput: true` in the demo's config only.
+- **Dev:** `dev/verify-v0.9.sh` (35 checks, one runs `browser-check.js v09` with 28 checks: 26 + 2 global).
+
+**Why**
+- The explainer's question is how Enter can disappear without the machine deciding for you. A pause plus a finished
+  sentence is the cheapest deterministic signal that you are done; turning it into a proposal (not an action) keeps
+  "models only ever propose" true for the page itself, and Enter stays as the override.
+- D9 keeps Enter in v1 because diffusing it would muddy what P5 measures. Behind a flag, default off, the five measures
+  are unchanged; the experiment's own events are counted apart and not judged.
+
+**Deliberately does not**
+- Never sends by itself, never changes Enter, never runs a model on the draft, never stores the draft.
+- No per-person learning of T or of the heuristic, no language other than English, no offer for commands.
+- No `/flag` for `settleMs` (config only) and no "default" value for `/flag` (on|off only; delete `flags.json` to fall
+  back to the config).
+- Off logs nothing, so there is no baseline "time to send" from before the flag (see QUESTIONS.md). The baseline inside
+  the experiment is `enter_send` without an offer.
+- Tab while an offer shows sends instead of moving focus to the panes (see QUESTIONS.md).
+
 ## pilot-v0.8
 
 Panes can go: an untouched pane fades to a tab, a touch brings it back, and only your answer removes it. This answers

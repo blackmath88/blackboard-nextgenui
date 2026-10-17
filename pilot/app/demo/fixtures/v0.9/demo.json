@@ -1,0 +1,12 @@
+{
+  "fakes": [
+    { "name": "frontier", "port": 5778 },
+    { "name": "morrow", "port": 5779 }
+  ],
+  "try": [
+    "Open {url}. The experiment settled-input is ON for this demo only (/flag shows it and where it comes from). Type a sentence and pause, e.g. \"Is the envelope ready?\": after 1.8 s a quiet \"send? (Tab to send, keep typing to ignore)\" appears. Nothing is sent until you press a key.",
+    "Press Tab: it sends. Or keep typing (the offer goes, settle_ignore is logged), or Escape. An unfinished line (\"and then,\" / \"see e.g.\" / \"wait...\") gets no offer.",
+    "Enter still sends at any time, offer or not (enter_send). /stats ends with an \"experiments\" block: offers, Tab, ignored, Enter with and without an offer, time from the last keystroke to the send.",
+    "/flag settled-input off restores the default (no offer, Tab moves focus again); it is kept in {dir}/flags.json. /flag settled-input on brings it back."
+  ]
+}

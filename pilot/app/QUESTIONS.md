@@ -103,3 +103,31 @@ The removal question is asked at most once for a pane entry in `modules.json` (`
 and grows again through its rule is a new entry and gets its own question. A question withdrawn by a touch does not
 count as asked.
 - Blocks: nothing. Options: keep; or once per module, ever (then a re-grown pane could never be offered for removal).
+
+## 2026-10-17 (v0.9) Building the Enter experiment before P5 passes
+`06-open-questions.md` lists "Diffusing the Enter key" with the condition "P5 passes (D9)", and D9 says it becomes v2's
+first step only then. The v0.9 brief asks for it now, behind a flag that is never the default.
+- Read as: build it, keep it off everywhere except the v0.9 demo config, and keep its events out of the five P5
+  measures (they are counted apart and not judged). With the flag off nothing is rendered or logged, so a dogfood
+  week on the default config measures exactly what D9 protects.
+- Blocks: nothing. Options: keep; or remove the flag from `pilot.config.json` until P5 passes (config-only via
+  `/flag`).
+
+## 2026-10-17 (v0.9) Tab sends while the offer shows
+Since pilot-v0.5 Tab moves focus from the input into the panes (and since v0.8 that is a `focus` touch). While a
+"send?" offer is visible, Tab sends instead. Without an offer, with Shift, or with the flag off, Tab is unchanged.
+- Blocks: nothing. It matters if you Tab to the proposals right after a finished sentence: you send it.
+- Options: keep (it is what the brief asks); use another key for the accept (e.g. Ctrl+Enter, but that is just
+  another Enter); or accept with Tab only after a second pause.
+
+## 2026-10-17 (v0.9) No baseline from before the flag
+With the flag off nothing new is logged (off = exactly today), so there is no "time from last keystroke to send" for
+plain Enter use. Inside the experiment the baseline is `enter_send` with `offerShowing: false`.
+- Blocks: nothing. Options: keep; or log `enter_send` also when the flag is off (one metric line per message, which
+  changes what off means).
+
+## 2026-10-17 (v0.9) The heuristic is English only, and T is a guess
+`looksFinished` knows English question words and abbreviations only; a German "Ist das fertig" without `?` gets no
+offer, "z.B." and "bzw." are treated as continuing. T = 1800 ms is a guess.
+- Blocks: nothing. Tune with the `/stats` experiments block: many `settle_ignore typed` means T is too short or the
+  heuristic too eager; many `enter_send` with an offer showing and a short `offerMs` means the offer comes too late.

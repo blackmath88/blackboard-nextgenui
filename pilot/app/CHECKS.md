@@ -746,3 +746,58 @@ Run by the coordinator, not the builder.
 - Demos v0.3 to v0.8: `/state` 200 within about 1 s each; no orphan processes.
 - Browser, demo v0.8: sent "what is left for Monday?" → the map faded to a tab with a controller line, and "Remove the kanban pane? (y/n/x)" asked once. `n` was recorded as `consent {question: remove, answer: no}`; the kanban stays in `modules.json` as `faded`. Clicking the map tab brought it back (`pane_touch how: tab, unfaded: true`).
 - An existing `.pilot/rules.json` without `fadeAfterTurns` never fades (CHANGELOG states it; not re-tested by hand).
+
+# pilot-v0.9
+
+Enter, diffused (experiment behind a flag, default off). Everything runs against `dev/fake-model.js`; the experiment
+itself uses no model.
+
+**Reproduce:** `bash pilot/app/dev/verify-v0.9.sh`. It has 35 checks; one of them runs the 28 checks of
+`browser-check.js v09` (26 + 2 global). It ends with `ALL v0.9 CHECKS PASSED` and exits non-zero on failure.
+- Own ports: server 4820, fakes 5821/5822; browser part 4825/5826/5827 and Chrome 9403; demo part 4976/5978/5979.
+- Own throwaway dirs: `.pilot-verify-v09/`, `.pilot-verify-v09b/`, `.pilot-demo-verify09/`.
+- The browser part runs with `settleMs: 400` so it is fast; the 1800 ms default is checked on the server and the demo.
+- The fixture is generated: `node dev/make-fixture-v09.js` (deterministic, from `demo/fixtures/v0.8/`).
+
+**Everything:** `cd pilot/app && npm run verify` (p0, p1, p2, v0.3–v0.9, browser p1 + p2; the v03–v09 browser checks
+run inside their verify scripts).
+Last run (Node v25.9.0, Chrome, macOS): `npm run verify` all passed (p0–p2, v0.3–v0.9, browser p1 + p2), no earlier
+assertion adapted. `browser-check.js v09` passed 4 runs in a row after the test waits for the page's metric writes.
+`npm run demo -- v0.3` to `-- v0.9` each served `/state` within about 1 s, and SIGINT left no process behind.
+
+## Definitions
+
+| Term | Definition |
+|---|---|
+| flag | `experiments.settledInput`: `.pilot/flags.json` if it sets it (written by `/flag`), else the config, else off |
+| last keystroke | the last change of the input's value (`input` event: typing, deleting, pasting, IME text). Keys that change nothing (arrows, Tab) do not count |
+| T | `experiments.settleMs` in the config, default 1800, clamped to 300–10000 |
+| offer | after T ms without a change, input focused and enabled, flag on, `looksFinished(text)` true (public/settle.js, cases in CHANGELOG.md # pilot-v0.9): `send? (Tab to send, keep typing to ignore)` next to the input; `settle_offer` |
+| outcome | `settle_accept` (Tab), `settle_ignore` how `typed` (any change of the value) or `escape`, or `enter_send` with `offerShowing: true`; at most one per offer |
+| unresolved | an offer without an outcome: focus left the input, the page was reloaded, the flag went off |
+| time to send | `sinceKeyMs` on `settle_accept` and `enter_send`: ms from the last keystroke to the send |
+
+## Checks
+
+| # | Check | How (section of `verify-v0.9.sh`) |
+|---|---|---|
+| 1 | The heuristic table: 24 cases (finished with cue punct/question; trailing off, `,`, `e.g.`, `Step 3.`, a URL, an open bracket or code span, a command, too short, empty) give the documented verdict. | 1 |
+| 2 | **Off by default:** a config without `experiments` is off ("default (off)", T 1800); `experiments.settledInput: false` is off from the config; both shipped configs say false / 1800. `/flag` shows it; `/help` lists `/flag`. While off `POST /metric` settle events → 400 and nothing is logged; no `flags.json` is written. | 2 |
+| 3 | **On:** `experiments.settledInput: true` is on; `settleMs: 50` is clamped to 300. `/flag nope on` and `/flag settled-input maybe` → 400. `/flag settled-input off` writes `flags.json` (rev 1), a system line, a `flag` event, and wins over the config; the system line is not a turn. After a restart with a config that says off, `flags.json` (on) still wins. | 3 |
+| 4 | **`POST /metric`:** a bad offer id, cue or missing number → 400; a valid offer → 200 with extra fields (a text) dropped, numbers rounded, `settleMs` and `turn` added; an outcome for an unknown offer → 400; `enter_send` with offerShowing true needs `offerRef` and false must not have one; a second outcome for an offer → 400, also after a restart. | 4 |
+| 5 | **`/stats` experiments block:** 4 offers (1 Tab, 1 Escape, 1 Enter while showing, 1 unresolved), 3 Enter sends (1 with, 2 without), the medians 2.4 / 2.1 / 0.4 s, the flag and its 2 switches; still exactly five PASS/NOT YET lines and none in the block; `npm run stats` prints the same lines. | 5 |
+| 6 | **Broken `flags.json`:** reported in `fileErrors`, the last good value (on) kept, `/flag` refuses (400) and leaves the file as it is; a repaired hand edit is read (off). `/flag` pushes `change {file: flags.json, rev}` over SSE. | 6 |
+| 7 | **Page off** (`browser-check.js v09`, v0.9 fixture, config off, T 400): no offer element, the old placeholder; a finished sentence and 3×T pause show nothing; Tab moves focus into a pane; Enter sends; no settle event. | 7 |
+| 8 | **Page on** (after `/flag settled-input on` in the page): no offer before T; after T `send? (Tab to send, keep typing to ignore)` with `aria-describedby`; `settle_offer` has cue, length, words, never the text; 1.5 s with the offer showing sends nothing; Tab sends (`settle_accept`, that offer, focus stays, no pane touch); `this is not done,` gets no offer; typing drops the offer (`settle_ignore typed`); Enter with an offer showing → `enter_send` offerShowing true with that offer; Enter before any offer → offerShowing false; Escape drops it and keeps the text; then Tab moves focus; a command (`/stats.`) gets no offer and is no `enter_send`; `/stats` shows the block with 4 offers, 1 Tab, 2 ignored, 1 Enter while showing, and still five verdict lines; every offer has at most one outcome. At 800 and 390 px the offer is on screen, the input keeps at least 120 px, no horizontal scroll. `/flag settled-input off` removes the element; off survives a reload. | 7 |
+| 9 | Contrast passes (the offer uses `--muted` on the panel, already checked for the fade line). | 7 |
+| 10 | **Demo:** `npm run demo -- v0.9` serves `/state` within about 1 s with the flag on from the demo config and T 1800; a message neither fades nor asks (thresholds 20); the try lines name the pause, Tab, keep typing, Enter still sends and `/flag settled-input off`; that command turns it off; Ctrl+C leaves no process. The v0.8 fixture is unchanged. | 8 |
+| 11 | Old checks still passing: p0, p1, p2, v0.3–v0.8, browser p1/p2/v03–v08. | `npm run verify` |
+
+## Deviations
+
+1. The brief says "after the person stops typing". The timer runs on value changes (the `input` event), not on key
+   presses, so a paste or an IME commit counts as typing and keys that change nothing (arrows) do not restart it.
+2. Escape is a second way to ignore an offer (`settle_ignore how: escape`) besides keeping typing; the brief names
+   only the latter. Without it, the only way to get rid of an offer on a finished line would be to change the text.
+3. Commands (lines starting with `/`) never get an offer and their Enter is not logged as `enter_send`: Tab must never
+   run a command such as `/flag settled-input off`, and `/stats` should time messages only.

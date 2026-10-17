@@ -1,0 +1,32 @@
+{
+  "rev": 1,
+  "rules": [
+    {
+      "module": "index",
+      "metric": "messages",
+      "threshold": 12,
+      "ask": "{n} messages. Scrolling back gets slow. Add an index pane?"
+    },
+    {
+      "module": "map",
+      "metric": "decisions",
+      "threshold": 2,
+      "ask": "{n} decisions so far. Add a reasoning map?"
+    },
+    {
+      "module": "kanban",
+      "metric": "tasks",
+      "threshold": 3,
+      "ask": "{n} tasks have come up. Track them on a board?"
+    }
+  ],
+  "afterNo": "ask again when the count has doubled",
+  "_notes": [
+    "Edit by hand; the controller reads this file on every turn.",
+    "decisions and tasks count proposed and confirmed items, not rejected ones.",
+    "fadeAfterTurns / askRemoveAfterTurns: default for every pane; a rule may set its own (pilot-v0.8).",
+    "Demo fixture v0.9 (from v0.8, see dev/make-fixture-v09.js): fading thresholds raised to 20 so nothing fades or asks during the settled-input demo."
+  ],
+  "fadeAfterTurns": 20,
+  "askRemoveAfterTurns": 20
+}

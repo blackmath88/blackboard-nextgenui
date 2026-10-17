@@ -13,6 +13,10 @@
 // POST /touch: a pointerdown or a wheel/touchmove inside a pane, or keyboard focus moved into it by you (Tab, arrows);
 // decisions on cards are touches on the server side. At most one report per pane per turn (the server writes only the
 // first). The removal question ("remove the map pane?") takes y/n/x.
+// pilot-v0.9: experiment "settled input", only while state.flags.settledInput is on (default off; /flag settled-input
+// on|off). After a pause of flags.settleMs on an input that looks finished (settle.js), a quiet inline "send?" appears;
+// Tab sends while it shows, Enter always sends, nothing is ever sent without a key. Off: no offer element, no listener
+// acts, Tab and Enter as before. Reports settle_offer / settle_accept / settle_ignore / enter_send (POST /metric).
 'use strict';
 const $ = (id) => document.getElementById(id);
 const bench = $('bench'), log = $('log'), form = $('form'), input = $('input');
@@ -106,6 +110,7 @@ function updatePlaceholder() {
   const parts = [];
   if (state.pending) parts.push(state.pendingKind === 'remove' ? 'y/n/x answer the question' : 'y/n/a/x answer the question');
   if (selected) parts.push('↓ or Tab to the proposals (c/r there, Esc back)');
+  if (!parts.length && settleOn()) { input.placeholder = 'Type a message and press Enter (or pause, then Tab when it offers "send?")'; return; }
   input.placeholder = parts.length ? `Empty input: ${parts.join(' · ')}` : PLACEHOLDER;
 }
 
@@ -464,6 +469,7 @@ const PARTS = { 'transcript.jsonl': ['transcript', 'total'], 'modules.json': ['p
   'roles.json': ['models'], 'state.json': ['items', 'stateRev', 'stateError'] };
 PARTS['modules.json'].push('paneInfo', 'pendingKind', 'removals', 'faded');   // pilot-v0.6, pilot-v0.8
 PARTS['transcript.jsonl'].push('turn');                                       // pilot-v0.8
+PARTS['flags.json'] = ['flags'];                                              // pilot-v0.9
 let reqGen = 0;
 const appliedGen = {};
 const sigs = {};
@@ -494,6 +500,7 @@ async function loadState(files) {
   updateCount();
   updatePlaceholder();
   renderNotice();
+  syncSettle();
   meta.textContent = state.extracting ? 'extracting proposals…'
     : state.total > state.transcript.length ? `showing last ${state.transcript.length} of ${state.total}` : live ? 'ready · live' : 'ready';
   document.body.dataset.loaded = '1';
@@ -581,6 +588,63 @@ async function runCommand(text) {
   }
 }
 
+// ---- pilot-v0.9: settled input (experiment). "Last keystroke" = the last change of the input's value (the input event),
+// so pasting and IME text count too. The offer is a proposal of this page's heuristic (settle.js), never of a model.
+const settleOn = () => !!(state.flags && state.flags.settledInput);
+let offerEl = null;          // created only while the flag is on: off renders exactly the old prompt
+let settleTimer = null, lastInputAt = 0, offer = null, tabSend = null, offerSeq = 0;
+function settleMetric(event, fields) {
+  fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event, ...fields }) }).catch(() => {});
+}
+// Drops the offer. how = typed | escape logs settle_ignore; without how it just goes (blur, flag off, sent).
+function dropOffer(how) {
+  const o = offer;
+  offer = null;
+  if (offerEl) offerEl.hidden = true;
+  input.removeAttribute('aria-describedby');
+  if (o && how) settleMetric('settle_ignore', { offerRef: o.id, how, offerMs: Date.now() - o.at });
+  return o;
+}
+function syncSettle() {
+  if (settleOn() && !offerEl) {
+    offerEl = document.createElement('span');
+    offerEl.id = 'settle'; offerEl.className = 'settle'; offerEl.hidden = true;
+    offerEl.setAttribute('role', 'status');
+    offerEl.dataset.author = 'controller';
+    offerEl.title = 'proposed by the settled-input heuristic of this page (no model); nothing is sent without a key';
+    offerEl.textContent = 'send? (Tab to send, keep typing to ignore)';
+    form.append(offerEl);
+  } else if (!settleOn() && offerEl) {
+    clearTimeout(settleTimer); dropOffer(); offerEl.remove(); offerEl = null;
+  }
+}
+function maybeOffer() {
+  if (!settleOn() || offer || input.disabled || document.activeElement !== input) return;
+  const v = Settle.looksFinished(input.value);
+  if (!v.finished) return;
+  offer = { id: `so-${Date.now().toString(36)}${(offerSeq++ % 36).toString(36)}`, at: Date.now() };
+  offerEl.hidden = false;
+  input.setAttribute('aria-describedby', 'settle');
+  const t = input.value.trim();
+  settleMetric('settle_offer', { offer: offer.id, cue: v.cue, chars: t.length, words: t.split(/\s+/).length, sinceKeyMs: Date.now() - lastInputAt });
+}
+input.addEventListener('input', () => {
+  if (!settleOn()) return;
+  lastInputAt = Date.now();
+  clearTimeout(settleTimer);
+  if (offer) dropOffer('typed');
+  settleTimer = setTimeout(maybeOffer, state.flags.settleMs);
+});
+input.addEventListener('blur', () => { clearTimeout(settleTimer); dropOffer(); });
+input.addEventListener('keydown', (e) => {
+  if (!offer || e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === 'Escape') { e.preventDefault(); dropOffer('escape'); return; }
+  if (e.key !== 'Tab' || e.shiftKey) return;     // without an offer Tab moves focus as before
+  e.preventDefault();
+  tabSend = dropOffer();
+  form.requestSubmit();
+});
+
 // Consent keys: a lowercase y/n/a/x answers the pending question only if the input is empty at keydown.
 // Once anything is typed, every key is text. The buttons always work.
 input.addEventListener('keydown', (e) => {
@@ -618,7 +682,15 @@ document.addEventListener('keydown', (e) => {
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = input.value.trim();
+  const viaTab = tabSend; tabSend = null;
   if (!text) return;
+  // pilot-v0.9: measure the send (messages only; commands never get an offer and are not counted)
+  clearTimeout(settleTimer);
+  if (settleOn() && !text.startsWith('/')) {
+    const since = Date.now() - lastInputAt;
+    if (viaTab) settleMetric('settle_accept', { offerRef: viaTab.id, sinceKeyMs: since, offerMs: Date.now() - viaTab.at, chars: text.length });
+    else { const o = dropOffer(); settleMetric('enter_send', { offerShowing: !!o, offerRef: o ? o.id : null, sinceKeyMs: since, chars: text.length }); }
+  } else dropOffer();
   input.value = '';
   if (text.startsWith('/')) {
     try { await runCommand(text); } catch (err) { addLine('system', `error: ${err.message}`); }

@@ -190,6 +190,37 @@ function quiet(events, transcript) {
   return { pass: hours >= 1 && asks.length <= allowed, lines };
 }
 
+// ---- pilot-v0.9: experiments. Measured, not judged: no threshold, no PASS / NOT YET. ----
+// settled input: each settle_offer ends in at most one of settle_accept (Tab), settle_ignore (kept typing / Escape) or
+// enter_send with offerShowing; an offer without one is "unresolved" (blur, reload, the flag switched off).
+// Time to send = ms from the last change of the input to the send.
+function median(xs) {
+  if (!xs.length) return null;
+  const v = xs.slice().sort((a, b) => a - b), mid = v.length >> 1;
+  return v.length % 2 ? v[mid] : Math.round((v[mid - 1] + v[mid]) / 2);
+}
+const secs = (ms) => (ms === null ? '–' : `${(ms / 1000).toFixed(1)} s`);
+function settledInput(events, flagsDoc) {
+  const offers = events.filter((e) => e.event === 'settle_offer');
+  const acc = events.filter((e) => e.event === 'settle_accept'), ign = events.filter((e) => e.event === 'settle_ignore');
+  const enters = events.filter((e) => e.event === 'enter_send');
+  const withOffer = enters.filter((e) => e.offerShowing), without = enters.filter((e) => !e.offerShowing);
+  const resolved = new Set([...acc, ...ign, ...withOffer].map((e) => e.offerRef));
+  const unresolved = offers.filter((o) => !resolved.has(o.offer)).length;
+  const flagEvents = events.filter((e) => e.event === 'flag' && e.name === 'settled-input');
+  const exp = flagsDoc && flagsDoc.experiments && typeof flagsDoc.experiments === 'object' ? flagsDoc.experiments : {};
+  const flag = typeof exp.settledInput === 'boolean' ? `${exp.settledInput ? 'on' : 'off'} in flags.json` : 'not set in flags.json (the config decides, see /flag)';
+  const ms = (xs) => xs.map((e) => e.sinceKeyMs).filter(Number.isFinite);
+  const lines = [`settled-input: ${flag}; switched ${flagEvents.length} time${flagEvents.length === 1 ? '' : 's'} with /flag`];
+  if (!offers.length && !enters.length) { lines.push('no settled-input events yet'); return lines; }
+  lines.push(`${offers.length} offer${offers.length === 1 ? '' : 's'} "send?": ${acc.length} accepted with Tab, ${ign.length} ignored (${ign.filter((e) => e.how === 'typed').length} kept typing, ${ign.filter((e) => e.how === 'escape').length} Escape), ${withOffer.length} sent with Enter while showing, ${unresolved} unresolved`);
+  lines.push(`${enters.length} sent with Enter: ${withOffer.length} while an offer showed, ${without.length} without one; ${acc.length + enters.length} sends in all while the flag was on`);
+  lines.push(`last keystroke to send (median, n): Tab ${secs(median(ms(acc)))} (${acc.length}), Enter with offer ${secs(median(ms(withOffer)))} (${withOffer.length}), Enter without ${secs(median(ms(without)))} (${without.length})`);
+  const ts = [...offers, ...acc, ...ign, ...enters].map((e) => e.settleMs).filter(Number.isFinite);
+  if (ts.length) lines.push(`pause before the offer: ${[...new Set(ts)].join(', ')} ms`);
+  return lines;
+}
+
 // Everything /stats and `npm run stats` print, from the dir alone. Read-only: never creates or writes a file.
 function computeStats(dir) {
   const events = readJsonl(path.join(dir, 'metrics.jsonl'));
@@ -205,6 +236,7 @@ function computeStats(dir) {
     lines: transcript.length, fixtureLines: transcript.filter((l) => l.fixture === true).length, notes,
     measures: { continuity: continuity(events), consent: consent(events, modules), usefulness: usefulness(events, transcript),
       signal: signal(events, items), quiet: quiet(events, transcript) },
+    experiments: { 'settled input': settledInput(events, readJsonSafe(path.join(dir, 'flags.json'), null)) },
   };
 }
 
@@ -222,6 +254,12 @@ function formatStats(s, label) {
   }
   const total = Object.keys(s.measures).length;
   out.push(`${pass} PASS, ${total - pass} NOT YET. Not measurable from files: "you never re-explained the project", the kill criterion.`);
+  // pilot-v0.9: experiments, measured only (no verdict, so the five lines above stay the only PASS / NOT YET lines)
+  out.push('experiments (measured, not judged; D9: Enter stays the default)');
+  for (const [name, ls] of Object.entries(s.experiments || {})) {
+    out.push(`  ${name}`);
+    for (const l of ls) out.push(`${' '.repeat(21)}${l}`);
+  }
   out.push('Work session: activity with no gap over 30 min. Hour of work: sum of gaps of at most 30 min between messages. Times in UTC.');
   return out;
 }

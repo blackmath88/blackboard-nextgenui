@@ -11,6 +11,9 @@
 // pilot-v0.8: panes can go. A pane nobody touched for fadeAfterTurns turns fades to a tab (modules.json state "faded",
 // never deleted); a touch (POST /touch, or a decision on one of its cards) brings it back. After askRemoveAfterTurns
 // more turns as a tab the controller asks once whether to remove it; only a recorded yes/never removes it (fade.js).
+// pilot-v0.9: experiment "settled input" behind a flag (experiments.settledInput in the config, or /flag settled-input
+// on|off, kept in .pilot/flags.json; default off). The page proposes "send?" after a pause on a finished-looking input
+// (public/settle.js) and reports settle_offer / settle_accept / settle_ignore / enter_send via POST /metric.
 // Node 20+, no dependencies. All paths resolve against this file's folder.
 'use strict';
 const http = require('http');
@@ -34,6 +37,7 @@ const ROLES = path.join(PILOT, 'roles.json');      // /model pins: a role listed
 const RULES = path.join(PILOT, 'rules.json');
 const MODULES = path.join(PILOT, 'modules.json');
 const STATE = path.join(PILOT, 'state.json');      // decisions, tasks, sources (proposed by the model or added by hand)
+const FLAGS = path.join(PILOT, 'flags.json');      // pilot-v0.9: /flag overrides of config.experiments (hand-editable)
 const EXTRACTION_SCHEMA = JSON.parse(fs.readFileSync(path.join(APP, 'schemas', 'extraction.schema.json'), 'utf8'));
 const BUILT = ['index', 'map', 'kanban'];   // panes this build can show; the controller only evaluates their rules
 const PORT = Number(config.port) || 4747;
@@ -114,6 +118,29 @@ function readJsonGood(file, fallback) {
     const error = e instanceof SyntaxError ? `${name} is not valid JSON: ${e.message}` : `${name}: ${e.message}`;
     return { doc: lastGood[name] === undefined ? null : lastGood[name], error };
   }
+}
+
+// ---- pilot-v0.9: experiment flags. config.experiments gives the default (missing = off); .pilot/flags.json, written by
+// /flag and hand-editable, overrides it. A broken flags.json reads as its last good version and is never written. ----
+const EXPERIMENTS = config.experiments && typeof config.experiments === 'object' ? config.experiments : {};
+const SETTLE_MS = Math.min(10000, Math.max(300, Number(EXPERIMENTS.settleMs) || 1800));   // pause before the offer
+const FLAG_NAMES = { 'settled-input': 'settledInput' };
+function readFlags() {
+  const r = readJsonGood(FLAGS, null);
+  const d = r.doc && typeof r.doc === 'object' && !Array.isArray(r.doc) ? r.doc : {};
+  const exp = d.experiments && typeof d.experiments === 'object' && !Array.isArray(d.experiments) ? d.experiments : {};
+  const out = { rev: Number.isInteger(d.rev) ? d.rev : 0, experiments: exp };
+  if (r.error) out.error = r.error;
+  return out;
+}
+// -> {settledInput, settleMs, source}: source names where the value comes from (flags.json, the config, or the default)
+function flagsSummary() {
+  const f = readFlags();
+  const cfgName = path.relative(APP, configPath);
+  let settledInput = false, source = 'default (off)';
+  if (typeof EXPERIMENTS.settledInput === 'boolean') { settledInput = EXPERIMENTS.settledInput; source = `${cfgName} experiments.settledInput`; }
+  if (typeof f.experiments.settledInput === 'boolean') { settledInput = f.experiments.settledInput; source = `${path.relative(APP, PILOT)}/flags.json (/flag)`; }
+  return { settledInput, settleMs: SETTLE_MS, source, rev: f.rev };
 }
 
 // ---- growth: deterministic controller over rules.json, consent answers in modules.json ----
@@ -761,7 +788,7 @@ function fileRev(name) {
   if (!name.endsWith('.json')) return { rev: null };
   try {
     const j = JSON.parse(raw);
-    if (name === 'modules.json' || name === 'roles.json') lastGood[name] = j;   // keep the last good version fresh
+    if (name === 'modules.json' || name === 'roles.json' || name === 'flags.json') lastGood[name] = j;   // keep the last good version fresh
     return { rev: j && Number.isInteger(j.rev) ? j.rev : 0 };
   }
   catch (e) { return { rev: null, error: `${name} is not valid JSON: ${e.message}` }; }
@@ -832,13 +859,52 @@ function statePayload(only) {
     Object.assign(out, { panes: visiblePanes(m), pending: m.pending, pendingKind: m.pendingKind || null, answers: m.answers, removals: m.removals,
       modulesRev: m.rev, paneInfo, faded: visiblePanes(m).filter((mod) => fade.isFaded(m.panes.find((p) => p.module === mod))) });
   }
+  if (want('flags.json')) out.flags = flagsSummary();   // pilot-v0.9
   // items carry `prov` ({added, fields}) when a part of them came from a hand edit (pilot-v0.6, see stats.js)
   if (want('state.json')) { st = readState(); Object.assign(out, { items: stats.withProvenance(st.items, metricsEvents()), stateRev: st.rev, stateError: st.error || null }); }
   // a broken hand-editable file: the page says "file X is not valid JSON, showing last good version" until fixed
   const fileErrors = {};
-  for (const [f, e] of [['state.json', (st || readState()).error], ['modules.json', (m || readModules()).error], ['roles.json', readJsonGood(ROLES, {}).error]]) if (e) fileErrors[f] = e;
+  for (const [f, e] of [['state.json', (st || readState()).error], ['modules.json', (m || readModules()).error], ['roles.json', readJsonGood(ROLES, {}).error], ['flags.json', readFlags().error]]) if (e) fileErrors[f] = e;
   out.fileErrors = fileErrors;
   return out;
+}
+
+// pilot-v0.9: settled-input events from the page. Only numbers, booleans and the named enums are kept; never any text
+// (an ignored offer was a draft nobody sent). Every outcome names its offer; one offer has at most one outcome.
+const SETTLE_EVENTS = {
+  settle_offer: { cue: ['punct', 'question'], chars: 'n', words: 'n', sinceKeyMs: 'n' },
+  settle_accept: { offerRef: 'id', sinceKeyMs: 'n', offerMs: 'n', chars: 'n' },
+  settle_ignore: { offerRef: 'id', how: ['typed', 'escape'], offerMs: 'n' },
+  enter_send: { offerShowing: 'b', offerRef: 'id?', sinceKeyMs: 'n', chars: 'n' },
+};
+const offerOutcome = new Map();   // offer id -> outcome event (this server run; older ones are checked in metrics.jsonl)
+function settleEvent(body) {
+  if (!flagsSummary().settledInput) return { error: 'the settled-input experiment is off (/flag settled-input on)' };
+  const spec = SETTLE_EVENTS[body.event], fields = {};
+  for (const [k, t] of Object.entries(spec)) {
+    const v = body[k];
+    if (t === 'id?' && (v === undefined || v === null)) continue;
+    const ok = Array.isArray(t) ? t.includes(v) : t === 'n' ? Number.isFinite(v) && v >= 0 && v < 864e5 : t === 'b' ? typeof v === 'boolean'
+      : typeof v === 'string' && /^so-[a-z0-9]{1,12}$/.test(v);
+    if (!ok) return { error: `${body.event}: bad or missing ${k}` };
+    fields[k] = t === 'n' ? Math.round(v) : v;
+  }
+  if (body.event === 'settle_offer') {
+    if (typeof body.offer !== 'string' || !/^so-[a-z0-9]{1,12}$/.test(body.offer)) return { error: 'settle_offer: bad or missing offer id' };
+    fields.offer = body.offer;
+    offerOutcome.set(body.offer, null);
+  }
+  if (body.event === 'enter_send' && fields.offerShowing !== !!fields.offerRef) return { error: 'enter_send: offerRef goes with offerShowing true' };
+  const ref = fields.offerRef;
+  if (ref) {
+    const known = offerOutcome.has(ref) || metricsEvents().some((e) => e.event === 'settle_offer' && e.offer === ref);
+    if (!known) return { error: `no settle_offer "${ref}"` };
+    if (offerOutcome.get(ref) || metricsEvents().some((e) => e.offerRef === ref)) return { error: `offer "${ref}" already has an outcome` };
+    offerOutcome.set(ref, body.event);
+  }
+  fields.settleMs = SETTLE_MS;
+  fields.turn = fade.turnOf(readTranscript());
+  return { fields };
 }
 
 // ---- HTTP ----
@@ -913,6 +979,7 @@ const HELP = [
   '/stats                     the five P5 measures (04-build-plan.md) from metrics.jsonl and the files, PASS / NOT YET',
   '/why [pane|item id]        why the workbench looks like this: rules, questions, answers, origins, with sources',
   '/theme light|dark|auto     colour theme of this page (kept in this browser only)',
+  '/flag [settled-input on|off]  experiments (pilot-v0.9): show them, or switch one (kept in flags.json; default off)',
   '/help                      this list',
 ];
 
@@ -974,6 +1041,28 @@ async function runCommand(input) {
     const r = why.explain(PILOT, args.join(' '), `${path.relative(APP, PILOT)}/`);
     return { ok: r.ok, lines: why.format(r.statements), why: r.statements };
   }
+  // pilot-v0.9: experiment flags. Without arguments: each flag, its value and where it comes from.
+  if (cmd === '/flag') {
+    const fs0 = flagsSummary();
+    const show = () => [`settled-input: ${fs0.settledInput ? 'on' : 'off'}  (from ${fs0.source}; offer after ${fs0.settleMs} ms; Enter always sends)`];
+    if (!args.length) return { ok: true, lines: show() };
+    const [name, val] = args;
+    if (!FLAG_NAMES[name]) return { ok: false, lines: [`unknown flag "${name}". Flags: ${Object.keys(FLAG_NAMES).join(', ')}`] };
+    if (val !== 'on' && val !== 'off') return { ok: false, lines: [`usage: /flag ${name} on|off`] };
+    const cur = readFlags();
+    if (cur.error) return { ok: false, lines: [`flags.json is not valid JSON, not changed: ${cur.error}`] };
+    const on = val === 'on';
+    await serial(() => {
+      const doc = readJson(FLAGS, {}) || {};
+      doc.rev = (Number.isInteger(doc.rev) ? doc.rev : 0) + 1;
+      doc.experiments = { ...(doc.experiments && typeof doc.experiments === 'object' ? doc.experiments : {}), [FLAG_NAMES[name]]: on };
+      atomicWrite(FLAGS, JSON.stringify(doc, null, 2) + '\n');
+      lastGood['flags.json'] = doc;
+    });
+    await appendLine('system', `experiment ${name} ${val} (/flag)${on ? ': after a pause on a finished-looking input the page offers "send?" (Tab sends, Enter always sends)' : ''}`, null);
+    await metric('flag', { name, value: on, was: fs0.settledInput });
+    return { ok: true, lines: [`settled-input: ${val}  (kept in ${path.relative(APP, PILOT)}/flags.json; /flag ${name} ${on ? 'off' : 'on'} switches back)`] };
+  }
   if (cmd === '/stats') return { ok: true, lines: stats.formatStats(stats.computeStats(PILOT), `${path.relative(APP, PILOT)}/`) };
   if (cmd === '/panes') {
     const m = readModules();
@@ -1002,9 +1091,16 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, out.code, out.body);
     }
     // pilot-v0.6: the page reports index jumps (Usefulness). Only this one event, with a message id that exists.
+    // pilot-v0.9: and the settled-input events, only while that experiment is on (settleEvent validates them).
     if (req.method === 'POST' && pathname === '/metric') {
       let body;
       try { body = JSON.parse(await readBody(req, 2000)); } catch { return sendJson(res, 400, { error: 'expected JSON {event: "index_jump", target}' }); }
+      if (body && SETTLE_EVENTS[body.event]) {
+        const out = settleEvent(body);
+        if (out.error) return sendJson(res, 400, { error: out.error });
+        await metric(body.event, out.fields);
+        return sendJson(res, 200, { ok: true });
+      }
       if (!body || body.event !== 'index_jump') return sendJson(res, 400, { error: 'only {event: "index_jump", target} is accepted' });
       const target = typeof body.target === 'string' ? body.target : '';
       const lines = readTranscript();
