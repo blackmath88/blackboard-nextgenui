@@ -156,7 +156,9 @@ function rejectedToggle(body, kinds) {
 function heading(text) { const h = document.createElement('h3'); h.className = 'sub'; h.textContent = text; return h; }
 
 function renderMap(body) {
-  const nodes = [heading('decisions'), itemList(itemsFor(['decision']), 'No decisions yet. Proposals appear here, dashed, after a turn.')];
+  const chain = itemList(itemsFor(['decision']), 'No decisions yet. Proposals appear here, dashed, after a turn.');
+  chain.classList.add('chain');                  // decisions as a chain, in the order they came up (01-concept, day 2)
+  const nodes = [heading('decisions'), chain];
   const sources = itemsFor(['source']);
   if (sources.length) nodes.push(heading('sources'), itemList(sources, 'No sources shown.'));
   body.replaceChildren(...nodes);

@@ -334,7 +334,7 @@ Proposals (P3). **Untested with a real model:** every check runs against the fak
 `dev/fake-model.js` (`--extract=good|malformed|badquote|many|dupes`, `--extract-delay`); no real endpoint was
 contacted and Morrow was not reachable.
 
-**Reproduce:** `bash pilot/app/dev/verify-v0.4.sh` (61 checks; one of them runs the 24 browser checks of
+**Reproduce:** `bash pilot/app/dev/verify-v0.4.sh` (61 checks; one of them runs the 25 browser checks of
 `browser-check.js v04`; ends with `ALL v0.4 CHECKS PASSED`, exits non-zero on failure). Own ports (server 4770, chat
 fakes 5771/5772, extract fake 5773; browser part 4775/5776/5777 and Chrome 9353; demo part 4954/5954/5955) and own
 throwaway dirs (`.pilot-verify-v04/`, `.pilot-verify-v04b/`, `.pilot-demo-verify04/`).
@@ -362,7 +362,7 @@ Last run (Node v25.9.0, Chrome, macOS): all passed.
 | 5 | `everyNTurns: 2`: no extract call after reply 1, one after reply 2. | section 9 |
 | 6 | **Extract follows the v0.3 rules:** with candidates [morrow (local, down), frontier] and policy fallback, the fallback to frontier is blocked (`fallback_blocked role extract`, system line), frontier never extracts, nothing written; with `allowCloudFallback: true` frontier extracts and the item records `model: frontier`; `/model extract frontier` pins it (frontier extracts although morrow is up); `--stall-after=2` with `stallMs: 1000` → `stall` metric for role extract, `extract_error {reason: stall}`, nothing written, chat not delayed. | section 10 |
 | 7 | **Consent for map/kanban:** thresholds 2: one decision → no question; two (proposed) → "2 decisions so far…" asked after the extraction; no pane before the answer; `y` → map pane, answer count 2 (decisions, not messages); kanban `n` at 2 tasks → not asked at 3, asked again at 4; after rejecting 2 of 4 tasks `/rules` shows `tasks 2`; `/rules` no longer says "not built yet". | section 11 |
-| 8 | **Page** (`browser-check.js v04`): map shown, kanban not (no answer); proposed dashed lavender, confirmed solid mint, rejected hidden behind "rejected: 1 (show)" and solid rose when shown; `crcr` typed in a non-empty input stays text and decides nothing; kanban question appears after the extraction without reload and counts 3 tasks; `y` → kanban with task-1 (hand-added, solid, "you") in done; highlight = newest proposal; ArrowDown moves focus between cards; focusing a card highlights it; decisions appear as system lines; a hand edit (`author: user`, `column: doing`) shows after the next state load; no page errors, no request outside its own server. | section 12 |
+| 8 | **Page** (`browser-check.js v04`): map shown, kanban not (no answer); proposed dashed lavender, confirmed solid mint, rejected hidden behind "rejected: 1 (show)" and solid rose when shown; `crcr` typed in a non-empty input stays text and decides nothing; kanban question appears after the extraction without reload and counts 3 tasks; `y` → kanban with task-1 (hand-added, solid, "you") in done; highlight = newest proposal; ArrowDown moves focus between cards; real Tab presses from the input reach a card, which is then highlighted; the map draws decisions as a chain (connector between cards); decisions appear as system lines; a hand edit (`author: user`, `column: doing`) shows after the next state load; no page errors, no request outside its own server. | section 12 |
 | 9 | Contrast still passes (new styles use only existing tokens; status tags reuse the `--ctl/--ok/--bad` label pairs). | section 12 |
 | 10 | **Demo:** `npm run demo -- v0.4` serves `/state` in ~1 s with the map pane and the proposal dec-2; one message (`Decision: we send the letter by registered mail. Task: draft the letter tonight.`) gives `dec-4` and `task-3` proposed and the kanban question pending in ~1.7 s; Ctrl+C leaves no process. | section 13 |
 | 11 | Old checks unchanged and passing: p0, p1, p2, v0.3, browser p1/p2/v03. | `npm run verify` |
@@ -380,6 +380,8 @@ Done by hand: the demo in the Browser pane (light theme): one message → dashed
   items in `state.json` and earlier survivors of the same batch.
 - **When extraction runs:** only after a complete reply (not after a failed or stalled one), queued before
   `res.end()` so `/state` already reports `extracting: true`; the controller runs again after the write.
+- **Map as a chain** (01-concept, day 2): decisions in the order they came up, joined by a connector; no graph
+  layout or links between decisions in this iteration.
 - **Rejected items:** hidden by default behind a pane-bar toggle "rejected: n (show)" (page-only, not saved).
 - **Focus and keys:** `c`/`r` act on a focused card, or from the empty chat input on the outlined proposal; a new
   proposal takes the outline (newest first). Same guards as the consent keys (composition, repeat, modifiers).

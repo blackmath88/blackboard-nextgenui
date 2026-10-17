@@ -6,5 +6,5 @@
 {"id":"m-demo406","ts":"2026-10-17T09:06:00.000Z","role":"system","text":"map: yes, pane added","model":null}
 {"id":"m-demo407","ts":"2026-10-17T09:06:20.000Z","role":"system","text":"dec-1 confirmed: dogfood the pilot on the insurance claim","model":null}
 {"id":"m-demo408","ts":"2026-10-17T09:07:10.000Z","role":"user","text":"Should we use a paid cloud model for the letter? Decision: use a paid cloud model for the letter.","model":null}
-{"id":"m-demo409","ts":"2026-10-17T09:07:40.000Z","role":"assistant","text":"[fixture] That would contradict dec-2. I proposed it anyway, since you said it; reject it if you did not mean it.","model":"frontier"}
+{"id":"m-demo409","ts":"2026-10-17T09:07:40.000Z","role":"assistant","text":"[fixture] That would contradict dec-2. The extractor (morrow) proposed it anyway, because you said it; reject it if you did not mean it.","model":"frontier"}
 {"id":"m-demo410","ts":"2026-10-17T09:08:30.000Z","role":"system","text":"dec-3 rejected: use a paid cloud model for the letter","model":null}

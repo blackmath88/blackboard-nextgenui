@@ -134,6 +134,10 @@ body { margin: 0; background: var(--base); color: var(--text); font: 400 15px/1.
 .item .key { padding: 0 8px; font-size: 12px; }
 .cols .item .key .w { display: none; }           /* narrow kanban columns: key letter only (title says the word) */
 .pane .bar > span, .pane .bar .toggle { white-space: nowrap; }
+/* Reasoning map: decisions as a chain, joined by a short connector in --line. */
+.chain .item { position: relative; }
+.chain .item + .item { margin-top: 14px; }
+.chain .item + .item::before { content: ""; position: absolute; left: 14px; top: -15px; height: 14px; border-left: 2px solid var(--line); }
 .items .empty { color: var(--muted); font-size: 12.5px; margin: 0 0 6px; }
 .sub { margin: 4px 0 6px; font: 400 17px/1.1 var(--px); color: var(--accent-fg); }
 .cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }

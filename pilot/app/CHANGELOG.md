@@ -21,7 +21,7 @@ extractor in `dev/fake-model.js`.
 - **`.pilot/state.json`** (atomic, `rev` bumped): `status: proposed`, `author: model`, `model`, `quote`,
   `fromMessage`, ids `dec-N`/`task-N`/`src-N` (max + 1, so hand-added ids never collide). Hand edits keep every
   unknown field; a broken file is reported (`/state.stateError`) and never overwritten.
-- **Panes:** reasoning map (decisions, sources) and kanban (tasks in todo/doing/done), grown only through the
+- **Panes:** reasoning map (decisions as a chain, then sources) and kanban (tasks in todo/doing/done), grown only through the
   controller and consent (`map`/`kanban` rules now count proposed + confirmed items, not rejected ones). Proposed =
   dashed lavender with "model · <name>"; confirmed = mint; rejected = rose, hidden behind a pane-bar toggle;
   hand-added (`author: user`) = solid with "you".

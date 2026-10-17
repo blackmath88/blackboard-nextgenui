@@ -63,7 +63,7 @@ async function openBrowser() {
       return r.result.result.value;
     },
     async key(k) {
-      const ARROWS = { ArrowUp: 38, ArrowDown: 40 };
+      const ARROWS = { ArrowUp: 38, ArrowDown: 40, Tab: 9 };
       if (ARROWS[k]) {
         await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: k, code: k, windowsVirtualKeyCode: ARROWS[k] });
         await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: ARROWS[k] });
@@ -299,12 +299,15 @@ async function v04(page) {
   await page.eval(`${card('dec-4')}.focus()`);
   await page.key('ArrowDown'); await sleep(100);
   check('ArrowDown on a focused card moves focus to the next card', await page.eval(`document.activeElement.classList.contains('item') && document.activeElement.dataset.id !== 'dec-4'`), await page.eval(`document.activeElement.dataset.id || document.activeElement.id`));
-  await page.eval(`${card('task-2')}.focus()`);
-  check('focusing a card (Tab) highlights it', !!(await style('task-2')).selected);
+  await page.eval(`document.getElementById('input').focus()`);
+  let tabs = 0;
+  while (tabs < 20 && !(await page.eval(`document.activeElement.dataset && document.activeElement.dataset.id === 'task-2'`))) { await page.key('Tab'); tabs++; }
+  check('Tab from the input reaches the task-2 card, and the focused card is highlighted', tabs < 20 && !!(await style('task-2')).selected, `${tabs} Tab presses`);
   await page.key('c'); await sleep(700);
   check('c on a focused card confirms that card', item('task-2').status === 'confirmed' && item('dec-4').status === 'proposed');
   await page.eval(`${card('dec-4')}.querySelector('.key[data-decision="reject"]').click()`); await sleep(700);
   check('reject button works', item('dec-4').status === 'rejected');
+  check('map shows decisions as a chain (connector between cards)', await page.eval(`getComputedStyle(document.querySelector('#pane-map .chain .item + .item'), '::before').borderLeftStyle === 'solid'`));
   check('decisions are system lines in the chat', await page.eval(`[...document.querySelectorAll('.ln.system')].some(l => /dec-4 rejected/.test(l.textContent))`));
 
   const st = JSON.parse(fs.readFileSync(file('state.json'), 'utf8'));
