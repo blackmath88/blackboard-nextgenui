@@ -86,8 +86,8 @@ body { margin: 0; background: var(--base); color: var(--text); font: 400 15px/1.
 }
 ::view-transition-group(*) { animation-duration: 480ms; animation-timing-function: steps(8, end); }
 @media (prefers-reduced-motion: reduce) { ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; } }
-.term::after { content: ""; pointer-events: none; position: absolute; inset: 0; background: repeating-linear-gradient(transparent 0 2px, var(--scan) 2px 3px); }
-.term .body { flex: 1; }
+/* Scanlines sit in the log's background, under the text (an overlay on top would darken the text too). */
+.term .body { flex: 1; background: repeating-linear-gradient(transparent 0 2px, var(--scan) 2px 3px), var(--panel); }
 
 /* Transcript lines. Role labels: pastel text in dark mode, ink on a pastel fill in light mode. */
 .ln { margin: 0 0 10px; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }

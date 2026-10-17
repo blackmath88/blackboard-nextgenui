@@ -296,6 +296,9 @@ the positive path was run with `TRY_REF=<commit>` (no tags exist yet; the coordi
   use `--text` with a rose left border (rose is never text in light mode); answered questions use `--muted`
   instead of `opacity: .6` (which made contrast unmeasurable); the index jump highlight is an outline instead of
   a tinted background.
+  The scanline effect moved from an overlay on top of the terminal (which darkened the text as well, so dark
+  `--muted` text fell to about 3.9:1) into the log's background, under the text; the contrast check models
+  exactly that (text on `--scan` over `--panel`).
 - **Sprites:** `pixel.js` writes `fill="var(--px-a|d|c|w)"`; the browser resolves them, so sprites follow
   `/theme` and OS changes live. Chosen over `getComputedStyle` (the brief's example), which would freeze the
   colours at render time.
