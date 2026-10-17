@@ -2,9 +2,10 @@
 // DEV ONLY. Drives the real page in headless Chrome over the DevTools protocol and prints PASS/FAIL.
 // p1/p2: start their own fake models and server (PILOT_CONFIG=pilot.config.dev.json, ports 4747/5701/5702)
 // and WIPE .pilot/ first. v03: own ports (4765/5766/5767, Chrome 9343) and its own dir .pilot-verify-v03b/,
-// so it never touches .pilot/ or a running demo.
+// so it never touches .pilot/ or a running demo. v04 (pilot-v0.4 proposals): ports 4775/5776/5777, Chrome 9353,
+// dir .pilot-verify-v04b/.
 // Needs Node 22+ (global WebSocket) and Google Chrome. No dependencies.
-// Usage: node dev/browser-check.js [p1|p2|v03|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
+// Usage: node dev/browser-check.js [p1|p2|v03|v04|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
 'use strict';
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -62,6 +63,12 @@ async function openBrowser() {
       return r.result.result.value;
     },
     async key(k) {
+      const ARROWS = { ArrowUp: 38, ArrowDown: 40 };
+      if (ARROWS[k]) {
+        await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: k, code: k, windowsVirtualKeyCode: ARROWS[k] });
+        await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: ARROWS[k] });
+        return;
+      }
       const enter = k === 'Enter';
       const vk = enter ? 13 : k.toUpperCase().charCodeAt(0);
       await send('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code: enter ? 'Enter' : `Key${k.toUpperCase()}`, windowsVirtualKeyCode: vk, text: enter ? '\r' : k });
@@ -226,7 +233,89 @@ async function v03(page) {
   if (process.env.SHOT_DIR) fs.writeFileSync(path.join(process.env.SHOT_DIR, 'v03-dark.png'), Buffer.from(shot2.result.data, 'base64'));
 }
 
-const SCENARIOS = { p1, p2, v03 };
+// pilot-v0.4: proposals in the map and kanban panes; c/r keys (empty input or focused card), buttons, styles,
+// rejected toggle, pickup of a background extraction without reload, hand-added items shown solid.
+async function v04(page) {
+  const at = (m) => new Date(Date.UTC(2026, 9, 17, 9, m)).toISOString();
+  const file = (f) => path.join(APP, ENV.dir, f);
+  fs.writeFileSync(file('state.json'), JSON.stringify({ rev: 1, items: [
+    { id: 'dec-1', kind: 'decision', text: 'keep the claim local', status: 'confirmed', author: 'model', model: 'morrow', quote: 'Decision: keep the claim local.', fromMessage: 'm-x1', createdAt: at(1), decidedAt: at(2), decidedBy: 'user' },
+    { id: 'dec-2', kind: 'decision', text: 'write the letter in German', status: 'proposed', author: 'model', model: 'morrow', quote: 'Decision: write the letter in German.', fromMessage: 'm-x1', createdAt: at(1) },
+    { id: 'dec-3', kind: 'decision', text: 'use a paid cloud model', status: 'rejected', author: 'model', model: 'morrow', quote: 'Decision: use a paid cloud model.', fromMessage: 'm-x1', createdAt: at(1), decidedAt: at(3), decidedBy: 'user' },
+    { id: 'task-1', kind: 'task', text: 'scan the invoice', status: 'confirmed', author: 'user', createdAt: at(4), column: 'done' },
+  ] }, null, 2));
+  fs.writeFileSync(file('modules.json'), JSON.stringify({ rev: 1, panes: [{ module: 'map', addedAt: at(5), atCount: 2 }], answers: { map: { answer: 'yes', at: at(5), count: 2 } }, pending: null }, null, 2));
+  editJson('rules.json', (r) => { r.rules.find((x) => x.module === 'index').threshold = 50; r.rules.find((x) => x.module === 'kanban').threshold = 2; });
+  await page.goto(URL);
+  const answers = () => page.net.filter((n) => n.url.endsWith('/answer')).length;
+  const items = () => JSON.parse(fs.readFileSync(file('state.json'), 'utf8')).items;
+  const item = (id) => items().find((i) => i.id === id);
+  const card = (id) => `document.querySelector('.item[data-id="${id}"]')`;
+  const style = (id) => page.eval(`(() => { const c = ${card(id)}; if (!c) return null; const s = getComputedStyle(c);
+    return { style: s.borderTopStyle, color: s.borderTopColor, meta: c.querySelector('.meta').textContent, selected: c.classList.contains('selected') }; })()`);
+  const waitFor = async (expr, ms = 5000) => { for (let t = 0; t < ms; t += 100) { if (await page.eval(expr)) return true; await sleep(100); } return false; };
+  const LAV = 'rgb(195, 177, 225)', MINT = 'rgb(168, 230, 207)', ROSE = 'rgb(244, 166, 184)';
+
+  check('map pane shown (consented), no kanban pane yet (no answer)', await page.eval(`!!document.getElementById('pane-map') && !document.getElementById('pane-kanban')`));
+  let s2 = await style('dec-2');
+  check('proposal dec-2: dashed lavender border, "model · morrow", highlighted', s2 && s2.style === 'dashed' && s2.color === LAV && /dec-2 · model · morrow · proposed/.test(s2.meta) && s2.selected, JSON.stringify(s2));
+  const s1 = await style('dec-1');
+  check('confirmed dec-1: solid mint border', s1 && s1.style === 'solid' && s1.color === MINT, JSON.stringify(s1));
+  check('rejected dec-3 hidden; pane bar toggle "rejected: 1 (show)"', !(await style('dec-3')) && await page.eval(`document.querySelector('#pane-map .bar .toggle').textContent === 'rejected: 1 (show)'`));
+  await page.eval(`document.querySelector('#pane-map .bar .toggle').click()`); await sleep(200);
+  const s3 = await style('dec-3');
+  check('toggle shows dec-3 with a solid rose border', s3 && s3.style === 'solid' && s3.color === ROSE, JSON.stringify(s3));
+  await page.eval(`document.querySelector('#pane-map .bar .toggle').click()`); await sleep(200);
+  check('toggle hides it again', !(await style('dec-3')));
+
+  await page.type('cr');
+  for (const k of ['c', 'r']) await page.key(k);
+  await sleep(400);
+  check('non-empty input: c and r stay text, nothing decided', (await page.eval(`document.getElementById('input').value`)) === 'crcr' && answers() === 0 && item('dec-2').status === 'proposed');
+  await page.eval(`document.getElementById('input').value = ''`);
+  await page.eval(`document.getElementById('input').focus()`);
+  await page.key('c'); await sleep(700);
+  const d2 = item('dec-2');
+  check('empty input: c confirms the highlighted proposal (state.json: confirmed, decidedAt, decidedBy user)', d2.status === 'confirmed' && !!d2.decidedAt && d2.decidedBy === 'user', JSON.stringify(d2));
+  s2 = await style('dec-2');
+  check('confirmed card turns solid mint, focus back in the input', s2 && s2.style === 'solid' && s2.color === MINT && await page.eval(`document.activeElement.id === 'input'`), JSON.stringify(s2));
+
+  const t0 = Date.now();
+  await page.submit('Decision: ship the board today. Task: test the keys. Task: write the notes.', 100);
+  const appeared = await waitFor(`!!${card('dec-4')} && !!document.querySelector('.ln.controller.pending')`, 6000);
+  check('after one message a dashed dec-4 appears and the kanban question asks, without a reload', appeared && (await style('dec-4') || {}).style === 'dashed', `${Date.now() - t0} ms`);
+  check('page loaded once (pickup by polling /state, no navigation)', page.net.filter((n) => n.url === URL).length === 1);
+  check('kanban question counts proposed + confirmed tasks (3)', await page.eval(`/^3 tasks/.test(document.querySelector('.ln.controller.pending').textContent)`));
+  await page.eval(`document.getElementById('input').focus()`);
+  await page.key('y'); await sleep(900);
+  check('y adds the kanban pane; tasks in columns (task-1 in done)', await page.eval(`!!document.querySelector('#pane-kanban .col.done .item[data-id="task-1"]') && !!document.querySelector('#pane-kanban .col.todo .item[data-id="task-2"]')`));
+  const u = await style('task-1');
+  check('hand-added task-1 (author user) is solid and says "you"', u && u.style === 'solid' && /task-1 · you/.test(u.meta), JSON.stringify(u));
+  const newest = await page.eval(`(document.querySelector('.item.selected') || {}).dataset?.id || null`);
+  check('highlight = newest proposal (task-3)', newest === 'task-3', newest);
+  await page.key('r'); await sleep(700);
+  check('empty input: r rejects it (rejected, decidedBy user) and it is hidden', item('task-3').status === 'rejected' && item('task-3').decidedBy === 'user' && !(await style('task-3')));
+
+  await page.eval(`${card('dec-4')}.focus()`);
+  await page.key('ArrowDown'); await sleep(100);
+  check('ArrowDown on a focused card moves focus to the next card', await page.eval(`document.activeElement.classList.contains('item') && document.activeElement.dataset.id !== 'dec-4'`), await page.eval(`document.activeElement.dataset.id || document.activeElement.id`));
+  await page.eval(`${card('task-2')}.focus()`);
+  check('focusing a card (Tab) highlights it', !!(await style('task-2')).selected);
+  await page.key('c'); await sleep(700);
+  check('c on a focused card confirms that card', item('task-2').status === 'confirmed' && item('dec-4').status === 'proposed');
+  await page.eval(`${card('dec-4')}.querySelector('.key[data-decision="reject"]').click()`); await sleep(700);
+  check('reject button works', item('dec-4').status === 'rejected');
+  check('decisions are system lines in the chat', await page.eval(`[...document.querySelectorAll('.ln.system')].some(l => /dec-4 rejected/.test(l.textContent))`));
+
+  const st = JSON.parse(fs.readFileSync(file('state.json'), 'utf8'));
+  st.items.push({ id: 'task-9', kind: 'task', text: 'added by hand', status: 'confirmed', author: 'user', createdAt: new Date().toISOString(), column: 'doing' });
+  fs.writeFileSync(file('state.json'), JSON.stringify(st, null, 2));
+  await page.submit('/panes', 600);
+  const h = await style('task-9');
+  check('hand edit of state.json shows after the next state load: solid, "you", in doing', h && h.style === 'solid' && /you/.test(h.meta) && await page.eval(`!!document.querySelector('#pane-kanban .col.doing .item[data-id="task-9"]')`), JSON.stringify(h));
+}
+
+const SCENARIOS = { p1, p2, v03, v04 };
 const ENVS = {
   v03: () => {
     const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
@@ -237,6 +326,16 @@ const ENVS = {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v03b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4765/', fakes: [5766, 5767], dir: '.pilot-verify-v03b', config: file, cdp: 9343 };
+  },
+  v04: () => {
+    const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
+    c.port = 4775;
+    c.roles.chat.candidates[0].baseUrl = 'http://127.0.0.1:5776/v1';
+    c.roles.chat.candidates[1].baseUrl = 'http://127.0.0.1:5777/v1';
+    c.roles.extract.candidates[0].baseUrl = 'http://127.0.0.1:5777/v1';
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v04b-')), 'config.json');
+    fs.writeFileSync(file, JSON.stringify(c));
+    return { url: 'http://127.0.0.1:4775/', fakes: [5776, 5777], dir: '.pilot-verify-v04b', config: file, cdp: 9353 };
   },
 };
 

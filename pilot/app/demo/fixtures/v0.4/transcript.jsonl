@@ -1,0 +1,10 @@
+{"id":"m-demo401","ts":"2026-10-17T09:00:10.000Z","role":"user","text":"Let us dogfood the pilot on one real topic this week: my health insurance claim.","model":null}
+{"id":"m-demo402","ts":"2026-10-17T09:00:40.000Z","role":"assistant","text":"[fixture] Good choice. Decision: dogfood the pilot on the insurance claim. It is a topic with deadlines, documents and a few decisions.","model":"frontier"}
+{"id":"m-demo403","ts":"2026-10-17T09:02:05.000Z","role":"user","text":"I scanned the hospital invoice already. Decision: the claim stays on local models only.","model":null}
+{"id":"m-demo404","ts":"2026-10-17T09:02:30.000Z","role":"assistant","text":"[fixture] Understood. Task: call the insurer about the deadline. The extract role runs on morrow, so nothing leaves your network.","model":"frontier"}
+{"id":"m-demo405","ts":"2026-10-17T09:05:00.000Z","role":"controller","text":"2 decisions so far. Add a reasoning map?","model":null,"module":"map"}
+{"id":"m-demo406","ts":"2026-10-17T09:06:00.000Z","role":"system","text":"map: yes, pane added","model":null}
+{"id":"m-demo407","ts":"2026-10-17T09:06:20.000Z","role":"system","text":"dec-1 confirmed: dogfood the pilot on the insurance claim","model":null}
+{"id":"m-demo408","ts":"2026-10-17T09:07:10.000Z","role":"user","text":"Should we use a paid cloud model for the letter? Decision: use a paid cloud model for the letter.","model":null}
+{"id":"m-demo409","ts":"2026-10-17T09:07:40.000Z","role":"assistant","text":"[fixture] That would contradict dec-2. I proposed it anyway, since you said it; reject it if you did not mean it.","model":"frontier"}
+{"id":"m-demo410","ts":"2026-10-17T09:08:30.000Z","role":"system","text":"dec-3 rejected: use a paid cloud model for the letter","model":null}

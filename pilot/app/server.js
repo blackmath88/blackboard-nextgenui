@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// CLI Pilot (P0-P2 + pilot-v0.3): serves the page, proxies POST /chat to the `chat` role with
+// CLI Pilot (P0-P2 + pilot-v0.3 + pilot-v0.4): serves the page, proxies POST /chat to the `chat` role with
 // streaming and per-role candidates/policies, appends lines to .pilot/transcript.jsonl,
 // runs the deterministic growth controller (rules.json -> consent -> modules.json),
+// runs the `extract` role in the background after each reply (proposals -> .pilot/state.json),
 // handles commands via POST /command and answers via POST /answer, logs to .pilot/metrics.jsonl.
 // Node 20+, no dependencies. All paths resolve against this file's folder.
 'use strict';
@@ -22,7 +23,9 @@ const METRICS = path.join(PILOT, 'metrics.jsonl');
 const ROLES = path.join(PILOT, 'roles.json');      // /model pins: a role listed in `active` is pinned (see CHECKS.md)
 const RULES = path.join(PILOT, 'rules.json');
 const MODULES = path.join(PILOT, 'modules.json');
-const BUILT = ['index'];   // panes this build can show; the controller only evaluates their rules
+const STATE = path.join(PILOT, 'state.json');      // decisions, tasks, sources (proposed by the model or added by hand)
+const EXTRACTION_SCHEMA = JSON.parse(fs.readFileSync(path.join(APP, 'schemas', 'extraction.schema.json'), 'utf8'));
+const BUILT = ['index', 'map', 'kanban'];   // panes this build can show; the controller only evaluates their rules
 const PORT = Number(config.port) || 4747;
 const HOST = '127.0.0.1';
 const TAIL = 500;      // lines returned by GET /state
@@ -89,8 +92,11 @@ function visiblePanes(m) {
   return m.panes.map((p) => p.module).filter((mod, i, a) => a.indexOf(mod) === i && ['yes', 'always'].includes((m.answers[mod] || {}).answer));
 }
 
-function counts(lines) {
-  return { messages: lines.filter((l) => l.role === 'user' || l.role === 'assistant').length, decisions: 0, tasks: 0, sources: 0 };  // items arrive in P3
+// decisions/tasks/sources count proposed and confirmed items, not rejected ones (rules.example.json _notes).
+function counts(lines, items = readState().items) {
+  const live = (kind) => items.filter((i) => i.kind === kind && i.status !== 'rejected').length;
+  return { messages: lines.filter((l) => l.role === 'user' || l.role === 'assistant').length,
+    decisions: live('decision'), tasks: live('task'), sources: live('source') };
 }
 
 // When a rule may ask: count >= threshold, not answered never, and after "no" only once the count has doubled.
@@ -140,14 +146,18 @@ function answer(module, raw) {
     const m = readModules();
     if (!module || m.pending !== module) return { code: 409, body: { error: `no pending question for "${module}"`, pending: m.pending } };
     const ts = new Date().toISOString();
-    const n = counts(readTranscript()).messages;
+    // count = the rule's own metric (decisions for map, tasks for kanban), so "no" waits for that count to double
+    let metricName = 'messages';
+    try { metricName = ((readJson(RULES, { rules: [] }).rules || []).find((r) => r.module === module) || {}).metric || 'messages'; } catch { /* keep messages */ }
+    const c = counts(readTranscript());
+    const n = typeof c[metricName] === 'number' ? c[metricName] : c.messages;
     m.answers[module] = { answer: ans, at: ts, count: n };
     if ((ans === 'yes' || ans === 'always') && !m.panes.some((p) => p.module === module)) m.panes.push({ module, addedAt: ts, atCount: n });
     m.pending = null;
     writeModules(m);
     const effect = { yes: 'pane added', always: 'pane added; will not ask again', no: 'will ask again when the count has doubled', never: 'will never ask again' }[ans];
     appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'system', text: `${module}: ${ans}, ${effect}`, model: null });
-    appendJsonl(METRICS, { ts, event: 'consent', module, answer: ans, count: n });
+    appendJsonl(METRICS, { ts, event: 'consent', module, answer: ans, count: n, metric: metricName });
     return { code: 200, body: { ok: true, module, answer: ans } };
   });
 }
@@ -197,7 +207,7 @@ function modelsSummary() {
 // One attempt against one candidate. Streams via onDelta; resolves with the full text.
 // timeoutMs covers the wait for the first delta (a long healthy reply is not cut off);
 // stallMs covers each gap between deltas after the first one (an endpoint that hangs mid-reply is cut off).
-async function callCandidate(candidate, messages, onDelta, signal) {
+async function callCandidate(candidate, messages, onDelta, signal, extraBody) {
   const headers = { 'content-type': 'application/json' };
   if (candidate.keyEnv) {
     const key = process.env[candidate.keyEnv];
@@ -218,7 +228,7 @@ async function callCandidate(candidate, messages, onDelta, signal) {
   try {
     const res = await fetch(candidate.baseUrl.replace(/\/$/, '') + '/chat/completions', {
       method: 'POST', headers,
-      body: JSON.stringify({ model: candidate.model, messages, stream: true }),
+      body: JSON.stringify({ model: candidate.model, messages, stream: true, ...(extraBody ? extraBody(candidate) : {}) }),
       signal: AbortSignal.any([firstByte.signal, stall.signal, signal]),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
@@ -259,7 +269,7 @@ async function callCandidate(candidate, messages, onDelta, signal) {
 // (a stall after the first token therefore never falls back). A pinned role never falls back. After a local
 // candidate (`local: true`) failed, non-local candidates are skipped unless the role sets `allowCloudFallback: true`;
 // a missing `local` counts as non-local. Resolves {text, candidate}; on failure throws with err.partial / err.candidate.
-async function callRole(role, messages, onDelta, signal) {
+async function callRole(role, messages, onDelta, signal, extraBody) {
   const order = attemptOrder(role);
   const rc = roleConfig(role);
   if (!order.length) throw new Error(`no candidate configured for role "${role}"`);
@@ -274,7 +284,7 @@ async function callRole(role, messages, onDelta, signal) {
     if (lastErr) await metric('fallback', { role, from: lastErr.candidate.name, to: c.name, reason: lastErr.reason });
     const t0 = Date.now();
     try {
-      const text = await callCandidate(c, messages, (d) => { streamed += d; onDelta(d); }, signal);
+      const text = await callCandidate(c, messages, (d) => { streamed += d; onDelta(d); }, signal, extraBody);
       await metric('model_call', { role, candidate: c.name, model: c.model, ok: true, latencyMs: Date.now() - t0, chars: text.length });
       lastUsed[role] = c.name;
       return { text, candidate: c };
@@ -290,6 +300,187 @@ async function callRole(role, messages, onDelta, signal) {
   }
   if (lastErr && pinnedName(role) && rc.policy === 'fallback' && !streamed && !signal.aborted) lastErr.message += ` (${role} is pinned to ${lastErr.candidate.name}, no fallback; /model ${role} auto unpins)`;
   throw lastErr;
+}
+
+// ---- state.json: decisions, tasks, sources. Hand-editable; a broken file is reported, never overwritten ----
+// readState() -> {doc, rev, items, error}: doc is the file as parsed (written back with every unknown field and
+// item kept), items the usable view (objects with string id, kind, text).
+function readState() {
+  let raw;
+  try { raw = fs.readFileSync(STATE, 'utf8'); } catch (e) {
+    if (e.code === 'ENOENT') return { doc: { rev: 0, items: [] }, rev: 0, items: [] };
+    return { doc: null, rev: 0, items: [], error: `state.json: ${e.message}` };
+  }
+  let doc;
+  try { doc = JSON.parse(raw); } catch (e) { return { doc: null, rev: 0, items: [], error: `state.json is not valid JSON: ${e.message}` }; }
+  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.items)) return { doc: null, rev: 0, items: [], error: 'state.json: expected {"rev": n, "items": [...]}' };
+  const items = doc.items.filter((i) => i && typeof i === 'object' && typeof i.id === 'string' && typeof i.kind === 'string' && typeof i.text === 'string');
+  return { doc, rev: Number.isInteger(doc.rev) ? doc.rev : 0, items };
+}
+function writeState(doc) { doc.rev = (Number.isInteger(doc.rev) ? doc.rev : 0) + 1; atomicWrite(STATE, JSON.stringify(doc, null, 2) + '\n'); return doc.rev; }
+
+const PREFIX = { decision: 'dec', task: 'task', source: 'src' };
+function nextId(doc, kind) {
+  const re = new RegExp(`^${PREFIX[kind]}-(\\d+)$`);
+  const max = doc.items.reduce((n, i) => { const m = re.exec(i && i.id); return m ? Math.max(n, Number(m[1])) : n; }, 0);
+  return `${PREFIX[kind]}-${max + 1}`;
+}
+
+// ---- validation: a small hand validator for the subset of JSON Schema that extraction.schema.json uses ----
+// (type, required, additionalProperties: false, properties, enum, minLength, maxLength, maxItems, items).
+// Chosen over Ajv: no dependency, and the schema is closed and tiny. An unknown keyword fails loudly at startup.
+const KNOWN = new Set(['$schema', 'title', 'description', 'type', 'required', 'additionalProperties', 'properties', 'enum', 'minLength', 'maxLength', 'maxItems', 'items']);
+(function assertSupported(s) {
+  for (const k of Object.keys(s)) if (!KNOWN.has(k)) throw new Error(`extraction.schema.json uses "${k}", which the hand validator does not support`);
+  if (s.properties) Object.values(s.properties).forEach(assertSupported);
+  if (s.items) assertSupported(s.items);
+})(EXTRACTION_SCHEMA);
+function validate(s, v, at = '$') {
+  const errs = [];
+  const type = Array.isArray(v) ? 'array' : v === null ? 'null' : Number.isInteger(v) ? 'integer' : typeof v;
+  if (s.type && !(s.type === type || (s.type === 'number' && type === 'integer'))) return [`${at}: expected ${s.type}, got ${type}`];
+  if (s.enum && !s.enum.includes(v)) errs.push(`${at}: must be one of ${s.enum.join(', ')}`);
+  if (typeof v === 'string') {
+    if (s.minLength !== undefined && v.length < s.minLength) errs.push(`${at}: shorter than ${s.minLength}`);
+    if (s.maxLength !== undefined && v.length > s.maxLength) errs.push(`${at}: longer than ${s.maxLength}`);
+  }
+  if (type === 'object') {
+    for (const r of s.required || []) if (!(r in v)) errs.push(`${at}: missing "${r}"`);
+    for (const [k, val] of Object.entries(v)) {
+      if (s.properties && s.properties[k]) errs.push(...validate(s.properties[k], val, `${at}.${k}`));
+      else if (s.additionalProperties === false) errs.push(`${at}: unexpected "${k}"`);
+    }
+  }
+  if (type === 'array') {
+    if (s.maxItems !== undefined && v.length > s.maxItems) errs.push(`${at}: ${v.length} items, at most ${s.maxItems} allowed`);
+    if (s.items) v.forEach((x, i) => errs.push(...validate(s.items, x, `${at}[${i}]`)));
+  }
+  return errs;
+}
+
+// Model output -> {items} or {error, reason}. A ```json fence around the object is tolerated; nothing else is.
+function parseExtraction(text) {
+  const t = String(text || '').trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/, '$1');
+  let j;
+  try { j = JSON.parse(t); } catch (e) { return { reason: 'malformed', error: `not JSON: ${e.message}` }; }
+  const errs = validate(EXTRACTION_SCHEMA, j);
+  return errs.length ? { reason: 'schema', error: errs.slice(0, 5).join('; ') } : { items: j.items };
+}
+
+// Quote rule: after collapsing whitespace and lowercasing, the quote must be a substring of the user or the
+// assistant message of this turn; fromMessage is the id of the message it was found in.
+const norm = (t) => String(t).replace(/\s+/g, ' ').trim().toLowerCase();
+// Near-duplicate rule: lowercase, split on anything that is not a letter or digit, drop a few stopwords; two
+// texts are near-duplicates when those word sets are equal or their Jaccard similarity is >= 0.75 (e.g.
+// "Keep the claim local" vs "keep claim local!"). Compared across kinds, and two sources with the same url are
+// duplicates. Compared against every non-rejected item in state.json and against earlier survivors of the batch.
+const STOP = new Set('a an the to of and or we i you it is are be will for on in at this that with as by our so'.split(' '));
+const words = (t) => new Set(String(t).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w && !STOP.has(w)));
+function similar(a, b) {
+  if (a.url && b.url && a.url === b.url) return true;
+  const A = words(a.text), B = words(b.text);
+  if (!A.size || !B.size) return norm(a.text) === norm(b.text);
+  let inter = 0;
+  for (const w of A) if (B.has(w)) inter++;
+  return inter / (A.size + B.size - inter) >= 0.75;
+}
+
+// ---- extraction: role `extract` after each complete reply, in the background, one run at a time ----
+let extracting = 0;                    // queued + running extraction runs (GET /state reports extracting: true)
+let extractChain = Promise.resolve();
+
+function extractionMessages(userLine, replyLine, items, maxItems) {
+  const existing = items.map((i) => `- ${i.id} (${i.kind}, ${i.status || 'confirmed'}): ${i.text}`).join('\n') || '(none)';
+  return [
+    { role: 'system', content: 'PILOT-EXTRACT v1\nYou propose decisions, tasks and sources from ONE conversation turn. Reply with JSON only: '
+      + `{"items": [...]}, at most ${maxItems} items, each {"kind": "decision" | "task" | "source", "text": short title, "quote": words copied `
+      + 'exactly from the turn}; sources also carry "url". Propose only what the turn clearly states. Skip anything already in the '
+      + 'existing items. If nothing qualifies, reply {"items": []}.' },
+    { role: 'user', content: `Existing items:\n${existing}\n\nLast user message:\n${userLine.text}\n\nLast assistant message:\n${replyLine.text}` },
+  ];
+}
+
+function queueExtraction(userLine, replyLine) {
+  const rc = roleConfig('extract');
+  if (!rc.candidates.length) return;
+  const every = Math.max(1, Number(rc.everyNTurns) || 1);
+  const turns = readTranscript().filter((l) => l.role === 'assistant').length;
+  if (turns % every !== 0) return;
+  extracting++;
+  extractChain = extractChain.then(() => runExtraction(userLine, replyLine))
+    .catch((err) => { console.error('extraction failed:', err); return metric('extract_error', { reason: 'internal', error: String(err.message || err) }); })
+    .catch(() => {})
+    .finally(() => { extracting--; });
+}
+
+async function runExtraction(userLine, replyLine) {
+  const rc = roleConfig('extract');
+  const schemaMax = EXTRACTION_SCHEMA.properties.items.maxItems;
+  const maxItems = Math.max(1, Math.min(schemaMax, Number(rc.maxItems) || schemaMax));
+  const before = readState();
+  if (before.error) { await metric('extract_error', { reason: 'state', error: before.error, fromMessage: replyLine.id }); return; }
+  const schema = JSON.parse(JSON.stringify(EXTRACTION_SCHEMA));
+  schema.properties.items.maxItems = maxItems;
+  delete schema.$schema;
+  const structured = (c) => c.structured === true ? { response_format: { type: 'json_schema', json_schema: { name: 'pilot_extraction', schema } } } : {};
+  const t0 = Date.now();
+  let out;
+  try { out = await callRole('extract', extractionMessages(userLine, replyLine, before.items, maxItems), () => {}, new AbortController().signal, structured); }
+  catch (err) { await metric('extract_error', { reason: err.stall ? 'stall' : 'model', error: String(err.message || err), fromMessage: replyLine.id }); return; }
+  const base = { candidate: out.candidate.name, model: out.candidate.model, fromMessage: replyLine.id };
+  const parsed = parseExtraction(out.text);
+  if (parsed.error) { await metric('extract_error', { ...base, reason: parsed.reason, error: parsed.error, chars: out.text.length }); return; }
+
+  const turn = [[userLine.id, norm(userLine.text)], [replyLine.id, norm(replyLine.text)]];
+  await serial(() => {
+    const st = readState();   // fresh: the user may have decided or hand-edited meanwhile
+    const ts = new Date().toISOString();
+    const drop = (reason, it, extra = {}) => appendJsonl(METRICS, { ts, event: 'extract_drop', ...base, reason, kind: it.kind, text: it.text, ...extra });
+    if (st.error) { appendJsonl(METRICS, { ts, event: 'extract_error', ...base, reason: 'state', error: st.error }); return; }
+    const live = st.items.filter((i) => i.status !== 'rejected');
+    const kept = [];
+    for (const it of parsed.items) {
+      const found = turn.find(([, t]) => t.includes(norm(it.quote)));
+      if (!found) { drop('quote', it, { quote: it.quote }); continue; }
+      const dup = live.find((i) => similar(i, it)) || kept.find((k) => similar(k, it));
+      if (dup) { drop('duplicate', it, { of: dup.id || dup.text }); continue; }
+      if (kept.length >= maxItems) { drop('maxItems', it); continue; }
+      kept.push({ ...it, fromMessage: found[0] });
+    }
+    const ids = [];
+    for (const it of kept) {
+      const item = { id: nextId(st.doc, it.kind), kind: it.kind, text: it.text, status: 'proposed', author: 'model', model: out.candidate.name,
+        quote: it.quote, fromMessage: it.fromMessage, createdAt: ts };
+      if (it.kind === 'task') item.column = 'todo';
+      if (it.url !== undefined) item.url = it.url;
+      st.doc.items.push(item);
+      ids.push(item.id);
+    }
+    const rev = ids.length ? writeState(st.doc) : st.rev;
+    appendJsonl(METRICS, { ts, event: 'extract', ...base, returned: parsed.items.length, proposed: ids.length,
+      dropped: parsed.items.length - ids.length, ids, rev, latencyMs: Date.now() - t0 });
+  });
+  await runController();   // new proposals may cross a map/kanban threshold
+}
+
+// POST /answer {itemId, decision}: confirm or reject a proposed item; records decidedAt and decidedBy: "user".
+const DECISIONS = { c: 'confirmed', confirm: 'confirmed', confirmed: 'confirmed', r: 'rejected', reject: 'rejected', rejected: 'rejected' };
+function decide(itemId, raw) {
+  const status = DECISIONS[String(raw || '').toLowerCase()];
+  return serial(() => {
+    if (!status) return { code: 400, body: { error: 'decision must be c/r or confirm/reject' } };
+    const st = readState();
+    if (st.error) return { code: 409, body: { error: `${st.error}; fix the file by hand first` } };
+    const item = st.doc.items.find((i) => i && i.id === itemId);
+    if (!item) return { code: 404, body: { error: `no item "${itemId}"` } };
+    if (item.status !== 'proposed') return { code: 409, body: { error: `${itemId} is ${item.status || 'not a proposal'}, only proposed items can be decided` } };
+    const ts = new Date().toISOString();
+    item.status = status; item.decidedAt = ts; item.decidedBy = 'user';
+    const rev = writeState(st.doc);
+    appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'system', text: `${itemId} ${status}: ${item.text}`, model: null });
+    appendJsonl(METRICS, { ts, event: 'decide', itemId, kind: item.kind, decision: status, decidedBy: 'user', author: item.author || null, model: item.model || null, rev });
+    return { code: 200, body: { ok: true, item, rev } };
+  });
 }
 
 // ---- HTTP ----
@@ -324,7 +515,7 @@ async function handleChat(req, res) {
   try { text = String(JSON.parse(await readBody(req)).text || '').trim(); } catch { return sendJson(res, 400, { error: 'expected JSON {text}' }); }
   if (!text) return sendJson(res, 400, { error: 'empty message' });
 
-  await appendLine('user', text, null);
+  const userLine = await appendLine('user', text, null);
   const history = readTranscript().filter((l) => l.role === 'user' || l.role === 'assistant').slice(-HISTORY)
     .map((l) => ({ role: l.role, content: l.text }));
 
@@ -333,9 +524,10 @@ async function handleChat(req, res) {
   const abort = new AbortController();
   res.on('close', () => { if (!res.writableFinished) abort.abort(); });
 
+  let replyLine = null;
   try {
     const { text: reply, candidate } = await callRole('chat', history, (d) => res.write(d), abort.signal);
-    await appendLine('assistant', reply, candidate.name);
+    replyLine = await appendLine('assistant', reply, candidate.name);
   } catch (err) {
     // Keep whatever arrived before the failure, then record the failure as a system line.
     if (err.partial) await appendLine('assistant', err.partial, err.candidate && err.candidate.name);
@@ -345,6 +537,9 @@ async function handleChat(req, res) {
     if (!res.writableEnded) res.write(`\n[${msg}]`);
   }
   await runController();
+  // Extraction only after a complete reply (not after a failure or a stall), queued before res.end() so
+  // GET /state already reports it as running, and never awaited here: it cannot delay the chat reply.
+  if (replyLine) queueExtraction(userLine, replyLine);
   res.end();
 }
 
@@ -404,7 +599,7 @@ async function runCommand(input) {
     return { ok: true, lines: rules.map((r) => {
       const ans = m.answers[r.module];
       const state = m.panes.some((p) => p.module === r.module) ? 'pane shown' : m.pending === r.module ? 'asking now'
-        : ans ? `answered ${ans.answer} at ${ans.count}` : BUILT.includes(r.module) ? 'not asked yet' : 'not built yet (P3)';
+        : ans ? `answered ${ans.answer} at ${ans.count}` : BUILT.includes(r.module) ? 'not asked yet' : 'not built yet';
       return `${r.module}: ${r.metric} ${c[r.metric]} / ${r.threshold}  (${state})`;
     }) };
   }
@@ -424,13 +619,15 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && pathname === '/state') {
       const lines = readTranscript();
       const m = readModules();
+      const st = readState();
       return sendJson(res, 200, { transcript: lines.slice(-TAIL), total: lines.length, models: modelsSummary(),
-        panes: visiblePanes(m), pending: m.pending, answers: m.answers });
+        panes: visiblePanes(m), pending: m.pending, answers: m.answers,
+        items: st.items, stateRev: st.rev, stateError: st.error || null, extracting: extracting > 0 });
     }
     if (req.method === 'POST' && pathname === '/answer') {
       let body;
-      try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'expected JSON {module, answer}' }); }
-      const out = await answer(body.module, body.answer);
+      try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'expected JSON {module, answer} or {itemId, decision}' }); }
+      const out = body && body.itemId !== undefined ? await decide(body.itemId, body.decision) : await answer(body.module, body.answer);
       return sendJson(res, out.code, out.body);
     }
     if (req.method === 'POST' && pathname === '/command') {

@@ -1,0 +1,12 @@
+{
+  "fakes": [
+    { "name": "frontier", "port": 5754 },
+    { "name": "morrow", "port": 5755 }
+  ],
+  "try": [
+    "The reasoning map is open (consented earlier): dec-2 is a dashed proposal by \"model · morrow\" (outlined = highlighted), dec-1 is confirmed (mint).",
+    "Send: Decision: we send the letter by registered mail. Task: draft the letter tonight.   -> about 2 s later a dashed dec-4 appears and the kanban question (3 tasks) asks.",
+    "With the input empty: c confirms the outlined proposal (the newest), r rejects the next one; arrows move the outline. y adds the kanban (task-1 there was added by hand: solid, \"you\").",
+    "Rejected items hide behind \"rejected: n (show)\" in the pane bar. Hand-edit .pilot-demo/state.json (author \"user\") and send /panes to see it solid."
+  ]
+}

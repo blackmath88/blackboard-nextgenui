@@ -16,4 +16,7 @@ date, old plan, new plan and why.
 
 ## Changes to the plan
 
-(none yet)
+- 2026-10-17 (v0.4). Old plan: live files are v0.5 (P4). New plan: unchanged, but v0.4 needs proposals to appear
+  without reload after a background extraction, so the page polls `/state` every 300 ms while `extracting` is true
+  (and only re-renders when something changed). Why: the alternative was SSE now, which is v0.5's job; the poll is
+  removed or replaced when v0.5 pushes file changes.

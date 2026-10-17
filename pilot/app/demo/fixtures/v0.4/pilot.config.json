@@ -1,0 +1,30 @@
+{
+  "port": 4754,
+  "pilotDir": ".pilot",
+  "stallMs": 20000,
+  "roles": {
+    "chat": {
+      "policy": "fallback",
+      "allowCloudFallback": false,
+      "candidates": [
+        { "name": "frontier", "local": false, "baseUrl": "http://127.0.0.1:5754/v1", "model": "fake-frontier", "timeoutMs": 10000 },
+        { "name": "morrow", "local": true, "baseUrl": "http://127.0.0.1:5755/v1", "model": "fake-morrow", "timeoutMs": 10000 }
+      ]
+    },
+    "extract": {
+      "policy": "manual",
+      "everyNTurns": 1,
+      "maxItems": 3,
+      "candidates": [
+        { "name": "morrow", "local": true, "baseUrl": "http://127.0.0.1:5755/v1", "model": "fake-morrow", "structured": true, "timeoutMs": 10000 }
+      ]
+    },
+    "title": {
+      "policy": "manual",
+      "candidates": []
+    }
+  },
+  "_notes": [
+    "DEMO ONLY (npm run demo -- v0.4). Derived from pilot.config.dev.json with own ports (server 4754, fakes 5754/5755). The extract role runs on the morrow fake, whose fake extractor turns sentences starting 'Decision:' / 'Task:' and URLs into proposals. Untested with a real model."
+  ]
+}

@@ -4,6 +4,45 @@ P0 to P2 (skeleton, model roles, growth controller with consent and the index pa
 baseline, merged before the numbered iterations started; see `CHECKS.md` (# P0, # P1, # P2). Iterations are
 tagged `pilot-v0.N` by the coordinator; each one is runnable with `npm run demo -- v0.N`.
 
+## pilot-v0.4
+
+Proposals (P3). **Untested with a real model:** Morrow was not reachable, so extraction ran only against the fake
+extractor in `dev/fake-model.js`.
+
+**Adds**
+- **Role `extract`** after each complete reply, in the background (queued, one run at a time, never awaited by
+  `/chat`), every `everyNTurns` replies. Input: last user + assistant message + existing item titles. The closed
+  `schemas/extraction.schema.json` goes along as `response_format` when the candidate has `structured: true`.
+  Same rules as chat: pins, local→cloud block, stall timeout.
+- **Validation, fail closed:** small hand validator (no Ajv). Malformed or schema-invalid output (including more
+  than 3 items) writes nothing and logs `extract_error`. Per item: `quote` must occur in the turn (whitespace and
+  case ignored), near-duplicates of non-rejected items and of the same batch are dropped (word-set Jaccard ≥ 0.75
+  after stopwords, or the same url), at most `maxItems` kept; each drop is logged as `extract_drop`.
+- **`.pilot/state.json`** (atomic, `rev` bumped): `status: proposed`, `author: model`, `model`, `quote`,
+  `fromMessage`, ids `dec-N`/`task-N`/`src-N` (max + 1, so hand-added ids never collide). Hand edits keep every
+  unknown field; a broken file is reported (`/state.stateError`) and never overwritten.
+- **Panes:** reasoning map (decisions, sources) and kanban (tasks in todo/doing/done), grown only through the
+  controller and consent (`map`/`kanban` rules now count proposed + confirmed items, not rejected ones). Proposed =
+  dashed lavender with "model · <name>"; confirmed = mint; rejected = rose, hidden behind a pane-bar toggle;
+  hand-added (`author: user`) = solid with "you".
+- **Confirm/reject:** `c` / `r` on a focused card, or in the empty chat input on the outlined proposal (the newest;
+  arrows move it), plus buttons. `POST /answer {itemId, decision}` records `decidedAt` and `decidedBy: "user"`
+  (schema extension in `pilot/app/schemas/state.schema.json`), a system line and a `decide` metric.
+- **Fake extractor:** `--extract=good|malformed|badquote|many|dupes`, `--extract-delay=<ms>`.
+- The page polls `/state` while an extraction runs, so proposals and a resulting question appear without reload.
+- Fix: a consent answer now stores the count of the rule's own metric (decisions/tasks), so "no" waits for that
+  count to double (it stored the message count, which was only right for the index).
+
+**Why**
+- P3 of the build plan: models only ever propose; the user decides, and every item says who authored it.
+
+**Deliberately does not**
+- No real model test (Morrow unreachable), no live file watching or SSE (v0.5; hand edits show on the next state
+  load), no moving tasks between columns in the page (edit `column` by hand), no undo of a decision.
+- No cap-and-keep for a response with more than 3 items: the closed schema says at most 3, so it is rejected whole
+  (see QUESTIONS.md).
+- No extraction after a failed or stalled reply.
+
 ## pilot-v0.3
 
 Hardening, pastel palette, iteration infrastructure.

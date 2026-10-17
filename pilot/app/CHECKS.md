@@ -327,3 +327,70 @@ Run by the coordinator, not the builder:
 - Stall: fake with `--stall-after=3`, `stallMs` 1500: reply cut at 1.69 s, partial text kept, `stall` metric logged, no fallback.
 - `dev/contrast-check.js`: all pass; light mode uses `--muted #5a5873` because `#9a97b0` on `#f4f5fa` is 2.60:1. Dark and light screenshots checked: pastels are fills/borders only in light mode; `pixel.js` and `app.js` contain no hard-coded hex colours.
 - Not tested by the coordinator: the `m` + Enter morrow toggle (it needs a real TTY); the same behaviour was tested by stopping the fake directly.
+
+# pilot-v0.4
+
+Proposals (P3). **Untested with a real model:** every check runs against the fake extractor in
+`dev/fake-model.js` (`--extract=good|malformed|badquote|many|dupes`, `--extract-delay`); no real endpoint was
+contacted and Morrow was not reachable.
+
+**Reproduce:** `bash pilot/app/dev/verify-v0.4.sh` (61 checks; one of them runs the 24 browser checks of
+`browser-check.js v04`; ends with `ALL v0.4 CHECKS PASSED`, exits non-zero on failure). Own ports (server 4770, chat
+fakes 5771/5772, extract fake 5773; browser part 4775/5776/5777 and Chrome 9353; demo part 4954/5954/5955) and own
+throwaway dirs (`.pilot-verify-v04/`, `.pilot-verify-v04b/`, `.pilot-demo-verify04/`).
+**Everything:** `cd pilot/app && npm run verify` (p0, p1, p2, v0.3, v0.4, browser p1 + p2).
+Last run (Node v25.9.0, Chrome, macOS): all passed.
+
+## P3 "done when" (04-build-plan.md)
+
+| Done when | How (section of `verify-v0.4.sh`) |
+|---|---|
+| After a turn with a clear decision, a proposed item appears, dashed, with author `model` and the model name. | 1: `Decision: … Task: … https://…` → `state.json` has `dec-1`, `task-1`, `src-1`, `status: proposed`, `author: model`, `model: morrow`, `quote`, `fromMessage`, `createdAt`, rev 1. 12 (browser): the card has a dashed lavender border and "dec-N · model · morrow · proposed"; after one message a new dashed card appears without a reload. 13: the demo does the same. |
+| Malformed extractor output writes nothing and is logged. | 3: `--extract=malformed` → no `state.json` written; an existing hand-edited one stays byte-identical; `extract_error {reason: malformed}`. |
+| A proposal whose `quote` is not in the turn is dropped. | 4: `--extract=badquote` → the decision with the invented quote is dropped (`extract_drop {reason: quote}`), the task with a real quote is written; quotes match case- and whitespace-insensitively. |
+| `c` confirms, `r` rejects; both are recorded with time and author. | 7: `POST /answer {itemId, decision}` → `status`, `decidedAt`, `decidedBy: "user"`, rev + 1, system line `dec-3 confirmed: …`, `decide` metric (with the item's author/model); again → 409, unknown → 404, bad word → 400. 12 (browser): `c`/`r` in the empty input on the outlined proposal, `c` on a focused card, reject button. |
+| Never more than 3 proposals per turn; near-duplicates are dropped. | 5: `--extract=many` (5 items) → rejected whole by the closed schema (`extract_error {reason: schema}`, "5 items, at most 3"); config `maxItems: 2` → 2 of 3 kept, 1 `extract_drop maxItems`. 6: `--extract=dupes` → of "X", "X!" in capitals and "the <existing title>", only X is written; two `extract_drop duplicate` (one `of: dec-1`). |
+
+## Other checks
+
+| # | Check | How |
+|---|---|---|
+| 1 | `structured: true` sends `response_format` (fake logs `response_format=yes`); `structured: false` does not, the fake recognises the `PILOT-EXTRACT` marker and it still works. Extraction never goes to the chat fakes. | section 1 |
+| 2 | **Extraction never delays the chat reply:** extract fake answers after 4 s; `/chat` returns in ~1.3 s, right after it the assistant line exists, no item yet, `/state.extracting: true`; a second turn meanwhile is not blocked either; the proposal arrives afterwards (runs are queued). | section 2 |
+| 3 | Hand edits survive: unknown top-level and item fields kept, rev 3 → 4; ids continue after hand-added ones (`task-7` → `task-8`); a near-duplicate of a **rejected** item is proposed again. A hand-added proposal (`author: user`) can be decided. | sections 6, 7 |
+| 4 | **Broken `state.json`** (invalid JSON): unchanged after a turn, `extract_error {reason: state}`, `/state.stateError` set, chat works, deciding → 409. | section 8 |
+| 5 | `everyNTurns: 2`: no extract call after reply 1, one after reply 2. | section 9 |
+| 6 | **Extract follows the v0.3 rules:** with candidates [morrow (local, down), frontier] and policy fallback, the fallback to frontier is blocked (`fallback_blocked role extract`, system line), frontier never extracts, nothing written; with `allowCloudFallback: true` frontier extracts and the item records `model: frontier`; `/model extract frontier` pins it (frontier extracts although morrow is up); `--stall-after=2` with `stallMs: 1000` → `stall` metric for role extract, `extract_error {reason: stall}`, nothing written, chat not delayed. | section 10 |
+| 7 | **Consent for map/kanban:** thresholds 2: one decision → no question; two (proposed) → "2 decisions so far…" asked after the extraction; no pane before the answer; `y` → map pane, answer count 2 (decisions, not messages); kanban `n` at 2 tasks → not asked at 3, asked again at 4; after rejecting 2 of 4 tasks `/rules` shows `tasks 2`; `/rules` no longer says "not built yet". | section 11 |
+| 8 | **Page** (`browser-check.js v04`): map shown, kanban not (no answer); proposed dashed lavender, confirmed solid mint, rejected hidden behind "rejected: 1 (show)" and solid rose when shown; `crcr` typed in a non-empty input stays text and decides nothing; kanban question appears after the extraction without reload and counts 3 tasks; `y` → kanban with task-1 (hand-added, solid, "you") in done; highlight = newest proposal; ArrowDown moves focus between cards; focusing a card highlights it; decisions appear as system lines; a hand edit (`author: user`, `column: doing`) shows after the next state load; no page errors, no request outside its own server. | section 12 |
+| 9 | Contrast still passes (new styles use only existing tokens; status tags reuse the `--ctl/--ok/--bad` label pairs). | section 12 |
+| 10 | **Demo:** `npm run demo -- v0.4` serves `/state` in ~1 s with the map pane and the proposal dec-2; one message (`Decision: we send the letter by registered mail. Task: draft the letter tonight.`) gives `dec-4` and `task-3` proposed and the kanban question pending in ~1.7 s; Ctrl+C leaves no process. | section 13 |
+| 11 | Old checks unchanged and passing: p0, p1, p2, v0.3, browser p1/p2/v03. | `npm run verify` |
+
+Done by hand: the demo in the Browser pane (light theme): one message → dashed dec-4 outlined → `c` confirmed it,
+`r` rejected dec-2, `y` added the kanban with task-2/task-3 dashed in todo and task-1 solid in done.
+
+## Decisions
+
+- **Fail closed vs. cap:** more than 3 items breaks the closed schema → the whole response is rejected. Config
+  `maxItems` (≤ 3) caps survivors one by one. Order per item: quote check, duplicate check, cap.
+- **Similarity rule:** lowercase, split on non-letters/digits, drop stopwords (`a an the to of and or we i you it is
+  are be will for on in at this that with as by our so`); near-duplicate when the Jaccard similarity of the word
+  sets is ≥ 0.75 (equal sets included), or two sources share a url. Compared across kinds, against non-rejected
+  items in `state.json` and earlier survivors of the same batch.
+- **When extraction runs:** only after a complete reply (not after a failed or stalled one), queued before
+  `res.end()` so `/state` already reports `extracting: true`; the controller runs again after the write.
+- **Rejected items:** hidden by default behind a pane-bar toggle "rejected: n (show)" (page-only, not saved).
+- **Focus and keys:** `c`/`r` act on a focused card, or from the empty chat input on the outlined proposal; a new
+  proposal takes the outline (newest first). Same guards as the consent keys (composition, repeat, modifiers).
+  Placeholder wording changed to "Empty input: y/n/a/x answer the question · c/r confirm/reject the outlined
+  proposal".
+- **`decidedBy`:** added to `pilot/app/schemas/state.schema.json` (the original in `pilot/cli-pilot-v1/` is
+  unchanged). `pilot/app/schemas/extraction.schema.json` is an identical copy of the original.
+- **Pickup without SSE:** the page polls `/state` every 300 ms while `extracting` is true (see ITERATIONS.md).
+
+## Deviations
+
+1. `/answer` also accepts `{itemId, decision}`; decisions add a system line to the transcript.
+2. Consent answers now record the count of the rule's metric (bug fix; only changes map/kanban, index unchanged).
+3. `dev/fake-model.js` ignores its own chat echo `(you said: "…")` when extracting, so it does not re-propose.

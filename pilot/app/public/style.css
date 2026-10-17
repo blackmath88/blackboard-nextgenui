@@ -65,7 +65,7 @@ body { margin: 0; background: var(--base); color: var(--text); font: 400 15px/1.
 
 .shell { height: 100%; max-width: 1280px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; }
 .pane { background: var(--panel); border: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; position: relative; }
-.pane .bar { display: flex; justify-content: space-between; align-items: baseline; padding: 3px 10px; background: var(--base); border-bottom: 1px solid var(--line); font: 400 20px/1.2 var(--px); color: var(--accent-fg); }
+.pane .bar { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 3px 10px; background: var(--base); border-bottom: 1px solid var(--line); font: 400 20px/1.2 var(--px); color: var(--accent-fg); }
 .pane .bar #brand { display: inline-flex; align-items: center; gap: 6px; }
 .pane .bar small { font: 400 12px var(--mono); color: var(--muted); }
 .pane .body { padding: 10px 12px; overflow: auto; }
@@ -113,8 +113,31 @@ body { margin: 0; background: var(--base); color: var(--text); font: 400 15px/1.
 .key:hover { background: var(--lavender); color: var(--onfill); }
 .key kbd { font: inherit; font-weight: 600; }
 .ln.flash { outline: 1px solid var(--focus); outline-offset: 2px; }
-/* Proposals (v0.4+): dashed lavender border, text stays in --text. */
-.proposal { border: 1px dashed var(--lavender); color: var(--text); padding: 4px 8px; }
+/* Items in the map and kanban panes (pilot-v0.4). Status shows as the border (pastels are borders/fills only,
+   never text, so light mode keeps contrast): proposed by a model = dashed lavender, confirmed = solid mint,
+   rejected = solid rose (hidden behind the pane-bar toggle by default), added by hand (author user) = solid.
+   The status tag uses the role label pairs (--ctl/--ok/--bad), which contrast-check.js already covers. */
+.item { border: 1px solid var(--line); color: var(--text); padding: 4px 8px; margin: 0 0 6px; font-size: 13px; cursor: default; }
+.item.proposed { border: 1px dashed var(--lavender); }
+.item.confirmed { border-color: var(--mint); }
+.item.rejected { border-color: var(--rose); color: var(--muted); }
+.item.by-user { border-style: solid; }
+.item.selected { outline: 2px solid var(--focus); outline-offset: 1px; }
+.item .text { display: block; overflow-wrap: anywhere; }
+.item .text a { color: var(--text); text-decoration-color: var(--lavender); }
+.item .meta { display: block; color: var(--muted); font-size: 11.5px; }
+.item .tag { padding: 0 4px; }
+.item .tag.proposed { color: var(--ctl-fg); background: var(--ctl-bg); }
+.item .tag.confirmed { color: var(--ok-fg); background: var(--ok-bg); }
+.item .tag.rejected { color: var(--bad-fg); background: var(--bad-bg); }
+.item .keys { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.item .key { padding: 0 8px; font-size: 12px; }
+.cols .item .key .w { display: none; }           /* narrow kanban columns: key letter only (title says the word) */
+.pane .bar > span, .pane .bar .toggle { white-space: nowrap; }
+.items .empty { color: var(--muted); font-size: 12.5px; margin: 0 0 6px; }
+.sub { margin: 4px 0 6px; font: 400 17px/1.1 var(--px); color: var(--accent-fg); }
+.cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.pane .bar .toggle { background: transparent; border: 0; color: var(--muted); font: 400 12px var(--mono); cursor: pointer; padding: 0; text-decoration: underline; text-decoration-color: var(--line); }
 
 /* Index pane */
 .idx { list-style: none; margin: 0; padding: 0; font-size: 13px; counter-reset: i; }

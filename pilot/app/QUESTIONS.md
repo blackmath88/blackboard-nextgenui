@@ -21,3 +21,23 @@ assertions changed by the v0.3 decisions were adapted). As a guard, `npm run ver
 Chosen: per role (`roles.chat.allowCloudFallback: true`), not top level, so e.g. a `title` role could allow cloud
 while `chat` does not. A top-level default is not read.
 - Blocks: nothing. Options: keep per role; or add a top-level default that roles override.
+
+## 2026-10-17 More than 3 extracted items: reject all, or keep the first 3?
+Chosen (v0.4): an extractor response with more than 3 items violates the closed schema (`maxItems: 3`) and is
+rejected whole (nothing written, `extract_error`), per "nothing half-valid is written". A config `maxItems` below 3
+is a cap: valid survivors beyond it are dropped one by one (`extract_drop maxItems`).
+- Blocks: nothing. Matters once a real model without structured output returns 4 items.
+- Options: keep fail-closed; or treat > 3 as "keep the first 3 that pass the checks".
+
+## 2026-10-17 `c`/`r` in the empty input can decide a proposal by accident
+Per the brief, `c`/`r` act from the empty chat input on the outlined proposal (same rule as y/n/a/x). Unlike a
+consent question, a proposal is outlined most of the time, so a message starting with "c" or "r" typed into an empty
+input decides a proposal on its first keystroke (there is no undo; the decision is shown as a system line).
+- Blocks: nothing; it is a usability risk during dogfooding.
+- Options: keep; act from the input only right after a new proposal arrived; require focus in a pane (Tab) for
+  keys; or add an undo for decisions.
+
+## 2026-10-17 Which name goes into `item.model`?
+Chosen: the candidate name (e.g. `morrow`), the same value the transcript stores in `model`; `metrics.jsonl`
+`extract` events carry both candidate and model id.
+- Blocks: nothing. Options: keep; or store the model id (`qwen3:14b`) instead or in addition.
