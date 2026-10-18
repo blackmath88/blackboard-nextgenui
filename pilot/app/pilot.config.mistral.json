@@ -1,0 +1,72 @@
+{
+  "port": 4747,
+  "pilotDir": ".pilot-mistral",
+  "stallMs": 20000,
+  "roles": {
+    "chat": {
+      "policy": "fallback",
+      "allowCloudFallback": false,
+      "candidates": [
+        {
+          "name": "mistral",
+          "local": false,
+          "baseUrl": "https://api.mistral.ai/v1",
+          "model": "mistral-large-latest",
+          "keyEnv": "MISTRAL_API_KEY",
+          "structured": true,
+          "timeoutMs": 60000
+        }
+      ]
+    },
+    "extract": {
+      "policy": "manual",
+      "everyNTurns": 1,
+      "maxItems": 3,
+      "candidates": [
+        {
+          "name": "mistral",
+          "local": false,
+          "baseUrl": "https://api.mistral.ai/v1",
+          "model": "mistral-large-latest",
+          "keyEnv": "MISTRAL_API_KEY",
+          "structured": true,
+          "timeoutMs": 60000
+        }
+      ]
+    },
+    "frame": {
+      "policy": "manual",
+      "candidates": [
+        {
+          "name": "mistral",
+          "local": false,
+          "baseUrl": "https://api.mistral.ai/v1",
+          "model": "mistral-large-latest",
+          "keyEnv": "MISTRAL_API_KEY",
+          "structured": true,
+          "timeoutMs": 60000
+        }
+      ]
+    },
+    "title": {
+      "policy": "manual",
+      "candidates": []
+    }
+  },
+  "experiments": {
+    "settledInput": false,
+    "settleMs": 1800,
+    "frameProposals": false
+  },
+  "_notes": [
+    "Model names and hosts are placeholders. Any OpenAI-compatible endpoint works, including a LiteLLM proxy.",
+    "keyEnv names an environment variable; keys never go into this file or the browser.",
+    "policy: manual = first candidate until /model switches; fallback = next candidate on error or timeout.",
+    "title with no candidates means the index uses each message's first sentence.",
+    "local: true marks a candidate that runs on your own machine or network. After a local candidate fails, fallback never goes to a non-local one unless the role sets allowCloudFallback: true. Missing local counts as non-local.",
+    "/model <role> <name> pins the role (no fallback) until /model <role> auto.",
+    "stallMs: once a reply has started, abort it when no new token arrives for this long (default 20000).",
+    "experiments (pilot-v0.9): settledInput false = Enter only (the default, D9). true = after settleMs (default 1800) of no typing on an input that looks finished, the page offers \"send?\" (Tab sends, Enter always sends). /flag settled-input on|off overrides it in .pilot/flags.json.",
+    "frame (pilot-v0.10): the role behind the frame-proposals experiment. It only proposes a FrameIntent (schemas/frame-intent.schema.json); it is called only while experiments.frameProposals is true or /flag frame-proposals on (default off), and follows pins, local-only fallback and stallMs like every role."
+  ]
+}
