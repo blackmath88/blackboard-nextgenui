@@ -4,6 +4,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const chats = require('./chats.js');   // pilot-v0.12: the measures count every chat of the project
 
 // A gap of more than 30 minutes between two activity timestamps ends a work session (Usefulness) and does not count
 // as work (Quiet). See CHECKS.md # pilot-v0.6 "Definitions".
@@ -221,10 +222,22 @@ function settledInput(events, flagsDoc) {
   return lines;
 }
 
+// ---- pilot-v0.12: chats. Measured, not judged (the five measures above count every chat of the project). ----
+function chatStats(events, list, cd) {
+  const n = (ev) => events.filter((e) => e.event === ev);
+  const sw = n('chat_switch'), rn = n('chat_rename'), ar = n('chat_archive');
+  const lines = [`${list.length} chat${list.length === 1 ? '' : 's'} (${list.filter((c) => c.archived).length} archived)${cd.error ? `; ${cd.error}` : ''}: ${list.map((c) => `${c.id} ${c.messages} messages`).join(', ')}`,
+    `chat_new ${n('chat_new').length}, chat_switch ${sw.length} (${['sidebar', 'command', 'tag', 'link', 'new', 'archive', 'back'].map((h) => [h, sw.filter((e) => e.how === h).length]).filter((x) => x[1]).map((x) => `${x[0]} ${x[1]}`).join(', ') || 'none'}), chat_rename ${rn.length} (${rn.filter((e) => e.by === 'user').length} by you, ${rn.filter((e) => e.by === 'model').length} by a model), chat_archive ${ar.filter((e) => e.archived).length} (unarchive ${ar.filter((e) => !e.archived).length})`];
+  return lines;
+}
+
 // Everything /stats and `npm run stats` print, from the dir alone. Read-only: never creates or writes a file.
 function computeStats(dir) {
   const events = readJsonl(path.join(dir, 'metrics.jsonl'));
-  const transcript = readJsonl(path.join(dir, 'transcript.jsonl'));
+  // pilot-v0.12: every chat (main = transcript.jsonl, plus chats/<id>.jsonl); with one chat exactly transcript.jsonl
+  const cd = chats.readDoc(dir);
+  const chatList = chats.normalize(cd.doc);
+  const transcript = chats.allRows(dir, chatList).map((r) => r.obj);
   const st = readJsonSafe(path.join(dir, 'state.json'), null);
   const items = st && Array.isArray(st.items) ? st.items.filter((i) => i && typeof i.id === 'string') : [];
   const mod = readJsonSafe(path.join(dir, 'modules.json'), {}) || {};
@@ -237,6 +250,7 @@ function computeStats(dir) {
     measures: { continuity: continuity(events), consent: consent(events, modules), usefulness: usefulness(events, transcript),
       signal: signal(events, items), quiet: quiet(events, transcript) },
     experiments: { 'settled input': settledInput(events, readJsonSafe(path.join(dir, 'flags.json'), null)) },
+    ...(cd.exists || events.some((e) => /^chat_/.test(e.event)) ? { chats: chatStats(events, chats.withActivity(dir, chatList), cd) } : {}),
   };
 }
 
@@ -260,6 +274,8 @@ function formatStats(s, label) {
     out.push(`  ${name}`);
     for (const l of ls) out.push(`${' '.repeat(21)}${l}`);
   }
+  // pilot-v0.12: chats, only when the project has more than one (or chat events)
+  if (s.chats) { out.push('chats (measured, not judged; every measure above counts all chats)'); for (const l of s.chats) out.push(`${' '.repeat(21)}${l}`); }
   out.push('Work session: activity with no gap over 30 min. Hour of work: sum of gaps of at most 30 min between messages. Times in UTC.');
   return out;
 }

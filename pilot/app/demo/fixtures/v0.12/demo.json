@@ -1,0 +1,12 @@
+{
+  "fakes": [
+    { "name": "frontier", "port": 5794 },
+    { "name": "morrow", "port": 5795 }
+  ],
+  "try": [
+    "Open {url}. The sidebar on the left lists the chats of this project, most recent first: \"The hospital sent the discharge letter today.\" (no name yet: its first sentence), \"invoices\" (named by morrow) and \"letter\" (named by you; it is transcript.jsonl). Click one: the chat changes, the URL says ?chat=<id>, the kanban stays the same, because the board is shared. Each card names the chat it came from.",
+    "Press \"+ new chat\" (or type /chat new) and send \"Task: call the pharmacy about the receipts.\" in it. The card appears on the shared kanban, dashed and tagged with the new chat, and after the first reply the chat gets a name from the title role (model · morrow). /chat rename <title> names it yourself.",
+    "Click the chat tag on a card (e.g. \"invoices\" on task-9): that chat opens and scrolls to the message the card came from. /why task-9 cites chats/c-invoices.jsonl and its line.",
+    "Open {url}/?chat=c-invoices in a second tab: each tab stays in its own chat, and a card added in one appears on the board in both. Alt+S focuses the sidebar (arrows, Enter; Escape back). Below 900 px the sidebar is a drawer: the ☰ button in the title bar. \"archived: 1\" at the bottom shows the archived chat; nothing is ever deleted ({dir}/chats/)."
+  ]
+}

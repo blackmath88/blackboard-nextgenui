@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "pilot state.json (pilot/app copy; pilot-v0.4 adds decidedBy; pilot-v0.11 adds order, movedBy, movedAt)",
+  "title": "pilot state.json (pilot/app copy; pilot-v0.4 adds decidedBy; pilot-v0.11 adds order, movedBy, movedAt; pilot-v0.12 adds fromChat)",
   "type": "object",
   "required": ["rev", "items"],
   "additionalProperties": false,
@@ -21,6 +21,7 @@
           "model": { "type": "string", "description": "required when author is model" },
           "quote": { "type": "string", "description": "the words in the turn the proposal rests on" },
           "fromMessage": { "type": "string" },
+          "fromChat": { "type": "string", "description": "pilot-v0.12 extension: the chat fromMessage is in (main = transcript.jsonl, else chats/<id>.jsonl); missing = main" },
           "createdAt": { "type": "string", "format": "date-time" },
           "decidedAt": { "type": "string", "format": "date-time" },
           "decidedBy": { "enum": ["user"], "description": "who confirmed or rejected the item (pilot-v0.4 extension; only the user decides)" },

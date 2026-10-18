@@ -1,0 +1,75 @@
+{
+  "port": 4786,
+  "pilotDir": ".pilot",
+  "stallMs": 20000,
+  "roles": {
+    "chat": {
+      "policy": "fallback",
+      "allowCloudFallback": false,
+      "candidates": [
+        {
+          "name": "frontier",
+          "local": false,
+          "baseUrl": "http://127.0.0.1:5794/v1",
+          "model": "fake-frontier",
+          "timeoutMs": 10000
+        },
+        {
+          "name": "morrow",
+          "local": true,
+          "baseUrl": "http://127.0.0.1:5795/v1",
+          "model": "fake-morrow",
+          "timeoutMs": 10000
+        }
+      ]
+    },
+    "extract": {
+      "policy": "manual",
+      "everyNTurns": 1,
+      "maxItems": 3,
+      "candidates": [
+        {
+          "name": "morrow",
+          "local": true,
+          "baseUrl": "http://127.0.0.1:5795/v1",
+          "model": "fake-morrow",
+          "structured": true,
+          "timeoutMs": 10000
+        }
+      ]
+    },
+    "frame": {
+      "policy": "manual",
+      "candidates": [
+        {
+          "name": "morrow",
+          "local": true,
+          "baseUrl": "http://127.0.0.1:5795/v1",
+          "model": "fake-morrow",
+          "structured": true,
+          "timeoutMs": 10000
+        }
+      ]
+    },
+    "title": {
+      "policy": "manual",
+      "candidates": [
+        {
+          "name": "morrow",
+          "local": true,
+          "baseUrl": "http://127.0.0.1:5795/v1",
+          "model": "fake-morrow",
+          "timeoutMs": 10000
+        }
+      ]
+    }
+  },
+  "_notes": [
+    "DEMO ONLY (npm run demo -- v0.12). Derived from the v0.11 demo config with own ports (server 4786, fakes 5794/5795). Every experiment is off. The title role points at the morrow fake (it answers with the first words of the first message), so a new chat gets a name after its first reply. Untested with a real model."
+  ],
+  "experiments": {
+    "settledInput": false,
+    "settleMs": 1800,
+    "frameProposals": false
+  }
+}

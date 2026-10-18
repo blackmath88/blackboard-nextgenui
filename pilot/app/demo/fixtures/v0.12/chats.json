@@ -1,0 +1,36 @@
+{
+  "rev": 6,
+  "chats": [
+    {
+      "id": "main",
+      "file": "transcript.jsonl",
+      "createdAt": "2026-10-14T09:01:00.000Z",
+      "title": "letter",
+      "titleBy": "user",
+      "titledAt": "2026-10-17T10:02:00.000Z"
+    },
+    {
+      "id": "c-scratch",
+      "file": "chats/c-scratch.jsonl",
+      "createdAt": "2026-10-17T10:00:00.000Z",
+      "title": "scratch",
+      "titleBy": "user",
+      "titledAt": "2026-10-17T10:00:00.000Z",
+      "archived": true
+    },
+    {
+      "id": "c-invoices",
+      "file": "chats/c-invoices.jsonl",
+      "createdAt": "2026-10-17T10:03:00.000Z",
+      "title": "invoices",
+      "titleBy": "model",
+      "titleModel": "morrow",
+      "titledAt": "2026-10-17T10:03:48.000Z"
+    },
+    {
+      "id": "c-hospital",
+      "file": "chats/c-hospital.jsonl",
+      "createdAt": "2026-10-17T10:09:00.000Z"
+    }
+  ]
+}

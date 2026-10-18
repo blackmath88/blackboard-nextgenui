@@ -89,6 +89,14 @@ const PAIRS = [
   ['frame proposal text on panel (pilot-v0.10)', '--text', '--panel'],
   ['frame "suggested by …, not by you", applied-frame line, frame chip on panel (pilot-v0.10)', '--muted', '--panel'],
   ['frame apply/dismiss key buttons on panel (pilot-v0.10)', '--accent-fg', '--panel'],
+  // pilot-v0.12: the chat sidebar (titles, "+ new chat", bylines on the panel; the current chat on the bar colour) and
+  // the chat tag on cards (muted on the panel)
+  ['chat title in the sidebar on panel (pilot-v0.12)', '--text', '--panel'],
+  ['current chat title on the bar colour (pilot-v0.12)', '--text', '--base'],
+  ['chat byline, archived toggle, chat tag on panel (pilot-v0.12)', '--muted', '--panel'],
+  ['byline of the current chat on the bar colour (pilot-v0.12)', '--muted', '--base'],
+  ['you / model author chips in the sidebar on panel (pilot-v0.12)', '--you-fg', '--you-bg', '--panel'],
+  ['model chip of the current chat on the bar colour (pilot-v0.12)', '--pilot-fg', '--pilot-bg', '--base'],
   ['status bar text on lavender fill', '--onfill', '--lavender'],
   ['hovered key button text on lavender fill', '--onfill', '--lavender'],
 ];

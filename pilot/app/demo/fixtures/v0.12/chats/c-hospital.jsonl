@@ -1,0 +1,5 @@
+{"id":"m-f207","ts":"2026-10-17T10:09:15.000Z","role":"user","text":"The hospital sent the discharge letter today. Task: copy the discharge letter for the insurer.","model":null,"fixture":true}
+{"id":"m-f208","ts":"2026-10-17T10:09:40.000Z","role":"assistant","text":"[fixture] Keep the original. One copy goes with the claim, one stays in your folder.","model":"frontier","fixture":true}
+{"id":"m-f209","ts":"2026-10-17T10:11:05.000Z","role":"system","text":"task-10 confirmed: copy the discharge letter for the insurer","model":null,"fixture":true}
+{"id":"m-f210","ts":"2026-10-17T10:12:30.000Z","role":"user","text":"Task: ask the hospital for an itemised bill.","model":null,"fixture":true}
+{"id":"m-f211","ts":"2026-10-17T10:12:55.000Z","role":"assistant","text":"[fixture] Yes, the insurer wants every line of the bill, not only the total.","model":"frontier","fixture":true}

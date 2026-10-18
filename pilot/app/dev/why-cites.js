@@ -26,7 +26,8 @@ function checkCite(c) {
   const words = label.split(' ');
   if (file.endsWith('.jsonl')) {
     let o; try { o = JSON.parse(text); } catch { return `${file}:${n} is not JSON`; }
-    if (file === 'transcript.jsonl') return o.id === words[0] ? null : `${file}:${n} is ${o.id}, not ${words[0]}`;
+    // pilot-v0.12: a chat file (chats/<id>.jsonl) holds lines like transcript.jsonl
+    if (file === 'transcript.jsonl' || /^chats\/[^/]+\.jsonl$/.test(file)) return o.id === words[0] ? null : `${file}:${n} is ${o.id}, not ${words[0]}`;
     if (o.event !== words[0]) return `${file}:${n} is event ${o.event}, not ${words[0]}`;
     const id = words[1];
     if (id && ![o.id, o.itemId, o.module].includes(id)) return `${file}:${n} has id ${o.id || o.itemId || o.module}, not ${id}`;   // pilot-v0.8: pane events name a module
@@ -39,6 +40,8 @@ function checkCite(c) {
   else if (/^answers\.(\S+)/.test(label)) re = new RegExp(`^\\s*"${esc(label.split(' ')[0].slice(8))}"\\s*:`);
   else if (/^(applied|pending|resets)\.(\S+)/.test(label)) re = new RegExp(`^\\s*"${esc(words[0].split('.')[1])}"\\s*:`);   // pilot-v0.10: frames.json
   else if (/^pending/.test(label)) re = /"pending"\s*:/;
+  else if (/^chats (\S+)/.test(label)) re = new RegExp(`"id"\\s*:\\s*"${esc(words[1])}"`);   // pilot-v0.12: chats.json
+  else if (/^chats$/.test(label)) re = /"chats"\s*:/;
   else if (/^removals\.(\S+)/.test(label)) re = new RegExp(`^\\s*"${esc(label.split(' ')[0].slice(9))}"\\s*:`);   // pilot-v0.8
   else if (/^(fadeAfterTurns|askRemoveAfterTurns)\b/.test(label)) re = new RegExp(`"${words[0]}"\\s*:`);
   else return `unknown JSON label "${label}"`;
@@ -61,7 +64,9 @@ function checkCite(c) {
       if (s.head) continue;
       if (!s.cite || !s.cite.length) { console.log(`FAIL /why ${t}: "${s.text}" cites nothing`); bad++; continue; }
       for (const c of s.cite) { const e = checkCite(c); if (e) { console.log(`FAIL /why ${t}: [${c}] ${e}`); bad++; } else ok++; }
-      if (s.msg && !lines('transcript.jsonl').some((l) => { try { return JSON.parse(l).id === s.msg; } catch { return false; } })) { console.log(`FAIL /why ${t}: link to ${s.msg}, which is not in transcript.jsonl`); bad++; }
+      // pilot-v0.12: a link names its chat when it is not main (s.chat); the message must be in that chat's file
+      const lf = s.chat ? `chats/${s.chat}.jsonl` : 'transcript.jsonl';
+      if (s.msg && !lines(lf).some((l) => { try { return JSON.parse(l).id === s.msg; } catch { return false; } })) { console.log(`FAIL /why ${t}: link to ${s.msg}, which is not in ${lf}`); bad++; }
     }
   }
   console.log(bad ? `CITES BAD ${bad} (ok ${ok})` : `CITES OK ${ok} in ${targets.length} explanations`);

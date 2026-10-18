@@ -32,6 +32,7 @@ const why = require('./why.js');
 const fade = require('./fade.js');
 const frame = require('./frame.js');
 const board = require('./public/board.js');   // pilot-v0.11: the kanban order rule, shared with the page
+const chats = require('./chats.js');          // pilot-v0.12: several chats in one project
 
 const APP = __dirname;
 const PUBLIC = path.join(APP, 'public');
@@ -40,7 +41,7 @@ const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 // PILOT_DIR (env, relative to pilot/app/) overrides config.pilotDir, e.g. PILOT_DIR=.pilot-demo for demos.
 const PILOT = path.resolve(APP, process.env.PILOT_DIR || config.pilotDir || '.pilot');
 const STALL_MS = Number(config.stallMs) || 20000;   // max gap between tokens once a reply has started
-const TRANSCRIPT = path.join(PILOT, 'transcript.jsonl');
+const CHATS = path.join(PILOT, 'chats.json');      // pilot-v0.12: the chats of this project (created on the first new chat)
 const METRICS = path.join(PILOT, 'metrics.jsonl');
 const ROLES = path.join(PILOT, 'roles.json');      // /model pins: a role listed in `active` is pinned (see CHECKS.md)
 const RULES = path.join(PILOT, 'rules.json');
@@ -69,15 +70,30 @@ function atomicWrite(file, data) {
   fs.renameSync(tmp, file);
 }
 
-function readTranscript() {
-  let raw = '';
-  try { raw = fs.readFileSync(TRANSCRIPT, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
-  const lines = [];
-  for (const l of raw.split('\n')) {
-    if (!l.trim()) continue;
-    try { lines.push(JSON.parse(l)); } catch { /* skip a broken hand-edited line */ }
-  }
-  return lines;
+// pilot-v0.12: the lines of every chat in the project (main = transcript.jsonl, then chats/<id>.jsonl, archived ones
+// included). Counts, turns and the controller use these: growth is a property of the project, not of one chat. With a
+// single chat (no chats.json) this is transcript.jsonl, exactly as before.
+function readTranscript() { return chats.allRows(PILOT, readChats().list).map((r) => r.obj); }
+// One chat's lines (the page's log, the index pane, the model's history).
+function readChat(chat) { return chats.readLines(chatFile(chat)); }
+
+// ---- pilot-v0.12: chats (chats.js has the readers). chats.json is hand-editable like the other JSON files: a broken
+// one is read as its last good version and never written. ----
+function readChats() {
+  const r = chats.readDoc(PILOT);
+  if (r.doc) lastGood['chats.json'] = r.doc;
+  const doc = r.doc || (r.error && lastGood['chats.json']) || null;
+  const out = { exists: r.exists, doc, list: chats.normalize(doc), rev: doc && Number.isInteger(doc.rev) ? doc.rev : 0 };
+  if (r.error) out.error = r.error;
+  return out;
+}
+const chatFile = (chat) => path.join(PILOT, chats.fileFor(chat || chats.MAIN));
+// A chat id from a request: missing = main (curl, older pages and checks); otherwise it must be listed in chats.json.
+// -> the id, or null when unknown (the caller answers 404).
+function chatOf(raw) {
+  if (raw === undefined || raw === null || raw === '') return chats.MAIN;
+  const id = String(raw);
+  return readChats().list.some((c) => c.id === id) ? id : null;
 }
 
 function appendJsonl(file, obj) {
@@ -88,10 +104,10 @@ function appendJsonl(file, obj) {
   return obj;
 }
 
-function appendLine(role, text, model, kind) {
+function appendLine(role, text, model, kind, chat) {   // pilot-v0.12: into the chat the line belongs to (missing = main)
   const line = { id: 'm-' + crypto.randomUUID().slice(0, 8), ts: new Date().toISOString(), role, text, model: model || null };
   if (kind) line.kind = kind;   // optional on system lines: blocked | stall | error (the page colours them)
-  return serial(() => appendJsonl(TRANSCRIPT, line));
+  return serial(() => appendJsonl(chatFile(chat), line));
 }
 
 function metric(event, fields) {
@@ -217,7 +233,7 @@ function removedSince(m, mod) {
 }
 
 // Runs after every turn, inside the write chain. Reads rules.json fresh each time. At most one question at a time.
-function runController() {
+function runController(chat) {
   return serial(() => {
     let rulesDoc;
     try { rulesDoc = readJson(RULES, { rules: [] }) || {}; }
@@ -227,7 +243,7 @@ function runController() {
     if (m.error) { appendJsonl(METRICS, { ts: new Date().toISOString(), event: 'controller_error', error: m.error }); return; }
     const lines = readTranscript();
     // pilot-v0.8: fading is not a question, so it runs before the one-question-at-a-time check
-    if (runFades(m, rulesDoc, lines)) writeModules(m);
+    if (runFades(m, rulesDoc, lines, chat)) writeModules(m);
     if (m.pending) return;
     const c = counts(lines);
     for (const rule of rules) {
@@ -238,18 +254,18 @@ function runController() {
       if (prior.answer === 'always' && !removedSince(m, rule.module)) {   // consent already given for good (not after a removal)
         m.panes.push({ module: rule.module, addedAt: ts, atCount: n, rule: { metric: rule.metric, threshold: rule.threshold }, lastTouch: { at: ts, turn: fade.turnOf(lines), how: 'added' } });
         writeModules(m);
-        appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'controller', text: `${n} ${rule.metric}. Added the ${rule.module} pane (you said always).`, model: null, module: rule.module });
+        appendJsonl(chatFile(chat), { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'controller', text: `${n} ${rule.metric}. Added the ${rule.module} pane (you said always).`, model: null, module: rule.module });
         appendJsonl(METRICS, { ts, event: 'controller_add', module: rule.module, count: n, answer: 'always', answerRef: prior.consentId || null, answerAt: prior.at || null });
         return;
       }
       const text = String(rule.ask || `Add the ${rule.module} pane?`).replace('{n}', n);
-      appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'controller', text, model: null, module: rule.module });
+      appendJsonl(chatFile(chat), { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'controller', text, model: null, module: rule.module });
       m.pending = rule.module;
       writeModules(m);
       appendJsonl(METRICS, { ts, event: 'controller_ask', module: rule.module, metric: rule.metric, count: n, threshold: rule.threshold });
       return;
     }
-    askRemoval(m, rulesDoc, lines);
+    askRemoval(m, rulesDoc, lines, chat);
   });
 }
 
@@ -257,7 +273,7 @@ function runController() {
 // Fades every shown pane that is due (untouched for fadeAfterTurns turns, holding no proposal) and brings back a faded
 // pane that holds a proposal (a faded pane must not hide a decision; that is not a touch). Mutates m, returns whether
 // it changed; the caller writes modules.json. Inside the write chain.
-function runFades(m, rulesDoc, lines) {
+function runFades(m, rulesDoc, lines, chat) {
   const turn = fade.turnOf(lines);
   const items = readState().items;
   let changed = false;
@@ -268,14 +284,14 @@ function runFades(m, rulesDoc, lines) {
     if (st.fadeDue) {
       entry.state = 'faded'; entry.fadedAt = ts; entry.fadedTurn = turn;
       changed = true;
-      appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'controller', text: `${entry.module} pane faded to a tab: untouched for ${st.idle} turns (fadeAfterTurns ${st.fadeAfter}). Click the tab to bring it back.`, model: null, pane: entry.module, event: 'fade' });
+      appendJsonl(chatFile(chat), { id: lineId(), ts, role: 'controller', text: `${entry.module} pane faded to a tab: untouched for ${st.idle} turns (fadeAfterTurns ${st.fadeAfter}). Click the tab to bring it back.`, model: null, pane: entry.module, event: 'fade' });
       appendJsonl(METRICS, { ts, event: 'pane_fade', module: entry.module, turn, idle: st.idle, fadeAfterTurns: st.fadeAfter, lastTouchTurn: st.lastTouch.turn, lastTouchRecorded: st.lastTouch.recorded });
     } else if (st.faded && st.holds.length) {
       unfade(entry);
       changed = true;
-      appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'controller', text: `${entry.module} pane is back: it holds a proposal (${st.holds.join(', ')}), and a tab must not hide a decision.`, model: null, pane: entry.module, event: 'unfade' });
+      appendJsonl(chatFile(chat), { id: lineId(), ts, role: 'controller', text: `${entry.module} pane is back: it holds a proposal (${st.holds.join(', ')}), and a tab must not hide a decision.`, model: null, pane: entry.module, event: 'unfade' });
       appendJsonl(METRICS, { ts, event: 'pane_unfade', module: entry.module, turn, reason: 'proposal', holds: st.holds });
-      withdrawRemoval(m, entry.module, 'it holds a proposal', ts);
+      withdrawRemoval(m, entry.module, 'it holds a proposal', ts, chat);
     }
   }
   return changed;
@@ -283,7 +299,7 @@ function runFades(m, rulesDoc, lines) {
 function unfade(entry) { delete entry.state; delete entry.fadedAt; delete entry.fadedTurn; }
 
 // Asks the removal question for the first faded pane that is due (once per pane). Inside the write chain, m.pending empty.
-function askRemoval(m, rulesDoc, lines) {
+function askRemoval(m, rulesDoc, lines, chat) {
   const turn = fade.turnOf(lines);
   const items = readState().items;
   for (const entry of m.panes) {
@@ -294,7 +310,7 @@ function askRemoval(m, rulesDoc, lines) {
     entry.removalAsked = true;
     m.pending = entry.module; m.pendingKind = 'remove';
     writeModules(m);
-    appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'controller', text: `The ${entry.module} pane has been a tab for ${st.fadedFor} turns. Remove the ${entry.module} pane? (y removes it, the rule may offer it again later; n keeps the tab; x removes it for good)`, model: null, module: entry.module, question: 'remove' });
+    appendJsonl(chatFile(chat), { id: lineId(), ts, role: 'controller', text: `The ${entry.module} pane has been a tab for ${st.fadedFor} turns. Remove the ${entry.module} pane? (y removes it, the rule may offer it again later; n keeps the tab; x removes it for good)`, model: null, module: entry.module, question: 'remove' });
     appendJsonl(METRICS, { ts, event: 'controller_ask', question: 'remove', module: entry.module, turn, fadedFor: st.fadedFor, askRemoveAfterTurns: st.askRemoveAfter, fadedTurn: st.fadedTurn });
     return;
   }
@@ -303,12 +319,12 @@ function askRemoval(m, rulesDoc, lines) {
 // A touch while the removal question for that pane is open withdraws the question (you are using the pane). A
 // withdrawn question does not count as asked: looking at a pane is not an answer, so the question can come again
 // once the pane has faded again and stayed a tab for askRemoveAfterTurns turns. Mutates m; inside the write chain.
-function withdrawRemoval(m, mod, why, ts) {
+function withdrawRemoval(m, mod, why, ts, chat) {
   if (m.pending !== mod || m.pendingKind !== 'remove') return false;
   m.pending = null; delete m.pendingKind;
   const entry = m.panes.find((p) => p && p.module === mod);
   if (entry) delete entry.removalAsked;
-  appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `remove ${mod}: question withdrawn, ${why}`, model: null });
+  appendJsonl(chatFile(chat), { id: lineId(), ts, role: 'system', text: `remove ${mod}: question withdrawn, ${why}`, model: null });
   appendJsonl(METRICS, { ts, event: 'controller_withdraw', question: 'remove', module: mod, reason: why });
   return true;
 }
@@ -316,7 +332,7 @@ function withdrawRemoval(m, mod, why, ts) {
 // Records a touch on a pane: lastTouch moves to this turn; a faded pane comes back. Only the first touch of a pane in
 // a turn is written and logged (a later one in the same turn changes nothing, so it is not written: no rev bump, no
 // event). Mutates m and returns {changed, unfaded}; the caller writes. Inside the write chain.
-function applyTouch(m, mod, how, ts, turn) {
+function applyTouch(m, mod, how, ts, turn, chat) {
   const entry = m.panes.find((p) => p && p.module === mod);
   if (!entry) return { changed: false };
   const was = entry.lastTouch;
@@ -325,20 +341,20 @@ function applyTouch(m, mod, how, ts, turn) {
   entry.lastTouch = { at: ts, turn, how };
   if (faded) unfade(entry);
   appendJsonl(METRICS, { ts, event: 'pane_touch', module: mod, how, turn, ...(faded ? { unfaded: true } : {}) });
-  withdrawRemoval(m, mod, 'you used the pane', ts);
+  withdrawRemoval(m, mod, 'you used the pane', ts, chat);
   return { changed: true, unfaded: faded };
 }
 
 // POST /touch {module, how}: the page reports an interaction with a pane (see CHECKS.md # pilot-v0.8 for the list).
 // No rev: a touch never conflicts with anything. Returns {ok, changed, unfaded, rev}.
-function touch(mod, how) {
+function touch(mod, how, chat) {
   return serial(() => {
     if (mod === 'chat') return { code: 400, body: { error: 'the chat pane never fades, it needs no touch' } };
     if (!fade.TOUCH_HOWS.includes(how)) return { code: 400, body: { error: `how must be one of ${fade.TOUCH_HOWS.join(', ')}` } };
     const m = readModules();
     if (m.error) return { code: 409, body: { error: `${m.error}; fix the file by hand first` } };
     if (!visiblePanes(m).includes(mod)) return { code: 404, body: { error: `no pane "${mod}" shown` } };
-    const r = applyTouch(m, mod, how, new Date().toISOString(), fade.turnOf(readTranscript()));
+    const r = applyTouch(m, mod, how, new Date().toISOString(), fade.turnOf(readTranscript()), chat);
     if (r.changed) writeModules(m);
     return { code: 200, body: { ok: true, module: mod, changed: r.changed, unfaded: !!r.unfaded, rev: m.rev } };
   });
@@ -346,7 +362,7 @@ function touch(mod, how) {
 
 // POST /answer {module, answer, rev?}: records the answer; yes/always add the pane. With `rev` (the modules.json rev
 // the page last saw), a stale rev is rejected with 409 {stale: true}; without it the answer is accepted (curl, old checks).
-function answer(module, raw, seenRev) {
+function answer(module, raw, seenRev, chat) {
   const ans = ANSWERS[String(raw || '').toLowerCase()];
   return serial(() => {
     if (!ans) return { code: 400, body: { error: 'answer must be y/n/a/x or yes/no/always/never' } };
@@ -354,7 +370,7 @@ function answer(module, raw, seenRev) {
     if (m.error) return { code: 409, body: { error: `${m.error}; fix the file by hand first` } };
     if (seenRev !== undefined && seenRev !== m.rev) return stale('modules.json', seenRev, m.rev);
     if (!module || m.pending !== module) return { code: 409, body: { error: `no pending question for "${module}"`, pending: m.pending } };
-    if (m.pendingKind === 'remove') return answerRemoval(m, module, ans);
+    if (m.pendingKind === 'remove') return answerRemoval(m, module, ans, chat);
     const ts = new Date().toISOString();
     // count = the rule's own metric (decisions for map, tasks for kanban), so "no" waits for that count to double
     let rule = {};
@@ -371,7 +387,7 @@ function answer(module, raw, seenRev) {
     m.pending = null;
     writeModules(m);
     const effect = { yes: 'pane added', always: 'pane added; will not ask again', no: 'will ask again when the count has doubled', never: 'will never ask again' }[ans];
-    appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'system', text: `${module}: ${ans}, ${effect}`, model: null });
+    appendJsonl(chatFile(chat), { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'system', text: `${module}: ${ans}, ${effect}`, model: null });
     appendJsonl(METRICS, { ts, event: 'consent', id: consentId, module, answer: ans, count: n, metric: metricName });
     if (adds) appendJsonl(METRICS, { ts, event: 'controller_add', module, count: n, answer: ans, answerRef: consentId, answerAt: ts });
     return { code: 200, body: { ok: true, module, answer: ans } };
@@ -381,7 +397,7 @@ function answer(module, raw, seenRev) {
 // pilot-v0.8: the answer to "remove the <module> pane?". yes: the pane entry is removed (its rule may offer it again,
 // see ruleDue); no: it stays a tab and is not asked again; never: removed, and its rule never asks again. "always" has
 // no meaning here and is refused. Recorded like any consent (consent event with question "remove"). In the chain.
-function answerRemoval(m, module, ans) {
+function answerRemoval(m, module, ans, chat) {
   if (ans === 'always') return { code: 400, body: { error: 'the removal question takes y/n/x (yes/no/never)' } };
   const ts = new Date().toISOString();
   const turn = fade.turnOf(readTranscript());
@@ -396,7 +412,7 @@ function answerRemoval(m, module, ans) {
   m.pending = null; delete m.pendingKind;
   writeModules(m);
   const effect = { yes: 'pane removed; its rule may offer it again once the count has doubled', no: 'kept as a tab; will not ask again', never: 'pane removed; its rule will never offer it again' }[ans];
-  appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `remove ${module}: ${ans}, ${effect}`, model: null });
+  appendJsonl(chatFile(chat), { id: lineId(), ts, role: 'system', text: `remove ${module}: ${ans}, ${effect}`, model: null });
   appendJsonl(METRICS, { ts, event: 'consent', question: 'remove', id: consentId, module, answer: ans, count: n, metric: rule.metric || 'messages', turn });
   if (ans !== 'no') appendJsonl(METRICS, { ts, event: 'pane_remove', module, answer: ans, answerRef: consentId, turn, fadedTurn: entry && entry.fadedTurn });
   return { code: 200, body: { ok: true, module, answer: ans, question: 'remove' } };
@@ -510,7 +526,7 @@ async function callCandidate(candidate, messages, onDelta, signal, extraBody) {
 // (a stall after the first token therefore never falls back). A pinned role never falls back. After a local
 // candidate (`local: true`) failed, non-local candidates are skipped unless the role sets `allowCloudFallback: true`;
 // a missing `local` counts as non-local. Resolves {text, candidate}; on failure throws with err.partial / err.candidate.
-async function callRole(role, messages, onDelta, signal, extraBody) {
+async function callRole(role, messages, onDelta, signal, extraBody, chat) {
   const order = attemptOrder(role);
   const rc = roleConfig(role);
   if (!order.length) throw new Error(`no candidate configured for role "${role}"`);
@@ -519,7 +535,7 @@ async function callRole(role, messages, onDelta, signal, extraBody) {
     const c = order[i];
     if (lastErr && failedLocal && c.local !== true && rc.allowCloudFallback !== true) {
       await metric('fallback_blocked', { role, from: lastErr.candidate.name, to: c.name, reason: `${failedLocal.name} is local` });
-      await appendLine('system', `fallback to ${c.name} blocked: ${failedLocal.name} is local`, null, 'blocked');
+      await appendLine('system', `fallback to ${c.name} blocked: ${failedLocal.name} is local`, null, 'blocked', chat);
       continue;
     }
     if (lastErr) await metric('fallback', { role, from: lastErr.candidate.name, to: c.name, reason: lastErr.reason });
@@ -620,7 +636,7 @@ function extractionMessages(userLine, replyLine, items, maxItems) {
   ];
 }
 
-function queueExtraction(userLine, replyLine) {
+function queueExtraction(userLine, replyLine, chat) {
   const rc = roleConfig('extract');
   if (!rc.candidates.length) return;
   const every = Math.max(1, Number(rc.everyNTurns) || 1);
@@ -628,13 +644,13 @@ function queueExtraction(userLine, replyLine) {
   if (turns % every !== 0) return;
   extracting++;
   if (extracting === 1) broadcast('status', { extracting: true });
-  extractChain = extractChain.then(() => runExtraction(userLine, replyLine))
+  extractChain = extractChain.then(() => runExtraction(userLine, replyLine, chat))
     .catch((err) => { console.error('extraction failed:', err); return metric('extract_error', { reason: 'internal', error: String(err.message || err) }); })
     .catch(() => {})
     .finally(() => { extracting--; if (!extracting) broadcast('status', { extracting: false }); });
 }
 
-async function runExtraction(userLine, replyLine) {
+async function runExtraction(userLine, replyLine, chat) {
   const rc = roleConfig('extract');
   const schemaMax = EXTRACTION_SCHEMA.properties.items.maxItems;
   const maxItems = Math.max(1, Math.min(schemaMax, Number(rc.maxItems) || schemaMax));
@@ -646,7 +662,7 @@ async function runExtraction(userLine, replyLine) {
   const structured = (c) => c.structured === true ? { response_format: { type: 'json_schema', json_schema: { name: 'pilot_extraction', schema } } } : {};
   const t0 = Date.now();
   let out;
-  try { out = await callRole('extract', extractionMessages(userLine, replyLine, before.items, maxItems), () => {}, new AbortController().signal, structured); }
+  try { out = await callRole('extract', extractionMessages(userLine, replyLine, before.items, maxItems), () => {}, new AbortController().signal, structured, chat); }
   catch (err) { await metric('extract_error', { reason: err.stall ? 'stall' : 'model', error: String(err.message || err), fromMessage: replyLine.id }); return; }
   const base = { candidate: out.candidate.name, model: out.candidate.model, fromMessage: replyLine.id };
   const parsed = parseExtraction(out.text);
@@ -672,6 +688,8 @@ async function runExtraction(userLine, replyLine) {
     for (const it of kept) {
       const item = { id: nextId(st.doc, it.kind), kind: it.kind, text: it.text, status: 'proposed', author: 'model', model: out.candidate.name,
         quote: it.quote, fromMessage: it.fromMessage, createdAt: ts };
+      // pilot-v0.12: the chat it came from, once the project has more than one (missing = main, as in older items)
+      if (readChats().exists) item.fromChat = chat || chats.MAIN;
       if (it.kind === 'task') item.column = 'todo';
       if (it.url !== undefined) item.url = it.url;
       st.doc.items.push(item);
@@ -682,7 +700,7 @@ async function runExtraction(userLine, replyLine) {
     appendJsonl(METRICS, { ts, event: 'extract', ...base, returned: parsed.items.length, proposed: ids.length,
       dropped: parsed.items.length - ids.length, ids, rev, latencyMs: Date.now() - t0 });
   });
-  await runController();   // new proposals may cross a map/kanban threshold
+  await runController(chat);   // new proposals may cross a map/kanban threshold
 }
 
 // ---- pilot-v0.10: frame proposals (frame.js has the rules; these functions write frames.json, nothing else) ----
@@ -736,17 +754,17 @@ function frameMessages(userLine, replyLine, panes, items, applied) {
 
 // After a complete reply, only while the flag is on and a frame role is configured; queued after this turn's
 // extraction (its proposals are cards a frame may name), never awaited by the chat.
-function queueFrame(userLine, replyLine) {
+function queueFrame(userLine, replyLine, chat) {
   if (!flagsSummary().frameProposals || !roleConfig('frame').candidates.length) return;
   framing++;
   const after = extractChain;
-  frameChain = Promise.all([after, frameChain]).then(() => runFrame(userLine, replyLine))
+  frameChain = Promise.all([after, frameChain]).then(() => runFrame(userLine, replyLine, chat))
     .catch((err) => { console.error('frame failed:', err); return metric('frame_error', { reason: 'internal', error: String(err.message || err) }); })
     .catch(() => {})
     .finally(() => { framing--; });
 }
 
-async function runFrame(userLine, replyLine) {
+async function runFrame(userLine, replyLine, chat) {
   if (!flagsSummary().frameProposals) return;   // switched off meanwhile
   const ctx = frameContext();
   const panes = frame.FRAME_PANES.filter((p) => ctx.visible.includes(p) && !ctx.faded.includes(p));
@@ -758,7 +776,7 @@ async function runFrame(userLine, replyLine) {
   const structured = (c) => c.structured === true ? { response_format: { type: 'json_schema', json_schema: { name: 'pilot_frame', schema } } } : {};
   const t0 = Date.now();
   let out;
-  try { out = await callRole('frame', frameMessages(userLine, replyLine, panes, ctx.items, cur.applied), () => {}, new AbortController().signal, structured); }
+  try { out = await callRole('frame', frameMessages(userLine, replyLine, panes, ctx.items, cur.applied), () => {}, new AbortController().signal, structured, chat); }
   catch (err) { await metric('frame_error', { reason: err.stall ? 'stall' : 'model', error: String(err.message || err), fromMessage: replyLine.id }); return; }
   const base = { candidate: out.candidate.name, model: out.candidate.model, fromMessage: replyLine.id };
   const parsed = frame.parse(out.text);
@@ -783,7 +801,7 @@ async function runFrame(userLine, replyLine) {
 // POST /frame {pane, id, action: apply|dismiss, rev?}: only you apply or dismiss a proposal. Apply checks it again
 // against what is on screen now (cards or panes may have changed since it was proposed); one that no longer fits is
 // dropped (409). `rev` = the frames.json rev the page last saw; a stale one is 409 {stale: true}.
-function frameAnswer(pane, id, action, seenRev) {
+function frameAnswer(pane, id, action, seenRev, chat) {
   return serial(() => {
     if (!frame.FRAME_PANES.includes(pane)) return { code: 400, body: { error: `pane must be one of ${frame.FRAME_PANES.join(', ')}` } };
     if (action !== 'apply' && action !== 'dismiss') return { code: 400, body: { error: 'action must be apply or dismiss' } };
@@ -798,7 +816,7 @@ function frameAnswer(pane, id, action, seenRev) {
     if (action === 'dismiss') {
       delete f.pending[pane];
       const rev = writeFrames(f);
-      appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `${pane}: frame ${id} dismissed (${who}); nothing changed`, model: null });
+      appendJsonl(chatFile(chat), { id: lineId(), ts, role: 'system', text: `${pane}: frame ${id} dismissed (${who}); nothing changed`, model: null });
       appendJsonl(METRICS, { ts, event: 'frame_dismiss', id, module: pane, by: 'user', model: p.model || null, rev });
       return { code: 200, body: { ok: true, pane, id, action, rev } };
     }
@@ -813,14 +831,14 @@ function frameAnswer(pane, id, action, seenRev) {
     f.applied[pane] = { ...p, appliedBy: 'user', appliedAt: ts };
     delete f.pending[pane];
     const rev = writeFrames(f);
-    appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `${pane}: frame ${id} applied by you (${who}): ${frame.describe(p.intent)}. /frame reset ${pane} undoes it`, model: null });
+    appendJsonl(chatFile(chat), { id: lineId(), ts, role: 'system', text: `${pane}: frame ${id} applied by you (${who}): ${frame.describe(p.intent)}. /frame reset ${pane} undoes it`, model: null });
     appendJsonl(METRICS, { ts, event: 'frame_apply', id, module: pane, intent: p.intent, by: 'user', model: p.model || null, proposedAt: p.at || null, rev, ...(prev && prev.id ? { replaces: prev.id } : {}) });
     return { code: 200, body: { ok: true, pane, id, action, frame: f.applied[pane], rev } };
   });
 }
 
 // /frame reset [pane]: back to the pane's own order (works with the flag off too: a frame must always be undoable).
-function frameReset(panes) {
+function frameReset(panes, chat) {
   return serial(() => {
     const f = readFrames();
     if (f.error) return { ok: false, lines: [`frames.json is not valid JSON, not changed: ${f.error}`] };
@@ -835,7 +853,7 @@ function frameReset(panes) {
     if (!done.length) return { ok: true, lines: [`nothing to reset: no frame applied${panes.length === 1 ? ` to ${panes[0]}` : ''}`] };
     const rev = writeFrames(f);
     for (const [pane, a] of done) {
-      appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `${pane}: frame ${a.id} reset by you; the pane shows its own order again`, model: null });
+      appendJsonl(chatFile(chat), { id: lineId(), ts, role: 'system', text: `${pane}: frame ${a.id} reset by you; the pane shows its own order again`, model: null });
       appendJsonl(METRICS, { ts, event: 'frame_reset', id: a.id || null, module: pane, by: 'user', rev });
     }
     return { ok: true, lines: done.map(([pane, a]) => `${pane}: frame ${a.id} reset (kept in ${path.relative(APP, PILOT)}/frames.json resets.${pane})`) };
@@ -901,7 +919,7 @@ function stale(file, sent, current) {
 // POST /answer {itemId, decision, rev?}: confirm or reject a proposed item; records decidedAt and decidedBy: "user".
 // `rev` = the state.json rev the page last saw (optional; a stale one is rejected with 409 {stale: true}).
 const DECISIONS = { c: 'confirmed', confirm: 'confirmed', confirmed: 'confirmed', r: 'rejected', reject: 'rejected', rejected: 'rejected' };
-function decide(itemId, raw, seenRev) {
+function decide(itemId, raw, seenRev, chat) {
   const status = DECISIONS[String(raw || '').toLowerCase()];
   return serial(() => {
     if (!status) return { code: 400, body: { error: 'decision must be c/r or confirm/reject' } };
@@ -916,11 +934,11 @@ function decide(itemId, raw, seenRev) {
     item.status = status; item.decidedAt = ts; item.decidedBy = 'user';
     const rev = writeState(st.doc);
     itemWrite(item, 'decide', before, ts);
-    appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'system', text: `${itemId} ${status}: ${item.text}`, model: null });
+    appendJsonl(chatFile(chat), { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'system', text: `${itemId} ${status}: ${item.text}`, model: null });
     appendJsonl(METRICS, { ts, event: 'decide', itemId, kind: item.kind, decision: status, decidedBy: 'user', author: item.author || null, model: item.model || null, rev });
     // pilot-v0.8: a decision on a card is a touch of the pane that shows it
     const mod = fade.paneOfKind(item.kind), m = readModules();
-    if (mod && !m.error && visiblePanes(m).includes(mod) && applyTouch(m, mod, 'decide', ts, fade.turnOf(readTranscript())).changed) writeModules(m);
+    if (mod && !m.error && visiblePanes(m).includes(mod) && applyTouch(m, mod, 'decide', ts, fade.turnOf(readTranscript()), chat).changed) writeModules(m);
     return { code: 200, body: { ok: true, item, rev } };
   });
 }
@@ -931,7 +949,7 @@ function decide(itemId, raw, seenRev) {
 // or rejects nothing, a proposed task stays proposed). A rejected task is not on the board and cannot be moved. Counts as
 // a touch of the kanban (v0.8). An applied kanban frame (v0.10) is reset: you arranged the pane yourself.
 const MOVE_FIELDS = ['column', 'order', 'movedBy', 'movedAt'];
-function move(itemId, column, index, seenRev) {
+function move(itemId, column, index, seenRev, chat) {
   return serial(() => {
     if (!board.COLUMNS.includes(column)) return { code: 400, body: { error: `column must be one of ${board.COLUMNS.join(', ')}` } };
     if (index !== undefined && !(Number.isInteger(index) && index >= 0)) return { code: 400, body: { error: 'index must be a whole number >= 0 (the position in the column, 0 = top)' } };
@@ -957,14 +975,14 @@ function move(itemId, column, index, seenRev) {
     const turn = fade.turnOf(readTranscript());
     appendJsonl(METRICS, { ts, event: 'item_move', id: itemId, from, to: column, order: p.order, fromIndex, index: p.index, between: p.neighbours, status: item.status || null, by: 'user', turn, rev });
     // a move is a touch of the kanban (only the first touch per turn is written, see applyTouch)
-    if (!m.error && applyTouch(m, 'kanban', 'move', ts, turn).changed) writeModules(m);
-    const frameReset = resetFrameByMove(ts);
+    if (!m.error && applyTouch(m, 'kanban', 'move', ts, turn, chat).changed) writeModules(m);
+    const frameReset = resetFrameByMove(ts, chat);
     return { code: 200, body: { ok: true, changed: true, item, rev, from, to: column, index: p.index, ...(frameReset ? { frameReset } : {}) } };
   });
 }
 // Inside the write chain. An applied kanban frame is reset when you move a card yourself (also while the experiment is
 // off: otherwise it would come back over your order when the flag goes on). A broken frames.json never blocks the move.
-function resetFrameByMove(ts) {
+function resetFrameByMove(ts, chat) {
   const f = readFrames();
   if (f.error) {
     if (lastGood['frames.json'] && lastGood['frames.json'].applied && lastGood['frames.json'].applied.kanban) appendJsonl(METRICS, { ts, event: 'frame_error', reason: 'frames', module: 'kanban', error: `${f.error}; a manual move could not reset the kanban frame` });
@@ -975,9 +993,182 @@ function resetFrameByMove(ts) {
   delete f.applied.kanban;
   f.resets.kanban = { at: ts, by: 'user', frame: a.id || null, reason: 'manual move' };
   const rev = writeFrames(f);
-  appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `kanban: frame ${a.id} reset by your manual move (suggested by ${a.model || 'a model'}); the pane shows your order now`, model: null });
+  appendJsonl(chatFile(chat), { id: lineId(), ts, role: 'system', text: `kanban: frame ${a.id} reset by your manual move (suggested by ${a.model || 'a model'}); the pane shows your order now`, model: null });
   appendJsonl(METRICS, { ts, event: 'frame_reset', id: a.id || null, module: 'kanban', by: 'user', reason: 'manual move', rev });
   return { id: a.id || null, model: a.model || null };
+}
+
+// ---- pilot-v0.12: several chats in one project. They share the board (state.json), the panes (modules.json) and the
+// controller's counts; each has its own lines (main: transcript.jsonl; others: chats/<id>.jsonl). chats.json lists them,
+// created on the first new chat. Nothing is deleted: archive only hides a chat from the list. ----
+// The list for the page: most recent activity first (main included), each with who named it (chats.js titleOf).
+function chatsSummary() {
+  const c = readChats(), events = metricsEvents();
+  const list = chats.withActivity(PILOT, c.list).map((x) => {
+    const t = chats.titleOf(x, events);
+    return { id: x.id, file: x.file, title: t.title, titleBy: t.by, titleModel: t.model, createdAt: x.createdAt, lastActivity: x.lastActivity,
+      messages: x.messages, lines: x.lines, archived: x.archived };
+  });
+  const at = (x) => Date.parse(x.lastActivity) || 0;
+  list.sort((a, b) => at(b) - at(a) || (a.id === chats.MAIN ? -1 : b.id === chats.MAIN ? 1 : 0));
+  return { exists: c.exists, rev: c.rev, list, ...(c.error ? { error: c.error } : {}) };
+}
+// The controller line that asked the open question (the newest one for that module and kind, in any chat).
+function pendingLine(m) {
+  const rows = chats.allRows(PILOT, readChats().list).filter((r) => r.obj && r.obj.role === 'controller' && r.obj.module === m.pending
+    && (r.obj.question === 'remove') === (m.pendingKind === 'remove'));
+  rows.sort((a, b) => (Date.parse(a.obj.ts) || 0) - (Date.parse(b.obj.ts) || 0));
+  const r = rows.pop();
+  return r ? { chat: r.chat, line: r.obj } : null;
+}
+// Items with the chat they came from (`chat`): fromChat, else the chat that holds fromMessage (older items: main), else
+// null (added by hand without a message). Only while the project has more than one chat; otherwise items are unchanged.
+function withChat(items) {
+  const c = readChats();
+  if (!c.exists) return items;
+  const where = new Map(chats.allRows(PILOT, c.list).map((r) => [r.obj && r.obj.id, r.chat]));
+  return items.map((it) => ({ ...it, chat: typeof it.fromChat === 'string' && c.list.some((x) => x.id === it.fromChat) ? it.fromChat : where.get(it.fromMessage) || null }));
+}
+// Writes chats.json (inside the write chain, only after readChats() said it is fine); keeps unknown fields.
+function writeChats(doc) {
+  doc.rev = (Number.isInteger(doc.rev) ? doc.rev : 0) + 1;
+  atomicWrite(CHATS, JSON.stringify(doc, null, 2) + '\n'); lastGood['chats.json'] = JSON.parse(JSON.stringify(doc));
+  return doc.rev;
+}
+// The doc to change: the file as it is, or (no chats.json yet) one listing main, so main stays the first chat.
+function chatsDocForWrite(c) {
+  if (c.doc) return JSON.parse(JSON.stringify(c.doc));
+  const first = readChat(chats.MAIN)[0];
+  return { rev: 0, chats: [{ id: chats.MAIN, file: chats.fileFor(chats.MAIN), createdAt: (first && first.ts) || new Date().toISOString() }] };
+}
+// A chat named by id or title (case-insensitive; an exact id wins, then an exact title, then a unique title prefix).
+function findChat(q, list) {
+  const s = String(q || '').trim().toLowerCase();
+  if (!s) return { error: 'name a chat: its title or id (see /chats)' };
+  const named = list.map((c) => ({ c, t: String(c.title || '').toLowerCase() }));
+  const hit = named.find((x) => x.c.id === s) || named.find((x) => x.t === s);
+  if (hit) return { chat: hit.c };
+  const pre = named.filter((x) => x.t.startsWith(s));
+  if (pre.length === 1) return { chat: pre[0].c };
+  return { error: pre.length ? `"${q}" fits ${pre.length} chats: ${pre.map((x) => `${x.c.title} (${x.c.id})`).join(', ')}` : `no chat "${q}" (see /chats)` };
+}
+const newChatId = () => 'c-' + crypto.randomUUID().slice(0, 6);
+// /chat new [title]: creates chats.json on the first call (main listed first) and an empty chats/<id>.jsonl. An empty,
+// untitled chat you have not used yet is reused instead of piling up empty ones. -> {ok, lines, chat}
+function newChat(title, from) {
+  return serial(() => {
+    const c = readChats();
+    if (c.error) return { ok: false, lines: [`chats.json is not valid JSON, not changed: ${c.error}`] };
+    const t = cleanTitle(title);
+    if (title && !t) return { ok: false, lines: ['a title is 1 to 60 characters on one line'] };
+    const empty = !t && chats.withActivity(PILOT, c.list).find((x) => x.id !== chats.MAIN && !x.archived && !x.title && x.lines === 0);
+    if (empty) return { ok: true, lines: [`chat ${empty.id} is still empty: using it`], chat: empty.id };
+    const doc = chatsDocForWrite(c);
+    const id = newChatId(), ts = new Date().toISOString();
+    const entry = { id, file: chats.fileFor(id), createdAt: ts, ...(t ? { title: t, titleBy: 'user', titledAt: ts } : {}) };
+    doc.chats.push(entry);
+    fs.mkdirSync(path.join(PILOT, 'chats'), { recursive: true });
+    watchChats();
+    if (!fs.existsSync(chatFile(id))) atomicWrite(chatFile(id), '');
+    const rev = writeChats(doc);
+    appendJsonl(METRICS, { ts, event: 'chat_new', chat: id, file: entry.file, from: from || null, rev, ...(t ? { title: t, by: 'user' } : {}), ...(c.exists ? {} : { created: 'chats.json' }) });
+    return { ok: true, lines: [`new chat ${id}${t ? ` "${t}"` : ''} (${entry.file}${c.exists ? '' : '; chats.json created, main stays transcript.jsonl'})`], chat: id };
+  });
+}
+const cleanTitle = (t) => { const s = String(t || '').replace(/\s+/g, ' ').trim().replace(/^["'“”]+|["'“”]+$/g, '').trim(); return s && s.length <= 60 ? s : null; };
+// /chat rename <title> (the chat you are in): titleBy "user", a chat_rename event (the ledger titleOf compares with).
+function renameChat(chat, title, by = 'user', model = null) {
+  return serial(() => {
+    const t = cleanTitle(title);
+    if (!t) return { ok: false, lines: ['usage: /chat rename <title>  (1 to 60 characters)'] };
+    const c = readChats();
+    if (c.error) return { ok: false, lines: [`chats.json is not valid JSON, not changed: ${c.error}`] };
+    const doc = chatsDocForWrite(c);
+    let e = doc.chats.find((x) => x && x.id === chat);
+    if (!e) { if (chat !== chats.MAIN) return { ok: false, lines: [`no chat ${chat}`] }; e = { id: chat, file: chats.fileFor(chat) }; doc.chats.unshift(e); }
+    if (by === 'model' && e.title) return { ok: true, lines: [], changed: false };   // a model never renames a named chat
+    const was = chats.titleOf(chats.withActivity(PILOT, chats.normalize(doc)).find((x) => x.id === chat), metricsEvents()).title;
+    const ts = new Date().toISOString();
+    Object.assign(e, { title: t, titleBy: by, titledAt: ts });
+    if (model) e.titleModel = model; else delete e.titleModel;
+    const rev = writeChats(doc);
+    appendJsonl(METRICS, { ts, event: 'chat_rename', chat, title: t, was, by, ...(model ? { model } : {}), rev, ...(c.exists ? {} : { created: 'chats.json' }) });
+    return { ok: true, lines: [`chat ${chat} is now "${t}" (named by ${by === 'user' ? 'you' : `model · ${model}`})`], changed: true };
+  });
+}
+// /chat archive [chat] and /chat unarchive <chat>: archived: true hides a chat from the list; nothing is removed.
+function archiveChat(chat, archived) {
+  return serial(() => {
+    const c = readChats();
+    if (c.error) return { ok: false, lines: [`chats.json is not valid JSON, not changed: ${c.error}`] };
+    if (chat === chats.MAIN && archived) return { ok: false, lines: ['main is the project\'s first chat (transcript.jsonl); it cannot be archived'] };
+    if (!c.exists) return { ok: false, lines: ['this project has one chat; nothing to archive'] };
+    const doc = chatsDocForWrite(c);
+    const e = doc.chats.find((x) => x && x.id === chat);
+    if (!e) return { ok: false, lines: [`no chat ${chat}`] };
+    if ((e.archived === true) === archived) return { ok: true, lines: [`chat ${chat} is already ${archived ? 'archived' : 'in the list'}`] };
+    if (archived) e.archived = true; else delete e.archived;
+    const ts = new Date().toISOString();
+    const rev = writeChats(doc);
+    appendJsonl(METRICS, { ts, event: 'chat_archive', chat, archived, rev });
+    return { ok: true, lines: [archived ? `chat ${chat} archived: hidden from the list, nothing deleted (${chats.fileFor(chat)} stays; /chat unarchive ${chat} brings it back)` : `chat ${chat} is back in the list`] };
+  });
+}
+// Role `title` (pilot-v0.12): after the first complete reply of a chat that has no title, in the background, only when
+// the project has chats.json and the role has a candidate (pins, local-only fallback and stallMs apply, as for every
+// role). The reply must be one line of 1 to 60 characters; anything else is logged (title_error) and changes nothing.
+// Without a candidate the title is the first sentence of the first message (chats.js). A named chat is never renamed.
+let titleChain = Promise.resolve();
+function queueTitle(chat) {
+  const c = readChats();
+  if (!c.exists || !roleConfig('title').candidates.length) return;
+  const entry = c.list.find((x) => x.id === chat);
+  const lines = readChat(chat);
+  if (!entry || entry.title || lines.filter((l) => l.role === 'assistant').length !== 1) return;
+  titleChain = titleChain.then(() => runTitle(chat)).catch((err) => metric('title_error', { chat, reason: 'internal', error: String(err.message || err) })).catch(() => {});
+}
+async function runTitle(chat) {
+  const lines = readChat(chat);
+  const u = lines.find((l) => l.role === 'user'), a = lines.find((l) => l.role === 'assistant');
+  if (!u || !a) return;
+  const msgs = [
+    { role: 'system', content: 'PILOT-TITLE v1\nGive this conversation a short title: at most 5 words, plain text, one line, no quotes. Reply with the title only.' },
+    { role: 'user', content: `First user message:\n${u.text}\n\nFirst assistant message:\n${a.text}` },
+  ];
+  let out;
+  try { out = await callRole('title', msgs, () => {}, new AbortController().signal, null, chat); }
+  catch (err) { await metric('title_error', { chat, reason: err.stall ? 'stall' : 'model', error: String(err.message || err) }); return; }
+  const t = String(out.text || '').trim();
+  if (/\n/.test(t) || !cleanTitle(t)) { await metric('title_error', { chat, reason: 'format', candidate: out.candidate.name, chars: t.length }); return; }
+  await renameChat(chat, t, 'model', out.candidate.name);
+}
+// /chats, /chat ... (commands; switching itself happens in the page, which reports chat_switch via POST /metric)
+async function chatCommand(cmd, args, chat) {
+  const sum = chatsSummary();
+  const label = (x) => `${x.title}${x.titleBy ? ` (${x.titleBy === 'model' ? `model · ${x.titleModel || '?'}` : x.titleBy})` : ''}`;
+  if (cmd === '/chats') {
+    const shown = sum.list.filter((x) => !x.archived || args[0] === 'all');
+    const lines = shown.map((x) => `${x.id === chat ? '*' : ' '} ${x.id.padEnd(9)} ${label(x)} · ${x.messages} messages · ${x.file}${x.archived ? ' · archived' : ''}`);
+    const n = sum.list.filter((x) => x.archived).length;
+    if (n && args[0] !== 'all') lines.push(`  ${n} archived (/chats all shows them)`);
+    if (!sum.exists) lines.push('  one chat so far: /chat new starts another (chats.json is created then)');
+    return { ok: true, lines };
+  }
+  const [sub, ...rest] = args;
+  if (!sub) return { ok: true, lines: [`you are in ${chat}: ${label(sum.list.find((x) => x.id === chat) || { title: chat })}. /chat new | /chat <title or id> | /chat rename <title> | /chat archive | /chat unarchive <chat> | /chats`] };
+  if (sub === 'new') return newChat(rest.join(' '), chat);
+  if (sub === 'rename') return renameChat(chat, rest.join(' '));
+  if (sub === 'archive' || sub === 'unarchive') {
+    const f = rest.length ? findChat(rest.join(' '), sum.list) : { chat: sum.list.find((x) => x.id === chat) };
+    if (f.error) return { ok: false, lines: [f.error] };
+    const r = await archiveChat(f.chat.id, sub === 'archive');
+    // archiving the chat you are in takes you to the most recent chat still listed
+    if (r.ok && sub === 'archive' && f.chat.id === chat) r.chat = (chatsSummary().list.find((x) => !x.archived) || { id: chats.MAIN }).id;
+    return r;
+  }
+  const f = findChat(args.join(' '), sum.list);
+  if (f.error) return { ok: false, lines: [f.error] };
+  return { ok: true, lines: [`chat ${f.chat.id}: ${label(f.chat)}${f.chat.archived ? ' (archived)' : ''}`], chat: f.chat.id };
 }
 
 // ---- live files (pilot-v0.5): fs.watch on the pilot dir -> SSE {file, rev} ----
@@ -1001,17 +1192,19 @@ function fileRev(name) {
   if (!name.endsWith('.json')) return { rev: null };
   try {
     const j = JSON.parse(raw);
-    if (['modules.json', 'roles.json', 'flags.json', 'frames.json'].includes(name)) lastGood[name] = j;   // keep the last good version fresh
+    if (['modules.json', 'roles.json', 'flags.json', 'frames.json', 'chats.json'].includes(name)) lastGood[name] = j;   // keep the last good version fresh
     return { rev: j && Number.isInteger(j.rev) ? j.rev : 0 };
   }
   catch (e) { return { rev: null, error: `${name} is not valid JSON: ${e.message}` }; }
 }
 const watched = (name) => !!name && !name.startsWith('.') && !name.endsWith('.tmp') && !name.endsWith('~');
 const sig = (st) => `${st.mtimeMs}|${st.size}|${st.ino}`;
+// pilot-v0.12: also the chat files in chats/, under their relative name ("chats/<id>.jsonl")
 function snapshot() {
   const out = new Map();
   let names = [];
   try { names = fs.readdirSync(PILOT); } catch { return out; }
+  try { names.push(...fs.readdirSync(path.join(PILOT, 'chats')).filter(watched).map((n) => `chats/${n}`)); } catch { /* no chats/ yet */ }
   for (const n of names) {
     if (!watched(n)) continue;
     try { const st = fs.statSync(path.join(PILOT, n)); if (st.isFile()) out.set(n, sig(st)); } catch { /* gone meanwhile */ }
@@ -1029,15 +1222,27 @@ function scan() {
     known = now;
     for (const file of changed.sort()) broadcast('change', { file, ...fileRev(file) });
     if (changed.includes('state.json')) onStateFileChange();
+    watchChats();
   } catch (err) { console.error('watch:', err.message); }
 }
+const onWatch = () => { clearTimeout(debounce); debounce = setTimeout(scan, DEBOUNCE_MS); };
 function startWatch() {
   try {
-    const w = fs.watch(PILOT, () => { clearTimeout(debounce); debounce = setTimeout(scan, DEBOUNCE_MS); });
+    const w = fs.watch(PILOT, onWatch);
     w.on('error', (err) => { console.error(`watch ${path.relative(APP, PILOT)}/ stopped: ${err.message}`); w.close(); setTimeout(startWatch, 1000).unref(); });
   } catch (err) { console.error(`cannot watch ${path.relative(APP, PILOT)}/: ${err.message}`); setTimeout(startWatch, 1000).unref(); }
 }
+// pilot-v0.12: chats/ gets its own watcher once it exists (fs.watch on the pilot dir is not recursive)
+let chatsWatcher = null;
+function watchChats() {
+  if (chatsWatcher || !fs.existsSync(path.join(PILOT, 'chats'))) return;
+  try {
+    chatsWatcher = fs.watch(path.join(PILOT, 'chats'), onWatch);
+    chatsWatcher.on('error', () => { try { chatsWatcher.close(); } catch { /* closed */ } chatsWatcher = null; setTimeout(watchChats, 1000).unref(); });
+  } catch { chatsWatcher = null; }
+}
 startWatch();
+watchChats();
 
 // GET /events: Server-Sent Events (D7). First a `hello` with the current revs, then `change` {file, rev[, error]}
 // per changed file and `status` {extracting} when background extraction starts or ends. A comment every 15 s keeps
@@ -1054,10 +1259,13 @@ function handleEvents(req, res) {
 
 // GET /state[?only=transcript.jsonl,state.json,modules.json,roles.json]: everything, or only the parts that belong to
 // the named files (the page reloads only what changed). extracting and fileErrors are always included.
-function statePayload(only) {
+// pilot-v0.12: `chat` = the chat this page shows (main by default). transcript.jsonl stands for that chat's file (its
+// lines, total); `turn` stays project-wide. The part chats.json is the chat list (with activity and who named each chat).
+function statePayload(only, chat = chats.MAIN) {
   const want = (f) => !only || only.includes(f);
   const out = { extracting: extracting > 0, framing: framing > 0 };
-  if (want('transcript.jsonl')) { const lines = readTranscript(); out.transcript = lines.slice(-TAIL); out.total = lines.length; out.turn = fade.turnOf(lines); }
+  if (want('transcript.jsonl')) { const lines = readChat(chat); out.transcript = lines.slice(-TAIL); out.total = lines.length; out.turn = fade.turnOf(readTranscript()); out.chat = chat; }
+  if (want('chats.json')) { out.chats = chatsSummary(); out.turn = fade.turnOf(readTranscript()); }
   if (want('modules.json') || want('roles.json')) out.models = modelsSummary();
   let m = null, st = null;
   if (want('modules.json')) {
@@ -1071,14 +1279,16 @@ function statePayload(only) {
     for (const p of m.panes) if (p && paneInfo[p.module]) paneInfo[p.module].fade = fade.status(p, { lines, turn, rulesDoc, items });
     Object.assign(out, { panes: visiblePanes(m), pending: m.pending, pendingKind: m.pendingKind || null, answers: m.answers, removals: m.removals,
       modulesRev: m.rev, paneInfo, faded: visiblePanes(m).filter((mod) => fade.isFaded(m.panes.find((p) => p.module === mod))) });
+    // pilot-v0.12: the open question is project-wide, its line lives in the chat where it was asked; every chat shows it
+    out.pendingLine = m.pending ? pendingLine(m) : null;
   }
   if (want('flags.json')) out.flags = flagsSummary();   // pilot-v0.9
   if (want('frames.json')) { const f = readFrames(); out.frames = { rev: f.rev, pending: f.pending, applied: f.applied, resets: f.resets }; }   // pilot-v0.10
   // items carry `prov` ({added, fields}) when a part of them came from a hand edit (pilot-v0.6, see stats.js)
-  if (want('state.json')) { st = readState(); Object.assign(out, { items: stats.withProvenance(st.items, metricsEvents()), stateRev: st.rev, stateError: st.error || null }); }
+  if (want('state.json')) { st = readState(); Object.assign(out, { items: withChat(stats.withProvenance(st.items, metricsEvents())), stateRev: st.rev, stateError: st.error || null }); }
   // a broken hand-editable file: the page says "file X is not valid JSON, showing last good version" until fixed
   const fileErrors = {};
-  for (const [f, e] of [['state.json', (st || readState()).error], ['modules.json', (m || readModules()).error], ['roles.json', readJsonGood(ROLES, {}).error], ['flags.json', readFlags().error], ['frames.json', readFrames().error]]) if (e) fileErrors[f] = e;
+  for (const [f, e] of [['state.json', (st || readState()).error], ['modules.json', (m || readModules()).error], ['roles.json', readJsonGood(ROLES, {}).error], ['flags.json', readFlags().error], ['frames.json', readFrames().error], ['chats.json', readChats().error]]) if (e) fileErrors[f] = e;
   out.fileErrors = fileErrors;
   return out;
 }
@@ -1149,12 +1359,14 @@ function serveStatic(req, res, pathname) {
 }
 
 async function handleChat(req, res) {
-  let text;
-  try { text = String(JSON.parse(await readBody(req)).text || '').trim(); } catch { return sendJson(res, 400, { error: 'expected JSON {text}' }); }
+  let text, chat;
+  try { const b = JSON.parse(await readBody(req)); text = String(b.text || '').trim(); chat = chatOf(b.chat); } catch { return sendJson(res, 400, { error: 'expected JSON {text, chat?}' }); }
   if (!text) return sendJson(res, 400, { error: 'empty message' });
+  if (!chat) return sendJson(res, 404, { error: 'no such chat (see /chats)' });
 
-  const userLine = await appendLine('user', text, null);
-  const history = readTranscript().filter((l) => l.role === 'user' || l.role === 'assistant').slice(-HISTORY)
+  const userLine = await appendLine('user', text, null, null, chat);
+  // pilot-v0.12: the model sees only this chat's history
+  const history = readChat(chat).filter((l) => l.role === 'user' || l.role === 'assistant').slice(-HISTORY)
     .map((l) => ({ role: l.role, content: l.text }));
 
   // no-cache, not no-store: Chrome reports a streamed no-store body read by a reader as net::ERR_ABORTED.
@@ -1164,22 +1376,22 @@ async function handleChat(req, res) {
 
   let replyLine = null;
   try {
-    const { text: reply, candidate } = await callRole('chat', history, (d) => res.write(d), abort.signal);
-    replyLine = await appendLine('assistant', reply, candidate.name);
+    const { text: reply, candidate } = await callRole('chat', history, (d) => res.write(d), abort.signal, null, chat);
+    replyLine = await appendLine('assistant', reply, candidate.name, null, chat);
   } catch (err) {
     // Keep whatever arrived before the failure, then record the failure as a system line.
-    if (err.partial) await appendLine('assistant', err.partial, err.candidate && err.candidate.name);
+    if (err.partial) await appendLine('assistant', err.partial, err.candidate && err.candidate.name, null, chat);
     const msg = err.stall ? `reply stalled: ${err.message}; kept the partial reply, no fallback` : `chat failed: ${err.message || err}`;
-    await appendLine('system', msg, null, err.stall ? 'stall' : 'error');
+    await appendLine('system', msg, null, err.stall ? 'stall' : 'error', chat);
     console.error(msg);
     if (!res.writableEnded) res.write(`\n[${msg}]`);
   }
-  await runController();
-  const after = readTranscript();
-  await metric('turn', { ok: !!replyLine, lines: after.length, messages: after.filter((l) => l.role === 'user' || l.role === 'assistant').length });
+  await runController(chat);
+  const after = readTranscript();   // pilot-v0.12: project-wide, like server_start (continuity compares the two)
+  await metric('turn', { ok: !!replyLine, lines: after.length, messages: after.filter((l) => l.role === 'user' || l.role === 'assistant').length, ...(chat !== chats.MAIN ? { chat } : {}) });
   // Extraction only after a complete reply (not after a failure or a stall), queued before res.end() so
   // GET /state already reports it as running, and never awaited here: it cannot delay the chat reply.
-  if (replyLine) { queueExtraction(userLine, replyLine); queueFrame(userLine, replyLine); }   // pilot-v0.10: frame after extraction
+  if (replyLine) { queueExtraction(userLine, replyLine, chat); queueFrame(userLine, replyLine, chat); queueTitle(chat); }   // pilot-v0.10: frame after extraction; pilot-v0.12: title
   res.end();
 }
 
@@ -1196,11 +1408,17 @@ const HELP = [
   '/flag [settled-input on|off]  experiments (pilot-v0.9): show them, or switch one (kept in flags.json; default off)',
   '/flag frame-proposals on|off  experiment (pilot-v0.10): the frame role may suggest how a pane shows its cards',
   '/frame [reset [map|kanban]]  frames (pilot-v0.10): what is proposed and applied per pane; reset undoes an applied frame',
+  '/chats [all]               chats of this project, most recent first (pilot-v0.12; all = with the archived ones)',
+  '/chat new [title]          start a new chat (chats.json is created on the first one; main stays transcript.jsonl)',
+  '/chat <title or id>        switch to that chat (this tab only; the URL says ?chat=<id>)',
+  '/chat rename <title>       name the chat you are in (recorded: named by you)',
+  '/chat archive [chat]       hide a chat from the list (nothing is deleted); /chat unarchive <chat> brings it back',
   '/help                      this list',
 ];
 
-async function runCommand(input) {
+async function runCommand(input, chat = chats.MAIN) {
   const [cmd, ...args] = input.trim().split(/\s+/);
+  if (cmd === '/chat' || cmd === '/chats') return chatCommand(cmd, args, chat);   // pilot-v0.12
   if (cmd === '/help') return { ok: true, lines: HELP };
   if (cmd === '/theme') return { ok: true, lines: ['/theme is handled in the page (it changes only this browser)'] };
   if (cmd === '/model') {
@@ -1222,7 +1440,7 @@ async function runCommand(input) {
       });
       delete lastUsed[role];
       const first = activeName(role);
-      await appendLine('system', `model for ${role} unpinned: ${summary[role].policy} policy, starting at ${first || 'none'}`, null);
+      await appendLine('system', `model for ${role} unpinned: ${summary[role].policy} policy, starting at ${first || 'none'}`, null, null, chat);
       await metric('model_unpin', { role, candidate: first });
       return { ok: true, lines: [`${role} follows its ${summary[role].policy} policy again, starting at ${first || 'none'}`] };
     }
@@ -1235,7 +1453,7 @@ async function runCommand(input) {
       lastGood['roles.json'] = saved;
     });
     delete lastUsed[role];
-    await appendLine('system', `model for ${role} switched to ${name} (pinned)`, null);
+    await appendLine('system', `model for ${role} switched to ${name} (pinned)`, null, null, chat);
     await metric('model_switch', { role, candidate: name, pinned: true });
     return { ok: true, lines: [`${role} now uses ${name} (pinned: no fallback until /model ${role} auto)`] };
   }
@@ -1280,7 +1498,7 @@ async function runCommand(input) {
     });
     const effect = { settledInput: ': after a pause on a finished-looking input the page offers "send?" (Tab sends, Enter always sends)',
       frameProposals: ': after a turn the frame role may suggest how the map or kanban shows its cards; only you apply it (f in that pane)' }[key];
-    await appendLine('system', `experiment ${name} ${val} (/flag)${on ? effect : ''}`, null);
+    await appendLine('system', `experiment ${name} ${val} (/flag)${on ? effect : ''}`, null, null, chat);
     await metric('flag', { name, value: on, was });
     return { ok: true, lines: [`${name}: ${val}  (kept in ${path.relative(APP, PILOT)}/flags.json; /flag ${name} ${on ? 'off' : 'on'} switches back)`] };
   }
@@ -1288,7 +1506,7 @@ async function runCommand(input) {
   if (cmd === '/frame') {
     if (!args.length) return { ok: true, lines: frameLines() };
     if (args[0] !== 'reset' || args.length > 2 || (args[1] && !frame.FRAME_PANES.includes(args[1]))) return { ok: false, lines: [`usage: /frame [reset [${frame.FRAME_PANES.join('|')}]]`] };
-    return frameReset(args[1] ? [args[1]] : frame.FRAME_PANES);
+    return frameReset(args[1] ? [args[1]] : frame.FRAME_PANES, chat);
   }
   if (cmd === '/stats') return { ok: true, lines: stats.formatStats(stats.computeStats(PILOT), `${path.relative(APP, PILOT)}/`) };
   if (cmd === '/panes') {
@@ -1307,14 +1525,18 @@ const server = http.createServer(async (req, res) => {
     const { pathname, searchParams } = new URL(req.url, `http://${HOST}`);
     if (req.method === 'GET' && pathname === '/state') {
       const only = searchParams.has('only') ? searchParams.get('only').split(',').filter(Boolean) : null;
-      return sendJson(res, 200, statePayload(only));
+      const chat = chatOf(searchParams.get('chat'));   // pilot-v0.12
+      if (!chat) return sendJson(res, 404, { error: `no chat "${searchParams.get('chat')}"`, unknownChat: true });
+      return sendJson(res, 200, statePayload(only, chat));
     }
     if (req.method === 'GET' && pathname === '/events') return handleEvents(req, res);
     if (req.method === 'POST' && pathname === '/answer') {
       let body;
       try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'expected JSON {module, answer} or {itemId, decision}' }); }
       const rev = body && body.rev !== undefined && body.rev !== null ? body.rev : undefined;   // optional: the rev the page last saw
-      const out = body && body.itemId !== undefined ? await decide(body.itemId, body.decision, rev) : await answer(body && body.module, body && body.answer, rev);
+      const chat = chatOf(body && body.chat);
+      if (!chat) return sendJson(res, 404, { error: 'no such chat' });
+      const out = body && body.itemId !== undefined ? await decide(body.itemId, body.decision, rev, chat) : await answer(body && body.module, body && body.answer, rev, chat);
       return sendJson(res, out.code, out.body);
     }
     // pilot-v0.6: the page reports index jumps (Usefulness). Only this one event, with a message id that exists.
@@ -1322,6 +1544,14 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && pathname === '/metric') {
       let body;
       try { body = JSON.parse(await readBody(req, 2000)); } catch { return sendJson(res, 400, { error: 'expected JSON {event: "index_jump", target}' }); }
+      if (body && body.event === 'chat_switch') {   // pilot-v0.12: the page moved to another chat
+        const list = readChats().list;
+        const ok = (id) => typeof id === 'string' && list.some((c) => c.id === id);
+        if (!ok(body.from) || !ok(body.to) || body.from === body.to) return sendJson(res, 400, { error: 'chat_switch needs from and to: two different chats in chats.json' });
+        const how = ['sidebar', 'command', 'tag', 'link', 'new', 'archive', 'back'].includes(body.how) ? body.how : null;
+        await metric('chat_switch', { from: body.from, to: body.to, how, turn: fade.turnOf(readTranscript()) });
+        return sendJson(res, 200, { ok: true });
+      }
       if (body && SETTLE_EVENTS[body.event]) {
         const out = settleEvent(body);
         if (out.error) return sendJson(res, 400, { error: out.error });
@@ -1330,10 +1560,12 @@ const server = http.createServer(async (req, res) => {
       }
       if (!body || body.event !== 'index_jump') return sendJson(res, 400, { error: 'only {event: "index_jump", target} is accepted' });
       const target = typeof body.target === 'string' ? body.target : '';
-      const lines = readTranscript();
+      // pilot-v0.12: the message is looked up in every chat; position and of count in its own chat
+      const row = chats.allRows(PILOT, readChats().list).find((r) => r.obj && r.obj.id === target);
+      if (!row) return sendJson(res, 400, { error: `no message "${target}"` });
+      const lines = readChat(row.chat);
       const at = lines.findIndex((l) => l.id === target);
-      if (at < 0) return sendJson(res, 400, { error: `no message "${target}"` });
-      await metric('index_jump', { target, position: at + 1, of: lines.length });
+      await metric('index_jump', { target, position: at + 1, of: lines.length, ...(row.chat !== chats.MAIN ? { chat: row.chat } : {}) });
       return sendJson(res, 200, { ok: true });
     }
     // pilot-v0.10: apply or dismiss a frame proposal (only you; the frame role only proposes)
@@ -1341,7 +1573,9 @@ const server = http.createServer(async (req, res) => {
       let body;
       try { body = JSON.parse(await readBody(req, 2000)); } catch { return sendJson(res, 400, { error: 'expected JSON {pane, id, action}' }); }
       const rev = body && body.rev !== undefined && body.rev !== null ? body.rev : undefined;
-      const out = await frameAnswer(body && body.pane, body && body.id, body && body.action, rev);
+      const chat = chatOf(body && body.chat);
+      if (!chat) return sendJson(res, 404, { error: 'no such chat' });
+      const out = await frameAnswer(body && body.pane, body && body.id, body && body.action, rev, chat);
       return sendJson(res, out.code, out.body);
     }
     // pilot-v0.11: you move a task on the kanban (drag and drop or Alt+arrows)
@@ -1350,20 +1584,25 @@ const server = http.createServer(async (req, res) => {
       try { body = JSON.parse(await readBody(req, 2000)); } catch { return sendJson(res, 400, { error: 'expected JSON {itemId, column, index}' }); }
       const rev = body && body.rev !== undefined && body.rev !== null ? body.rev : undefined;
       const index = body && body.index !== undefined && body.index !== null ? body.index : undefined;
-      const out = await move(body && body.itemId, body && body.column, index, rev);
+      const chat = chatOf(body && body.chat);
+      if (!chat) return sendJson(res, 404, { error: 'no such chat' });
+      const out = await move(body && body.itemId, body && body.column, index, rev, chat);
       return sendJson(res, out.code, out.body);
     }
     // pilot-v0.8: the page reports an interaction with a pane (a faded pane comes back)
     if (req.method === 'POST' && pathname === '/touch') {
       let body;
       try { body = JSON.parse(await readBody(req, 2000)); } catch { return sendJson(res, 400, { error: 'expected JSON {module, how}' }); }
-      const out = await touch(body && body.module, body && body.how);
+      const chat = chatOf(body && body.chat);
+      if (!chat) return sendJson(res, 404, { error: 'no such chat' });
+      const out = await touch(body && body.module, body && body.how, chat);
       return sendJson(res, out.code, out.body);
     }
     if (req.method === 'POST' && pathname === '/command') {
-      let text;
-      try { text = String(JSON.parse(await readBody(req)).text || ''); } catch { return sendJson(res, 400, { ok: false, lines: ['expected JSON {text}'] }); }
-      const out = await runCommand(text);
+      let text, chat;
+      try { const b = JSON.parse(await readBody(req)); text = String(b.text || ''); chat = chatOf(b.chat); } catch { return sendJson(res, 400, { ok: false, lines: ['expected JSON {text}'] }); }
+      if (!chat) return sendJson(res, 404, { ok: false, lines: ['no such chat'] });
+      const out = await runCommand(text, chat);
       return sendJson(res, out.ok ? 200 : 400, out);
     }
     if (req.method === 'POST' && pathname === '/chat') return await handleChat(req, res);

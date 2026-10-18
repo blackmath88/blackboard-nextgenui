@@ -7,7 +7,8 @@
 // PILOT_DEMO_DIR=.pilot-demo-<x> uses another throwaway dir (must start with .pilot-demo).
 // Fixture layout: demo.json {fakes: [{name, port, args?, toggleKey?}], try: [lines; {url} {dir} {app} {rel} are filled in]},
 // pilot.config.json,
-// and data files copied verbatim into the demo dir (transcript.jsonl, rules.json, modules.json, roles.json, ...).
+// and data files copied verbatim into the demo dir (transcript.jsonl, rules.json, modules.json, roles.json, ...;
+// pilot-v0.12: folders too, e.g. chats/).
 'use strict';
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -34,7 +35,9 @@ fs.rmSync(DIR, { recursive: true, force: true });
 fs.mkdirSync(DIR);
 for (const f of fs.readdirSync(src)) {
   if (f === 'demo.json' || f === 'pilot.config.json') continue;
-  fs.copyFileSync(path.join(src, f), path.join(DIR, f));
+  // pilot-v0.12: a folder (chats/) is copied with its files
+  if (fs.statSync(path.join(src, f)).isDirectory()) fs.cpSync(path.join(src, f), path.join(DIR, f), { recursive: true });
+  else fs.copyFileSync(path.join(src, f), path.join(DIR, f));
 }
 // The config lives in the throwaway dir too, with ports shifted if asked.
 const config = JSON.parse(fs.readFileSync(path.join(src, 'pilot.config.json'), 'utf8'));

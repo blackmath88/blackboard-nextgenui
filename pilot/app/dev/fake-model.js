@@ -35,7 +35,8 @@
 //                    wrongpane good, but pane "index" (not in the closed vocabulary)
 //                    malformed truncated JSON
 // Extraction and frame requests never advance the canned chat replies; each prints one "[extract] ..." or
-// "[frame] ..." log line.
+// "[frame] ..." log line. pilot-v0.12: a title request (system message "PILOT-TITLE") gets the first four words of the
+// first user message, lowercase, without a "Task:"/"Decision:" prefix; it prints "[title] ..." and advances nothing.
 // Every chat reply starts with "[fake:<name>]" so you can tell instances apart.
 'use strict';
 const http = require('http');
@@ -174,7 +175,14 @@ function respond(req, res, body, isExtract, isFrame) {
   const lastUser = [...msgs].reverse().find((m) => m.role === 'user');
   const echo = lastUser ? String(lastUser.content).slice(0, 60) : '';
   let reply;
-  if (isFrame) {
+  // pilot-v0.12: a title request ("PILOT-TITLE" in the system message): up to four words of the first user message
+  const isTitle = msgs.some((m) => m.role === 'system' && String(m.content).includes('PILOT-TITLE'));
+  if (isTitle) {
+    const c = String(lastUser ? lastUser.content : '');
+    const first = (c.split('First user message:\n')[1] || '').split('\n\nFirst assistant message:')[0];
+    reply = first.replace(/^\s*(task|decision|todo)\s*:\s*/i, '').split(/[^\p{L}\p{N}'-]+/u).filter(Boolean).slice(0, 4).join(' ').toLowerCase() || 'untitled';
+    console.log(`[title] reply=${reply}`);
+  } else if (isFrame) {
     reply = frameReply(msgs);
     console.log(`[frame] mode=${frameMode} response_format=${reqJson.response_format ? 'yes' : 'no'} reply=${reply}`);
   } else if (isExtract) {
@@ -192,7 +200,7 @@ function respond(req, res, body, isExtract, isFrame) {
       choices: [{ index: 0, message: { role: 'assistant', content: reply }, finish_reason: 'stop' }] }));
   }
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
-  const words = isExtract || isFrame ? reply.match(/[\s\S]{1,40}/g) || [] : reply.split(/(?<= )/);
+  const words = isExtract || isFrame || isTitle ? reply.match(/[\s\S]{1,40}/g) || [] : reply.split(/(?<= )/);
   let i = 0;
   const chunk = (delta, finish) => `data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created, model,
     choices: [{ index: 0, delta, finish_reason: finish || null }] })}\n\n`;

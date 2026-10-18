@@ -18,7 +18,9 @@
 // v11 (pilot-v0.11 kanban drag and drop): ports 4845/5846/5847, Chrome 9423, dir .pilot-verify-v11b/ seeded from
 // demo/fixtures/v0.11/ with its config (kanban shown); real mouse drags, Alt+arrows, touch, a second tab (SHOT_DIR=<dir>).
 // Needs Node 22+ (global WebSocket) and Google Chrome. No dependencies.
-// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|v07|v08|v09|v10|v11|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
+// v12 (pilot-v0.12 several chats): ports 4855/5856/5857, Chrome 9433, dir .pilot-verify-v12b/ seeded from demo/fixtures/v0.12/
+// (chats/ included) with its config; sidebar, new chat, card tags, /why links, two tabs, Alt+S, the drawer (SHOT_DIR=<dir>).
+// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|v07|v08|v09|v10|v11|v12|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
 'use strict';
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -1295,7 +1297,176 @@ async function v11(page) {
   check('no move wrote status, decidedAt or decidedBy (item_write via move only carries what it moved)', events().filter((e) => e.event === 'item_write' && e.via === 'move').every((e) => { const before = events().filter((x) => x.event === 'item_write' && x.itemId === e.itemId && x.ts < e.ts).pop(); return !before || (before.item.status === e.item.status && before.item.decidedAt === e.item.decidedAt); }) && events().filter((e) => e.event === 'item_write').length > writes0);
 }
 
-const SCENARIOS = { p1, p2, v03, v04, v05, v06, v07, v08, v09, v10, v11 };
+// pilot-v0.12: several chats in one project. The v0.12 fixture: chats c-hospital, c-invoices, main ("letter") and the
+// archived c-scratch, one shared kanban. Real clicks on the sidebar, a new chat, a card tag, /why links, two tabs in two
+// chats, Alt+S, the drawer at 820 px, back/forward, the open question shown in every chat.
+async function v12(page) {
+  const file = (f) => path.join(APP, ENV.dir, f);
+  await stop('server');
+  fs.cpSync(path.join(APP, 'demo', 'fixtures', 'v0.12'), path.join(APP, ENV.dir), { recursive: true });
+  fs.rmSync(file('demo.json'), { force: true }); fs.rmSync(file('pilot.config.json'), { force: true });
+  await startServer();
+  const mainBefore = fs.readFileSync(file('transcript.jsonl'));
+  const waitFor = async (expr, ms = 4000, p = page) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await p.eval(expr)) return Date.now() - t0; await sleep(20); } return null; };
+  const events = () => fs.readFileSync(file('metrics.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const chatsDoc = () => JSON.parse(fs.readFileSync(file('chats.json'), 'utf8'));
+  const items = () => JSON.parse(fs.readFileSync(file('state.json'), 'utf8')).items;
+  const shot = async (name, p = page) => { if (!process.env.SHOT_DIR) return; const r = await p.send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.SHOT_DIR, name), Buffer.from(r.result.data, 'base64')); };
+  const click = async (sel, p = page) => {
+    const b = await p.eval(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return null; el.scrollIntoView({ block: 'nearest' }); const r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+    if (!b) return false;
+    for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await p.send('Input.dispatchMouseEvent', { type, x: b.x, y: b.y, button: type === 'mouseMoved' ? 'none' : 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: type === 'mouseMoved' ? 0 : 1 });
+    return true;
+  };
+  const listed = (p = page) => p.eval(`[...document.querySelectorAll('#chat-list .chat-link')].map((a) => a.dataset.chat).join(',')`);
+  const current = (p = page) => p.eval(`(document.querySelector('#chat-list .chat-link[aria-current="page"]') || {}).dataset?.chat || null`);
+  const where = (p = page) => p.eval(`location.pathname + location.search`);
+  const board = (p = page) => p.eval(`['todo', 'doing', 'done'].map((c) => [...document.querySelectorAll('#pane-kanban .col.' + c + ' .item')].map((x) => x.dataset.id).join(',')).join(' | ')`);
+  const tag = (id, p = page) => p.eval(`(document.querySelector('#pane-kanban .item[data-id="${id}"] .chat-tag') || {}).textContent || null`);
+  const logHas = (t, p = page) => p.eval(`document.getElementById('log').textContent.includes(${JSON.stringify(t)})`);
+
+  await page.goto(URL);
+  await waitFor(`document.getElementById('meta').textContent.includes('live')`);
+  check('the sidebar is open (the project has chats.json): three chats, most recent first; the archived one is not listed', await page.eval(`!document.getElementById('chats').hidden`) && await listed() === 'c-hospital,c-invoices,main', await listed());
+  check('main is the current chat at / (aria-current), the title bar says "· letter", the tab title too', await current() === 'main' && await where() === '/' && await page.eval(`document.getElementById('chat-name').textContent === '· letter' && document.title.startsWith('letter')`));
+  const bylines = await page.eval(`[...document.querySelectorAll('#chat-list .chat-link')].map((a) => a.querySelector('.cby').textContent.replace(/ · \\d\\d-\\d\\d \\d\\d:\\d\\d$/, '')).join(' | ')`);
+  check('who named each chat: the first sentence (no name yet), model · morrow, you', bylines === 'first message · 4 msg | model · morrow · 4 msg | you · 88 msg', bylines);
+  check('the archived chat sits behind "archived: 1 (show)"', await page.eval(`(() => { const t = document.getElementById('archived-toggle'); return !t.hidden && t.textContent === 'archived: 1 (show)' && document.getElementById('chat-archived').hidden; })()`));
+  const start = await board();
+  check('the shared kanban: tasks from three chats', start === 'task-4,task-5,task-7,task-8,task-9,task-11 | task-3,task-10 | task-1,task-2', start);
+  check('each card names its chat: task-9 "chat · invoices", task-10 and task-11 the hospital chat, task-4 "chat · letter"', await tag('task-9') === 'chat · invoices' && /^chat · The hospital sent/.test(await tag('task-10')) && /^chat · The hospital sent/.test(await tag('task-11')) && await tag('task-4') === 'chat · letter', `${await tag('task-9')} / ${await tag('task-10')} / ${await tag('task-4')}`);
+  const lay = await page.eval(`(() => { const n = document.getElementById('chats').getBoundingClientRect(), b = document.getElementById('bench').getBoundingClientRect(), k = document.querySelector('#pane-kanban .body'); const cs = getComputedStyle(k); return { navRight: Math.round(n.right), benchLeft: Math.round(b.left), kb: Math.round(k.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)), cols: [...document.querySelectorAll('#pane-kanban .col')].map((c) => Math.round(c.getBoundingClientRect().top)), h: document.documentElement.scrollWidth > innerWidth }; })()`);
+  check('1280 px: the sidebar is its own column left of the bench; the kanban keeps three columns side by side; no horizontal scroll', lay.navRight <= lay.benchLeft && lay.kb >= 420 && new Set(lay.cols).size === 1 && !lay.h, JSON.stringify(lay));
+  await shot('v12-start.png');
+
+  // ---- switch in the sidebar ----
+  await click('#chat-list .chat-link[data-chat="c-invoices"]');
+  await waitFor(`location.search === '?chat=c-invoices' && document.getElementById('log').textContent.includes('pharmacy receipts')`);
+  check('a click on "invoices": the URL says ?chat=c-invoices, the log is that chat (its lines only), it is marked current', await where() === '/?chat=c-invoices' && await logHas('sort the pharmacy receipts') && !(await logHas('dogfood the pilot')) && await current() === 'c-invoices');
+  check('the board stays the same (it belongs to the project, not the chat)', await board() === start);
+  await sleep(300);
+  check('metrics.jsonl: chat_switch {from main, to c-invoices, how sidebar}', events().some((e) => e.event === 'chat_switch' && e.from === 'main' && e.to === 'c-invoices' && e.how === 'sidebar'));
+
+  // ---- a new chat; a task in it lands on the shared board, tagged ----
+  await click('#new-chat');
+  await waitFor(`/^\\?chat=c-[0-9a-f]{6}$/.test(location.search)`);
+  const nc = (await where()).split('=')[1];
+  check('"+ new chat": a new chat c-xxxxxx, the URL follows, the log is empty but for the command, chats.json lists it (main stays first)', /^c-[0-9a-f]{6}$/.test(nc || '') && chatsDoc().chats[0].id === 'main' && chatsDoc().chats.some((c) => c.id === nc) && fs.existsSync(file(`chats/${nc}.jsonl`)) && !(await page.eval(`document.querySelectorAll('#log .ln:not(.out)').length`)), nc);
+  check('the new chat is at the top of the list and current ("new chat", no messages)', (await listed()).startsWith(`${nc},`) && await current() === nc);
+  await page.submit('Task: call the pharmacy about the receipts.', 300);
+  const tAppear = await waitFor(`!!document.querySelector('#pane-kanban .item[data-id="task-12"] .chat-tag')`, 6000);
+  check('the task from the new chat appears on the shared kanban, dashed (proposed), tagged with the new chat', tAppear !== null && await page.eval(`document.querySelector('#pane-kanban .item[data-id="task-12"]').classList.contains('proposed')`), `${tAppear} ms`);
+  check('state.json: task-12 records fromChat (the new chat) and fromMessage (a line of chats/<id>.jsonl)', (() => { const t = items().find((i) => i.id === 'task-12'); return t && t.fromChat === nc && fs.readFileSync(file(`chats/${nc}.jsonl`), 'utf8').includes(t.fromMessage); })());
+  check('the model saw only this chat: "1 messages in context"', await logHas('1 messages in context'));
+  await waitFor(`(document.querySelector('#chat-list .chat-link[aria-current="page"] .ct') || {}).textContent === 'call the pharmacy about'`, 4000);
+  check('after the first reply the title role names it: "call the pharmacy about", model · morrow', await page.eval(`(() => { const a = document.querySelector('#chat-list .chat-link[aria-current="page"]'); return a.querySelector('.ct').textContent === 'call the pharmacy about' && a.querySelector('.cby').textContent.startsWith('model · morrow'); })()`) && await tag('task-12') === 'chat · call the pharmacy about');
+  check('transcript.jsonl (main) is untouched byte for byte by everything in the other chats', Buffer.compare(mainBefore, fs.readFileSync(file('transcript.jsonl'))) === 0);
+  await shot('v12-new.png');
+
+  // ---- a card's chat tag opens that chat at the message ----
+  await click('#pane-kanban .item[data-id="task-9"] .chat-tag');
+  await waitFor(`location.search === '?chat=c-invoices'`);
+  const fm = items().find((i) => i.id === 'task-9').fromMessage;
+  await sleep(200);
+  check('the tag on task-9 opens c-invoices and marks the message it came from', await where() === '/?chat=c-invoices' && await page.eval(`document.getElementById('msg-${fm}') && document.getElementById('msg-${fm}').classList.contains('flash')`) && events().some((e) => e.event === 'chat_switch' && e.to === 'c-invoices' && e.how === 'tag'));
+
+  // ---- back and forward ----
+  await page.eval(`history.back()`);
+  await waitFor(`location.search === '?chat=${nc}'`);
+  check('Back returns to the chat before (the log follows the URL)', await where() === `/?chat=${nc}` && await logHas('call the pharmacy') && await current() === nc);
+
+  // ---- /why with a link into another chat ----
+  await page.submit('/why task-9', 600);
+  const why = await page.eval(`[...document.querySelectorAll('.why-fact')].map((p) => p.textContent).join('\\n')`);
+  check('/why task-9 cites chats/c-invoices.jsonl and its line, and names the chat', /chats\/c-invoices\.jsonl:1 m-f/.test(why) && /from chat c-invoices "invoices" \(chats\/c-invoices\.jsonl, line 1\)/.test(why), why.split('\n').slice(0, 4).join(' / '));
+  await click('.why-fact .go');
+  await waitFor(`location.search === '?chat=c-invoices' && !!document.querySelector('#log .ln.flash')`);
+  check('its "show m-…" opens c-invoices at that message', await where() === '/?chat=c-invoices' && await page.eval(`!!document.querySelector('#log .ln.flash')`));
+
+  // ---- two tabs in two chats ----
+  const tab2 = await page.newTab();
+  await tab2.goto(`${URL}?chat=c-hospital`);
+  await waitFor(`document.getElementById('meta').textContent.includes('live')`, 4000, tab2);
+  check('a second tab at ?chat=c-hospital shows that chat (its own log), marked current there', await current(tab2) === 'c-hospital' && await logHas('discharge letter', tab2) && !(await logHas('pharmacy receipts', tab2)));
+  await click(`#chat-list .chat-link[data-chat="${nc}"]`);
+  await waitFor(`location.search === '?chat=${nc}'`);
+  await page.submit('Task: bring the receipts folder.', 300);
+  const t2 = await waitFor(`!!document.querySelector('#pane-kanban .item[data-id="task-13"]')`, 6000, tab2);
+  check('a task sent in tab 1 (the new chat) appears on the board in tab 2, which stays in c-hospital', t2 !== null && await where(tab2) === '/?chat=c-hospital' && !(await logHas('receipts folder', tab2)), `${t2} ms`);
+  await waitFor(`(document.querySelector('#chat-list .chat-link') || {}).dataset?.chat === '${nc}'`, 3000, tab2);
+  check('the list in tab 2 follows by SSE: the new chat is first there (most recent activity) with its name', (await listed(tab2)).startsWith(`${nc},`) && await tab2.eval(`document.querySelector('#chat-list .chat-link .ct').textContent === 'call the pharmacy about'`));
+  await tab2.goto(`${URL}?chat=c-hospital`);
+  await waitFor(`document.getElementById('meta').textContent.includes('live')`, 4000, tab2);
+  check('a reload keeps tab 2 in c-hospital', await where(tab2) === '/?chat=c-hospital' && await current(tab2) === 'c-hospital');
+  check('tab 1 is still in the new chat (each tab has its own chat)', await where() === `/?chat=${nc}` && await current() === nc);
+  tab2.close();
+
+  // ---- the open question shows in every chat, saying where it was asked ----
+  const mods = JSON.parse(fs.readFileSync(file('modules.json'), 'utf8'));
+  const ask = { id: 'm-q12test', ts: new Date().toISOString(), role: 'controller', text: 'The index pane has been a tab for 9 turns. Remove the index pane? (y removes it, the rule may offer it again later; n keeps the tab; x removes it for good)', model: null, module: 'index', question: 'remove' };
+  fs.appendFileSync(file('chats/c-hospital.jsonl'), JSON.stringify(ask) + '\n');
+  mods.pending = 'index'; mods.pendingKind = 'remove'; mods.panes.find((p) => p.module === 'index').removalAsked = true; mods.rev += 1;
+  fs.writeFileSync(file('modules.json'), JSON.stringify(mods, null, 2));
+  await waitFor(`!!document.querySelector('#log .ln.controller.pending .asked-in')`, 3000);
+  check('an open question asked in c-hospital shows in the new chat too, with its y/n/x buttons and "asked in chat …"', await page.eval(`(() => { const p = document.querySelector('#log .ln.controller.pending'); return !!p && /^asked in chat The hospital sent/.test(p.querySelector('.asked-in').textContent) && p.querySelectorAll('button.key').length === 3; })()`));
+  await page.eval(`document.getElementById('input').focus()`);
+  await page.key('n'); await sleep(500);
+  check('n from the empty input answers it here: removals.index "no", the system line goes to this chat (not to main, not to c-hospital)', JSON.parse(fs.readFileSync(file('modules.json'), 'utf8')).removals.index.answer === 'no' && fs.readFileSync(file(`chats/${nc}.jsonl`), 'utf8').includes('remove index: no') && Buffer.compare(mainBefore, fs.readFileSync(file('transcript.jsonl'))) === 0);
+
+  // ---- keyboard: Alt+S (Option+S), arrows, Escape; never from a non-empty input ----
+  const altS = () => page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 's', code: 'KeyS', windowsVirtualKeyCode: 83, modifiers: 1 }).then(() => page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 's', code: 'KeyS', windowsVirtualKeyCode: 83, modifiers: 1 }));
+  await page.eval(`document.getElementById('input').focus()`);
+  await altS(); await sleep(100);
+  check('Alt+S from the empty input focuses the current chat in the sidebar', await page.eval(`document.activeElement.classList.contains('chat-link') && document.activeElement.dataset.chat === ${JSON.stringify(nc)}`));
+  await page.key('ArrowDown'); await sleep(50);
+  const next = await page.eval(`document.activeElement.dataset.chat`);
+  await page.key('Escape'); await sleep(50);
+  check('↓ moves to the next chat, Escape returns to the input', next && next !== nc && await page.eval(`document.activeElement.id === 'input'`), next);
+  await page.type('half a sentence');
+  await altS(); await sleep(100);
+  check('Alt+S with text in the input does nothing (focus and text stay)', await page.eval(`document.activeElement.id === 'input' && document.getElementById('input').value === 'half a sentence'`));
+  await page.eval(`document.getElementById('input').value = ''`);
+
+  // ---- /chat commands: rename, archive (nothing deleted), unarchive ----
+  await page.submit('/chat rename pharmacy', 500);
+  check('/chat rename pharmacy: chats.json title, named by you (chat_rename by user)', chatsDoc().chats.find((c) => c.id === nc).title === 'pharmacy' && chatsDoc().chats.find((c) => c.id === nc).titleBy === 'user' && await page.eval(`document.querySelector('#chat-list .chat-link[aria-current="page"] .cby').textContent.startsWith('you')`));
+  const size = fs.statSync(file(`chats/${nc}.jsonl`)).size;
+  await page.submit('/chat archive', 700);
+  check('/chat archive: hidden from the list, you are taken to the most recent chat left, chats/<id>.jsonl still there unchanged', !(await listed()).split(',').includes(nc) && await where() !== `/?chat=${nc}` && fs.statSync(file(`chats/${nc}.jsonl`)).size === size && chatsDoc().chats.find((c) => c.id === nc).archived === true);
+  await click('#archived-toggle');
+  check('"archived: 2 (show)" lists both archived chats', await page.eval(`!document.getElementById('chat-archived').hidden && document.querySelectorAll('#chat-archived .chat-link').length === 2`));
+  await page.submit(`/chat unarchive pharmacy`, 600);
+  check('/chat unarchive pharmacy: back in the list', (await listed()).split(',').includes(nc) && chatsDoc().chats.find((c) => c.id === nc).archived === undefined);
+
+  // ---- the drawer below 900 px ----
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 820, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(300);
+  check('820 px: the sidebar is a closed drawer, the ☰ button in the title bar opens it; no horizontal scroll', await page.eval(`document.getElementById('chats').hidden && getComputedStyle(document.getElementById('chats-btn')).display !== 'none' && document.documentElement.scrollWidth <= innerWidth`));
+  await click('#chats-btn'); await sleep(200);
+  const dr = await page.eval(`(() => { const n = document.getElementById('chats'); return { open: !n.hidden, fixed: getComputedStyle(n).position === 'fixed', w: Math.round(n.getBoundingClientRect().width), h: document.documentElement.scrollWidth > innerWidth }; })()`);
+  check('☰ opens the drawer over the page (fixed), no horizontal scroll', dr.open && dr.fixed && dr.w > 0 && !dr.h, JSON.stringify(dr));
+  await shot('v12-drawer.png');
+  const other = (await current()) === 'c-invoices' ? 'c-hospital' : 'c-invoices';
+  await click(`#chat-list .chat-link[data-chat="${other}"]`);
+  await waitFor(`location.search === '?chat=${other}'`);
+  await sleep(150);
+  check('a chat picked in the drawer opens and the drawer closes', await where() === `/?chat=${other}` && await page.eval(`document.getElementById('chats').hidden`));
+  await page.eval(`document.getElementById('input').focus()`);
+  await altS(); await sleep(150);
+  check('Alt+S opens the drawer and focuses the current chat; Escape closes it again', await page.eval(`!document.getElementById('chats').hidden && document.activeElement.dataset.chat === '${other}'`) && (await page.key('Escape'), await sleep(100), await page.eval(`document.getElementById('chats').hidden && document.activeElement.id === 'input'`)));
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(200);
+
+  // ---- light mode and the files ----
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+  await sleep(150);
+  check('light mode: the current chat keeps its marker (lavender edge on the bar colour)', await page.eval(`(() => { const a = document.querySelector('#chat-list .chat-link[aria-current="page"]'); const cs = getComputedStyle(a); return cs.borderLeftStyle === 'solid' && cs.borderLeftWidth === '3px'; })()`));
+  await shot('v12-light.png');
+  await page.send('Emulation.setEmulatedMedia', { features: [] });
+  check('nothing was deleted: every chat file of the fixture is still there, main byte for byte', ['chats/c-scratch.jsonl', 'chats/c-invoices.jsonl', 'chats/c-hospital.jsonl', `chats/${nc}.jsonl`].every((f) => fs.existsSync(file(f))) && Buffer.compare(mainBefore, fs.readFileSync(file('transcript.jsonl'))) === 0);
+}
+
+const SCENARIOS = { p1, p2, v03, v04, v05, v06, v07, v08, v09, v10, v11, v12 };
 const ENVS = {
   v03: () => {
     const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
@@ -1388,6 +1559,15 @@ const ENVS = {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v11b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4845/', fakes: [5846, 5847], dir: '.pilot-verify-v11b', config: file, cdp: 9423 };
+  },
+  // pilot-v0.12: the v0.12 demo config (three chats and an archived one, a title role on morrow) on this scenario's ports
+  v12: () => {
+    const c = JSON.parse(fs.readFileSync(path.join(APP, 'demo', 'fixtures', 'v0.12', 'pilot.config.json'), 'utf8'));
+    c.port = 4855;
+    for (const r of Object.values(c.roles)) for (const k of r.candidates) k.baseUrl = k.baseUrl.replace(':5794/', ':5856/').replace(':5795/', ':5857/');
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v12b-')), 'config.json');
+    fs.writeFileSync(file, JSON.stringify(c));
+    return { url: 'http://127.0.0.1:4855/', fakes: [5856, 5857], dir: '.pilot-verify-v12b', config: file, cdp: 9433 };
   },
 };
 

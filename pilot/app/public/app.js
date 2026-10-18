@@ -29,6 +29,12 @@
 // card. The card moves at once (optimistic) and POST /move writes it with the page's last state.json rev; a refused move
 // (stale rev, a rejected task) reloads and the card snaps back. Columns sort by public/board.js (order, else file order).
 // Moves are announced in an aria-live region (#announce). File events wait while a drag or a move is in flight.
+// pilot-v0.12: several chats in one project. This tab shows one chat (`chat`, kept in the URL: /?chat=<id>, main = /),
+// so a reload and two tabs in two chats both work. Every write names the chat it comes from. The sidebar (#chats) lists
+// the chats, most recent activity first, with who named each one; "+ new chat"; archived ones behind a toggle. It is
+// closed while the project has one chat (no chats.json), open otherwise, a drawer below 900 px (☰ in the title bar);
+// Alt+S focuses it (never while the input has text). The board is shared: a card names its chat (a button that opens
+// that chat at the message). The open question of the controller shows in every chat, saying where it was asked.
 'use strict';
 const $ = (id) => document.getElementById(id);
 const bench = $('bench'), log = $('log'), form = $('form'), input = $('input');
@@ -48,6 +54,8 @@ let es = null, live = false; // EventSource on /events; live = connected (else: 
 let streaming = false;      // this tab is streaming a reply: file events wait (a re-render would drop the live line)
 const deferred = new Set(); // files changed while streaming
 let flash = null, flashTimer = null;   // short notice after a stale write
+// pilot-v0.12: the chat this tab shows (from the URL; main when none)
+let chat = new URLSearchParams(location.search).get('chat') || 'main';
 $('brand').insertAdjacentHTML('afterbegin', Pixel.sprite('teletype', 18, 'pilot') + ' ');
 
 function addLine(role, text, model, id, kind) {
@@ -111,6 +119,16 @@ function renderLog() {
     if (l.role === 'controller') addController(l, !!l.module && lastCtl[ctlKey(l)] === i);
     else addLine(l.role, l.text, l.model, l.id, l.kind);
   });
+  // pilot-v0.12: the open question was asked in another chat. It belongs to the project, so it shows here too (with its
+  // buttons, and the y/n/a/x keys answer it as before), saying where it was asked.
+  const pl = state.pendingLine;
+  if (state.pending && pl && pl.line && pl.chat !== chat && !state.transcript.some((l) => l.id === pl.line.id)) {
+    addController(pl.line, true);
+    const p = log.lastElementChild;
+    p.removeAttribute('id');
+    const s = document.createElement('small'); s.className = 'asked-in'; s.textContent = `asked in chat ${chatTitle(pl.chat)}; it is about the whole project`;
+    p.querySelector('.text').prepend(s);
+  }
   updateCount();
 }
 function updateCount() {
@@ -209,6 +227,16 @@ function itemMeta(it, status, byModel) {
   }
   const edited = fields.filter((f) => !['status', 'decidedAt', 'decidedBy'].includes(f));
   if (edited.length) meta.append(' · edited by ', chip('you', 'you (file edit)'), `: ${edited.join(', ')}`);
+  // pilot-v0.12: the board is shared by the chats; a card names the chat it came from (only with more than one chat)
+  if (multiChat() && it.chat) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'chat-tag'; b.dataset.chat = it.chat;
+    const t = chatTitle(it.chat);
+    b.textContent = `chat · ${t.length > 24 ? `${t.slice(0, 23)}…` : t}`;
+    b.title = `from chat "${t}" (${it.chat})${it.fromMessage ? `, message ${it.fromMessage}: click to open it there` : ''}`;
+    b.addEventListener('click', (e) => { e.stopPropagation(); switchChat(it.chat, 'tag', it.fromMessage); });
+    meta.append(' · ', b);
+  }
   return meta;
 }
 
@@ -296,7 +324,7 @@ function frameNodes(mod) {
   return nodes;
 }
 async function sendFrame(mod, id, action, fromPane) {
-  const res = await fetch('/frame', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pane: mod, id, action, rev: (state.frames || {}).rev }) });
+  const res = await fetch('/frame', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pane: mod, id, action, rev: (state.frames || {}).rev, chat }) });
   if (!res.ok) await writeFailed(res);
   await loadState();
   if (!fromPane) return;
@@ -378,7 +406,7 @@ async function writeFailed(res) {
 }
 
 async function sendDecision(id, word, fromCard) {
-  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ itemId: id, decision: word, rev: state.stateRev }) });
+  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ itemId: id, decision: word, rev: state.stateRev, chat }) });
   if (!res.ok) await writeFailed(res);
   else if (selected === id) selected = null;
   await loadState();
@@ -448,7 +476,11 @@ function renderWhy(statements, ok) {
       if (st.msg) {
         const b = document.createElement('button');
         b.type = 'button'; b.className = 'go'; b.textContent = `show ${st.msg}`;
-        b.addEventListener('click', () => { if (!scrollToMsg(st.msg)) addLine('out', `${st.msg} is not among the lines shown`).p.classList.add('err'); });
+        // pilot-v0.12: a message in another chat opens that chat first (st.chat; missing = main)
+        b.addEventListener('click', () => {
+          if ((st.chat || 'main') !== chat) { switchChat(st.chat || 'main', 'link', st.msg); return; }
+          if (!scrollToMsg(st.msg)) addLine('out', `${st.msg} is not among the lines shown`).p.classList.add('err');
+        });
         body.append(' ', b);
       }
     }
@@ -500,7 +532,7 @@ function benchTemplate(list) {
   const anyShown = list.some((m) => !faded(m));
   const rows = list.map((m, i) => `"chat p${i + 1}" ${faded(m) ? 'auto' : 'minmax(0, 1fr)'}`);
   if (!anyShown) rows.push('"chat ." minmax(0, 1fr)');
-  return `${rows.join(' ')} / ${anyShown ? 'minmax(0, 1.6fr) minmax(0, 1fr)' : 'minmax(0, 1fr) fit-content(18rem)'}`;
+  return `${rows.join(' ')} / ${anyShown ? 'minmax(0, var(--chat-fr, 1.6fr)) minmax(0, 1fr)' : 'minmax(0, 1fr) fit-content(18rem)'}`;   // pilot-v0.12: --chat-fr (1.2 with the sidebar)
 }
 
 function renderPanes(contentOnly) {
@@ -576,22 +608,35 @@ PARTS['modules.json'].push('paneInfo', 'pendingKind', 'removals', 'faded');   //
 PARTS['transcript.jsonl'].push('turn');                                       // pilot-v0.8
 PARTS['flags.json'] = ['flags'];                                              // pilot-v0.9
 PARTS['frames.json'] = ['frames'];                                            // pilot-v0.10
+PARTS['chats.json'] = ['chats', 'turn'];                                      // pilot-v0.12: the chat list
+PARTS['modules.json'].push('pendingLine');                                    // pilot-v0.12
+PARTS['transcript.jsonl'].push('chat');
 let reqGen = 0;
 const appliedGen = {};
 const sigs = {};
 const sigOf = {
-  log: (s) => [s.total, (s.transcript[s.transcript.length - 1] || {}).id, s.pending, s.pendingKind, JSON.stringify(s.answers), JSON.stringify(s.removals)].join('|'),
+  log: (s) => [s.chat, s.total, (s.transcript[s.transcript.length - 1] || {}).id, s.pending, s.pendingKind, JSON.stringify(s.answers), JSON.stringify(s.removals), JSON.stringify(s.pendingLine), multiChat() && chatTitle(s.pendingLine && s.pendingLine.chat)].join('|'),
   // items too: hand edits keep rev. pilot-v0.8: of the fade status only what the panes show (tab or not, its label), so
   // a touch (lastTouch moves) does not re-render the panes
-  panes: (s) => [(s.panes || []).join(','), (s.faded || []).join(','), JSON.stringify(s.frames), !!(s.flags && s.flags.frameProposals), s.stateRev, JSON.stringify(s.items), JSON.stringify(s.paneInfo, (k, v) => (k === 'fade'
+  panes: (s) => [multiChat() && JSON.stringify(((s.chats || {}).list || []).map((c) => [c.id, c.title])), (s.panes || []).join(','), (s.faded || []).join(','), JSON.stringify(s.frames), !!(s.flags && s.flags.frameProposals), s.stateRev, JSON.stringify(s.items), JSON.stringify(s.paneInfo, (k, v) => (k === 'fade'
     ? (v && v.faded ? { fadedTurn: v.fadedTurn, lastTouch: v.lastTouch && v.lastTouch.turn, fadeAfter: v.fadeAfter } : null) : v))].join('|'),
   models: (s) => JSON.stringify(s.models) + !!(s.flags && s.flags.frameProposals),
+  chats: (s) => JSON.stringify(s.chats) + chat,   // pilot-v0.12
 };
 async function loadState(files) {
   const gen = ++reqGen;
   const list = files ? files.filter((f) => PARTS[f]) : Object.keys(PARTS);
   if (files && !list.length) return;
-  const next = await (await fetch(files ? `/state?only=${encodeURIComponent(list.join(','))}` : '/state')).json();
+  const want = chat;
+  const q = `chat=${encodeURIComponent(want)}`;
+  const res = await fetch(files ? `/state?only=${encodeURIComponent(list.join(','))}&${q}` : `/state?${q}`);
+  if (res.status === 404 && want !== 'main') {   // pilot-v0.12: a chat that is not (or no longer) in chats.json
+    chat = 'main'; history.replaceState(null, '', chatUrl('main'));
+    showFlash(`no chat "${want}" in this project; showing main`);
+    return loadState();
+  }
+  const next = await res.json();
+  if (want !== chat) return;   // switched meanwhile: the answer belongs to the other chat
   for (const f of list) {
     if (gen <= (appliedGen[f] || 0)) continue;
     appliedGen[f] = gen;
@@ -603,6 +648,7 @@ async function loadState(files) {
   if (dirty('log')) renderLog();
   if (dirty('panes')) renderPanes();
   if (dirty('models')) renderModels(state.models);
+  if (dirty('chats')) renderChats();
   updateCount();
   updatePlaceholder();
   renderNotice();
@@ -620,7 +666,20 @@ async function loadState(files) {
 function onFiles(files) {
   // pilot-v0.11: also while a drag or a move is in flight (a re-render would drop the dragged card or snap it back early)
   if (streaming || drag || moving) { files.forEach((f) => deferred.add(f)); return; }
-  loadState(files).catch(() => {});
+  loadState(partsOf(files)).catch(() => {});
+}
+// pilot-v0.12: a file event -> the parts of /state to reload. The file of the chat this tab shows is its transcript part;
+// any chat file (and chats.json) changes the list (activity, titles, the project-wide turn).
+const isChatFile = (f) => f === 'transcript.jsonl' || /^chats\/[^/]+\.jsonl$/.test(f);
+const chatFile = (id) => (id === 'main' ? 'transcript.jsonl' : `chats/${id}.jsonl`);
+const allFiles = () => [...Object.keys(PARTS).filter((f) => f !== 'transcript.jsonl'), chatFile(chat)];   // every part, as file events
+function partsOf(files) {
+  const out = new Set();
+  for (const f of files) {
+    if (isChatFile(f)) { if (f === chatFile(chat)) out.add('transcript.jsonl'); out.add('chats.json'); }
+    else out.add(f);
+  }
+  return [...out];
 }
 function connectEvents() {
   if (typeof EventSource !== 'function') return;
@@ -628,12 +687,12 @@ function connectEvents() {
   let wasLive = false;
   es.addEventListener('hello', () => {
     const again = wasLive; live = true; wasLive = true;
-    if (again || document.body.dataset.loaded) onFiles(Object.keys(PARTS));   // catch up on what was missed
+    if (again || document.body.dataset.loaded) onFiles(allFiles());   // catch up on what was missed
   });
   es.addEventListener('change', (e) => { try { onFiles([JSON.parse(e.data).file]); } catch { /* ignore a bad event */ } });
   es.addEventListener('status', (e) => {
     try { state.extracting = JSON.parse(e.data).extracting; } catch { return; }
-    if (!state.extracting) onFiles(['state.json', 'modules.json', 'transcript.jsonl']);
+    if (!state.extracting) onFiles(['state.json', 'modules.json', chatFile(chat)]);
     else meta.textContent = 'extracting proposals…';
   });
   es.onerror = () => { live = false; if (!streaming) meta.textContent = 'reconnecting…'; };   // EventSource retries
@@ -648,7 +707,7 @@ const touched = {};   // pane -> turn of the last report
 function sendTouch(mod, how, force) {
   if (!force && touched[mod] === state.turn) return;
   touched[mod] = state.turn;
-  fetch('/touch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ module: mod, how }) })
+  fetch('/touch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ module: mod, how, chat }) })
     .then((r) => r.json()).then((b) => {
       // keep the modules.json rev current, so the touch never makes a consent answer stale
       if (b && Number.isInteger(b.rev) && b.rev > (state.modulesRev || 0)) state.modulesRev = b.rev;
@@ -700,7 +759,7 @@ function moveCard(card, col, index) {
   moving++;
   moveChain = moveChain.then(async () => {
     try {
-      const res = await fetch('/move', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ itemId: id, column: col, index, rev: state.stateRev }) });
+      const res = await fetch('/move', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ itemId: id, column: col, index, rev: state.stateRev, chat }) });
       if (!res.ok) {
         const body = await res.clone().json().catch(() => ({}));
         await writeFailed(res);
@@ -715,7 +774,7 @@ function moveCard(card, col, index) {
       }
     } catch (err) { addLine('system', `move failed: ${err.message}`); sigs.panes = null; }
     moving--;
-    if (!moving && drag) Object.keys(PARTS).forEach((f) => deferred.add(f));   // a new drag started: reload when it ends
+    if (!moving && drag) allFiles().forEach((f) => deferred.add(f));   // a new drag started: reload when it ends
     else if (!moving) {
       deferred.clear();
       await loadState().catch(() => {});
@@ -823,7 +882,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 async function sendAnswer(module, word) {
-  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ module, answer: word, rev: state.modulesRev }) });
+  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ module, answer: word, rev: state.modulesRev, chat }) });
   if (!res.ok) await writeFailed(res);
   await loadState();
   input.focus();
@@ -839,9 +898,11 @@ async function runCommand(text) {
     addLine('out', ok ? `theme: ${arg}` : 'usage: /theme light|dark|auto').p.classList.toggle('err', !ok);
     return;
   }
-  const res = await fetch('/command', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+  const res = await fetch('/command', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, chat }) });
   const out = await res.json();
-  await loadState();                             // picks up a /model system line and the new status bar
+  // pilot-v0.12: /chat new, /chat <name>, /chat archive name a chat to go to; the output is shown there
+  if (out.chat && out.chat !== chat) await switchChat(out.chat, /^\/chat new\b/.test(text) ? 'new' : /^\/chat archive\b/.test(text) ? 'archive' : 'command');
+  else await loadState();                        // picks up a /model system line and the new status bar
   addLine('out', text).p.classList.add('cmd');
   if (cmd === '/why' && Array.isArray(out.why)) return renderWhy(out.why, out.ok);
   for (const l of out.lines || []) {
@@ -978,7 +1039,7 @@ form.addEventListener('submit', async (e) => {
   p.classList.add('streaming');
   meta.textContent = 'thinking…';
   try {
-    const res = await fetch('/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+    const res = await fetch('/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, chat }) });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -999,6 +1060,111 @@ form.addEventListener('submit', async (e) => {
     input.disabled = false;
     input.focus();
   }
+});
+
+// ---- pilot-v0.12: chats. The URL holds the chat (main = /), so a reload stays in it and two tabs can be in two chats.
+const chatUrl = (id) => (id === 'main' ? '/' : `/?chat=${encodeURIComponent(id)}`);
+const multiChat = () => !!(state.chats && state.chats.exists);
+const chatInfo = (id) => ((state.chats && state.chats.list) || []).find((c) => c.id === id) || null;
+const chatTitle = (id) => { const c = chatInfo(id); return c ? c.title : id || 'main'; };
+const nav = $('chats'), shell = $('shell'), chatsBtn = $('chats-btn');
+const wide = matchMedia('(min-width: 900px)');
+let drawerOpen = false;     // below 900 px: the drawer is open
+const sidebarPref = () => { try { return localStorage.getItem('pilot-sidebar'); } catch { return null; } };   // open | closed | null
+// Open: wide -> your choice (☰), else open when the project has more than one chat; narrow -> the drawer.
+const sidebarOpen = () => (wide.matches ? (sidebarPref() ? sidebarPref() === 'open' : multiChat()) : drawerOpen);
+function layoutChats() {
+  const open = sidebarOpen();
+  nav.hidden = !open;
+  shell.classList.toggle('with-chats', open && wide.matches);
+  nav.classList.toggle('drawer', !wide.matches);
+  chatsBtn.setAttribute('aria-expanded', String(open));
+  $('chat-name').textContent = multiChat() ? `· ${chatTitle(chat)}` : '';
+  document.title = multiChat() ? `${chatTitle(chat)} · CLI Pilot` : 'CLI Pilot';
+}
+function toggleChats(open, focus) {
+  if (wide.matches) { try { localStorage.setItem('pilot-sidebar', open ? 'open' : 'closed'); } catch { /* not kept */ } }
+  else drawerOpen = open;
+  layoutChats();
+  if (open && focus) focusChats();
+  if (!open && nav.contains(document.activeElement)) input.focus();
+}
+function focusChats() {
+  const cur = nav.querySelector('.chat-link[aria-current="page"]') || nav.querySelector('.chat-link') || $('new-chat');
+  if (cur) cur.focus();
+}
+const byline = (c) => (c.titleBy === 'model' ? chip('model', `model · ${c.titleModel || '?'}`) : c.titleBy === 'you' || c.titleBy === 'you (file edit)' ? chip('you', c.titleBy) : c.titleBy || '');
+function chatLink(c) {
+  const li = document.createElement('li');
+  const a = document.createElement('a');
+  a.className = 'chat-link'; a.href = chatUrl(c.id); a.dataset.chat = c.id;
+  if (c.id === chat) a.setAttribute('aria-current', 'page');
+  a.title = `${c.title} (${c.id}, ${c.file}): ${c.messages} messages${c.titleBy ? `; named by ${c.titleBy === 'model' ? `model · ${c.titleModel || '?'}` : c.titleBy}` : ''}${c.lastActivity ? `; last activity ${c.lastActivity}` : ''}`;
+  const t = document.createElement('span'); t.className = 'ct'; t.textContent = c.title;
+  const by = document.createElement('small'); by.className = 'cby';
+  by.append(byline(c), `${c.titleBy ? ' · ' : ''}${c.messages} msg`, ...(c.lastActivity ? [' · ', when(c.lastActivity)] : []));
+  a.append(t, by);
+  a.addEventListener('click', (e) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;   // a new tab: the link does it
+    e.preventDefault();
+    switchChat(c.id, 'sidebar');
+  });
+  li.append(a);
+  return li;
+}
+let showArchived = false;
+function renderChats() {
+  const list = (state.chats && state.chats.list) || [];
+  const live = list.filter((c) => !c.archived || c.id === chat), arch = list.filter((c) => c.archived);
+  $('chat-list').replaceChildren(...live.map(chatLink));
+  const tg = $('archived-toggle');
+  tg.hidden = !arch.length;
+  tg.textContent = `archived: ${arch.length} (${showArchived ? 'hide' : 'show'})`;
+  tg.setAttribute('aria-expanded', String(showArchived));
+  $('chat-archived').hidden = !showArchived || !arch.length;
+  $('chat-archived').replaceChildren(...arch.map(chatLink));
+  layoutChats();
+}
+$('archived-toggle').addEventListener('click', () => { showArchived = !showArchived; renderChats(); });
+$('new-chat').addEventListener('click', () => { runCommand('/chat new').then(() => input.focus()).catch((err) => addLine('system', `error: ${err.message}`)); });
+chatsBtn.addEventListener('click', () => toggleChats(!sidebarOpen(), !wide.matches));
+$('chats-close').addEventListener('click', () => toggleChats(false));
+wide.addEventListener('change', () => { drawerOpen = false; layoutChats(); });
+
+// Switches this tab to chat `id`: the URL, the log, the index; the board and the panes stay (they are the project's).
+// how (for chat_switch in metrics.jsonl): sidebar | command | tag | link | new | archive | back. `msg` scrolls to a message.
+async function switchChat(id, how, msg) {
+  const from = chat;
+  if (!wide.matches && drawerOpen) { drawerOpen = false; layoutChats(); }   // a pick in the drawer closes it
+  if (id !== from) {
+    chat = id;
+    if (how !== 'back') history.pushState({ chat: id }, '', chatUrl(id));
+    state.transcript = []; state.total = 0; state.pendingLine = null;
+    for (const k of Object.keys(sigs)) sigs[k] = null;
+    fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: 'chat_switch', from, to: id, how }) }).catch(() => {});
+    await loadState();
+  }
+  if (msg && !scrollToMsg(msg)) addLine('out', `${msg} is not among the lines shown`).p.classList.add('err');
+  if (!msg) log.scrollTop = log.scrollHeight;
+  if (how !== 'back' && !(nav.contains(document.activeElement) && wide.matches)) input.focus();
+}
+window.addEventListener('popstate', () => { const id = new URLSearchParams(location.search).get('chat') || 'main'; if (id !== chat) switchChat(id, 'back'); });
+
+// Alt+S (Option+S): focus the chat list, opening it if needed. Never while the chat input has text (then it is a key
+// like any other). In the list: ↑/↓ move, Enter opens (a link), Escape returns to the input (and closes the drawer).
+document.addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyS' || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing || e.repeat) return;
+  if (e.target === input && input.value !== '') return;
+  e.preventDefault();
+  if (!sidebarOpen()) toggleChats(true, true); else focusChats();
+});
+nav.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { e.preventDefault(); if (!wide.matches) toggleChats(false); input.focus(); return; }
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  const all = [$('new-chat'), ...nav.querySelectorAll('.chat-link')].filter((x) => x.offsetParent !== null);
+  const i = all.indexOf(document.activeElement);
+  const to = all[Math.max(0, Math.min(all.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
+  if (to) { e.preventDefault(); to.focus(); }
 });
 
 loadState().catch((err) => { meta.textContent = 'offline'; addLine('system', `cannot load state: ${err.message}`); });

@@ -21,6 +21,7 @@ const stats = require('./stats.js');
 const fade = require('./fade.js');
 const frame = require('./frame.js');
 const board = require('./public/board.js');   // pilot-v0.11: the kanban order rule
+const chats = require('./chats.js');          // pilot-v0.12: several chats; a message is cited in its own chat's file
 
 const MODULES = ['index', 'map', 'kanban'];   // panes this build can show (server.js BUILT)
 const TITLES = { chat: 'chat', index: 'index', map: 'reasoning map', kanban: 'kanban' };
@@ -99,9 +100,13 @@ function keyCite(ctx, key, mod, from) {
 
 function load(dir) {
   const ctx = { dir, raw: {} };
-  const tr = readJsonlNumbered(path.join(dir, 'transcript.jsonl'));
+  // pilot-v0.12: the lines of every chat, each row {n, obj, file, chat} (file = transcript.jsonl or chats/<id>.jsonl)
+  const cd = chats.readDoc(dir);
+  ctx.multi = cd.exists;
+  ctx.chatList = chats.normalize(cd.doc);
+  ctx.raw['chats.json'] = (() => { try { return fs.readFileSync(path.join(dir, 'chats.json'), 'utf8'); } catch { return ''; } })();
   const me = readJsonlNumbered(path.join(dir, 'metrics.jsonl'));
-  ctx.lines = tr.rows; ctx.events = me.rows;
+  ctx.lines = chats.allRows(dir, ctx.chatList); ctx.events = me.rows;
   for (const [key, file] of [['modules', 'modules.json'], ['state', 'state.json'], ['rules', 'rules.json'], ['frames', 'frames.json']]) {
     const r = readJsonDoc(path.join(dir, file));
     ctx.raw[file] = r.raw;
@@ -123,6 +128,10 @@ function load(dir) {
 
 const ev = (ctx, pred) => ctx.events.filter((r) => r.obj && pred(r.obj));
 const msgRow = (ctx, id) => ctx.lines.find((r) => r.obj && r.obj.id === id) || null;
+// pilot-v0.12: a link to a message names its chat when it is not main (the page switches there first)
+const link = (row) => ({ msg: row.obj.id, ...(row.chat && row.chat !== chats.MAIN ? { chat: row.chat } : {}) });
+const where = (ctx) => (ctx.multi ? 'any chat' : 'transcript.jsonl');
+const chatCite = (ctx, id) => inFile(ctx, 'chats.json', new RegExp(`"id"\\s*:\\s*"${esc(id)}"`), `chats ${id}`);
 const author = (line) => (line.role === 'assistant' ? `model${line.model ? ` · ${line.model}` : ''}` : WHO[line.role] || line.role);
 const norm = (t) => String(t).replace(/\s+/g, ' ').trim().toLowerCase();
 const shown = (ctx, mod) => ctx.panes.some((p) => p.module === mod) && ['yes', 'always'].includes((ctx.answers[mod] || {}).answer);
@@ -160,8 +169,8 @@ function paneHistory(ctx, mod) {
       if (e.event === 'controller_ask') {
         const q = questionLine(ctx, e);
         out.push({ text: `the controller asked at ${e.ts} (turn ${e.turn}) whether to remove it: a tab for ${e.fadedFor} turns, askRemoveAfterTurns ${e.askRemoveAfterTurns}`
-          + (q ? `, "${q.obj.text}"` : ' (the question line is not in transcript.jsonl)'),
-          cite: [jl('metrics.jsonl', row, 'controller_ask'), ...(q ? [jl('transcript.jsonl', q, q.obj.id)] : [])], ...(q ? { msg: q.obj.id } : {}) });
+          + (q ? `, "${q.obj.text}"` : ` (the question line is not in ${where(ctx)})`),
+          cite: [jl('metrics.jsonl', row, 'controller_ask'), ...(q ? [jl(q.file, q, q.obj.id)] : [])], ...(q ? link(q) : {}) });
       } else if (e.event === 'consent') {
         out.push({ text: `you answered "${e.answer}" to removing it at ${e.ts} (turn ${e.turn})`, cite: [jl('metrics.jsonl', row, `consent ${e.id || ''}`.trim())] });
       }
@@ -170,8 +179,8 @@ function paneHistory(ctx, mod) {
     if (e.event === 'controller_ask') {
       const q = questionLine(ctx, e);
       out.push({ text: `the controller asked at ${e.ts}: ${e.count} ${e.metric} reached the threshold ${e.threshold}`
-        + (q ? `, "${q.obj.text}"` : ' (the question line is not in transcript.jsonl)'),
-        cite: [jl('metrics.jsonl', row, 'controller_ask'), ...(q ? [jl('transcript.jsonl', q, q.obj.id)] : [])], ...(q ? { msg: q.obj.id } : {}) });
+        + (q ? `, "${q.obj.text}"` : ` (the question line is not in ${where(ctx)})`),
+        cite: [jl('metrics.jsonl', row, 'controller_ask'), ...(q ? [jl(q.file, q, q.obj.id)] : [])], ...(q ? link(q) : {}) });
     } else if (e.event === 'consent') {
       out.push({ text: `you answered "${e.answer}" at ${e.ts} (count ${e.count})`, cite: [jl('metrics.jsonl', row, `consent ${e.id || ''}`.trim())] });
     } else {
@@ -232,6 +241,14 @@ function explainPane(ctx, mod) {
   }
   else out.push({ text: 'not shown: not listed in modules.json', cite: ['modules.json panes'] });
   out.push(...ruleFacts(ctx, mod, entry));
+  // pilot-v0.12: the counts are project-wide; the index lists only the chat you are in, the board is shared
+  if (ctx.multi && ['index', 'map', 'kanban'].includes(mod)) {
+    const listed = ctx.chatList.filter((c) => c.listed);
+    const msgs = (c) => ctx.lines.filter((r) => r.chat === c.id && r.obj && (r.obj.role === 'user' || r.obj.role === 'assistant')).length;
+    out.push({ text: mod === 'index'
+      ? `the rule counts messages in all ${listed.length} chats (${listed.map((c) => `${c.id} ${msgs(c)}`).join(', ')}); the pane lists the messages of the chat you are in`
+      : `the board is shared: its cards come from all ${listed.length} chats, each card names its chat`, cite: [inFile(ctx, 'chats.json', /"chats"\s*:/, 'chats'), ...listed.map((c) => `${c.file} ×${msgs(c)} messages`)] });
+  }
   const hist = paneHistory(ctx, mod);
   out.push(...hist);
   if (!hist.length) out.push({ text: 'no question, answer or add for this pane in metrics.jsonl', cite: ['metrics.jsonl'] });
@@ -257,7 +274,7 @@ function fadeFacts(ctx, entry) {
   const turn = fade.turnOf(ctx.lines.map((r) => r.obj));
   const st = fade.status(entry, { lines: ctx.lines.map((r) => r.obj), turn, rulesDoc: ctx.rules.doc, items: ctx.items });
   const pc = paneCite(ctx, mod);
-  const turns = `transcript.jsonl user lines ×${turn}`;
+  const turns = ctx.multi ? `transcript.jsonl + chats/*.jsonl user lines ×${turn} (all chats)` : `transcript.jsonl user lines ×${turn}`;
   const out = [];
   const fadeRow = ev(ctx, (e) => e.event === 'pane_fade' && e.module === mod).pop();
   if (st.faded) out.push({ text: `faded to a tab at ${st.fadedAt || '(time not in the entry)'} (turn ${st.fadedTurn ?? '?'}), a tab for ${st.fadedFor ?? '?'} turns now; it stays in modules.json, a touch on the tab brings it back`,
@@ -303,7 +320,7 @@ function frameOrigin(ctx, f, mod, section) {
   if (prop) {
     const m = f.fromMessage ? msgRow(ctx, f.fromMessage) : null;
     out.push({ text: `suggested by model ${f.model || prop.obj.candidate} (frame role, model id ${prop.obj.model}) at ${prop.obj.ts}, after message ${f.fromMessage || '?'} (turn ${prop.obj.turn ?? '?'}); allographic: written about your workbench by a model, not by you`,
-      cite: [jl('metrics.jsonl', prop, `frame_propose ${f.id}`), ...(m ? [jl('transcript.jsonl', m, f.fromMessage)] : [])], ...(m ? { msg: f.fromMessage } : {}) });
+      cite: [jl('metrics.jsonl', prop, `frame_propose ${f.id}`), ...(m ? [jl(m.file, m, f.fromMessage)] : [])], ...(m ? link(m) : {}) });
   } else {
     out.push({ text: `the file says it was suggested by ${f.model || '(no model)'}${f.at ? ` at ${f.at}` : ''}, but no frame_propose event matches ${f.id || 'it'}: written by file edit, when is not recorded`,
       cite: [frameCite(ctx, section, mod), `metrics.jsonl (no frame_propose ${f.id || mod})`] });
@@ -376,13 +393,19 @@ function explainItem(ctx, it) {
   if (it.fromMessage) {
     const m = msgRow(ctx, it.fromMessage);
     if (m) {
-      out.push({ text: `from message ${it.fromMessage} by ${author(m.obj)} at ${m.obj.ts}`, cite: [jl('transcript.jsonl', m, it.fromMessage)], msg: it.fromMessage });
+      out.push({ text: `from message ${it.fromMessage} by ${author(m.obj)} at ${m.obj.ts}`, cite: [jl(m.file, m, it.fromMessage)], ...link(m) });
+      // pilot-v0.12: which chat, when the project has more than one (the board is shared by all of them)
+      if (ctx.multi) {
+        const c = ctx.chatList.find((x) => x.id === m.chat);
+        const said = it.fromChat === undefined ? 'the item names no chat (older than pilot-v0.12); its message is in' : it.fromChat === m.chat ? 'from chat' : `the item says fromChat ${it.fromChat}, but its message is in`;
+        out.push({ text: `${said} ${m.chat}${c && c.title ? ` "${c.title}"` : ''} (${m.file}, line ${m.n})`, cite: [...(it.fromChat !== undefined ? [itemCite(ctx, it.id)] : []), chatCite(ctx, m.chat), jl(m.file, m, it.fromMessage)], ...link(m) });
+      }
       if (it.quote !== undefined) {
         const found = norm(m.obj.text).includes(norm(it.quote));
-        out.push({ text: `quote "${it.quote}" ${found ? 'is in that message' : 'is NOT in that message (one of them was edited)'}`, cite: [itemCite(ctx, it.id), jl('transcript.jsonl', m, it.fromMessage)], msg: it.fromMessage });
+        out.push({ text: `quote "${it.quote}" ${found ? 'is in that message' : 'is NOT in that message (one of them was edited)'}`, cite: [itemCite(ctx, it.id), jl(m.file, m, it.fromMessage)], ...link(m) });
       }
     } else {
-      out.push({ text: `from message ${it.fromMessage}, which is not in transcript.jsonl`, cite: [itemCite(ctx, it.id), 'transcript.jsonl'] });
+      out.push({ text: `from message ${it.fromMessage}, which is not in ${where(ctx)}`, cite: [itemCite(ctx, it.id), ctx.multi ? 'transcript.jsonl (and chats/*.jsonl: not found)' : 'transcript.jsonl'] });
       if (it.quote !== undefined) out.push({ text: `quote "${it.quote}"`, cite: [itemCite(ctx, it.id)] });
     }
   } else {
@@ -460,9 +483,9 @@ function explainFrame(ctx) {
       const added = add ? `added by the controller${add.obj.answer === 'always' && crow && add.obj.ts !== crow.obj.ts ? ` at ${add.obj.ts} (always)` : ''}` : 'added by file edit (no controller_add)';
       const faded = fade.isFaded(entry) ? `; faded to a tab at turn ${entry.fadedTurn ?? '?'}` : '';
       out.push({ text: `${mod}: ${rule}; ${asked}; ${said}; ${added}${faded}`,
-        cite: [paneCite(ctx, mod) + '.rule', ...(ctx.rules.list.some((r) => r && r.module === mod && entry.rule && r.metric === entry.rule.metric && r.threshold === entry.rule.threshold) ? [ruleCite(ctx, mod)] : []), ...(ask ? [jl('metrics.jsonl', ask, 'controller_ask')] : []), ...(q ? [jl('transcript.jsonl', q, q.obj.id)] : []),
+        cite: [paneCite(ctx, mod) + '.rule', ...(ctx.rules.list.some((r) => r && r.module === mod && entry.rule && r.metric === entry.rule.metric && r.threshold === entry.rule.threshold) ? [ruleCite(ctx, mod)] : []), ...(ask ? [jl('metrics.jsonl', ask, 'controller_ask')] : []), ...(q ? [jl(q.file, q, q.obj.id)] : []),
           crow ? jl('metrics.jsonl', crow, `consent ${crow.obj.id || ''}`.trim()) : answerCite(ctx, mod), ...(add ? [jl('metrics.jsonl', add, 'controller_add')] : [])],
-        ...(q ? { msg: q.obj.id } : {}) });
+        ...(q ? link(q) : {}) });
     } else if (removal(ctx, mod)) {
       const rem = ctx.removals[mod];
       out.push({ text: `${mod} not shown: removed, you said ${rem.answer} to removing it (${rem.at})${ctx.pending === mod ? '; its rule is asking again now' : ''}`, cite: [removalCite(ctx, mod)] });
