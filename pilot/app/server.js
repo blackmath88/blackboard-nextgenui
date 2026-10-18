@@ -1241,8 +1241,10 @@ async function handleChat(req, res) {
   const userLine = await appendLine('user', text, null, undefined, chat);
   const history = readTranscript().filter((l) => (l.role === 'user' || l.role === 'assistant') && chatOf(l) === chat).slice(-HISTORY)
     .map((l) => ({ role: l.role, content: l.text }));
+  // Just before the new user message, not first: mistral-large-latest ignored a leading board message (4 of 4 tries,
+  // it went along with a request against a confirmed decision) and named the conflict when the board came last (4 of 4).
   const board = boardContext();
-  if (board) history.unshift(board);
+  if (board) history.splice(history.length - 1, 0, board);
 
   // no-cache, not no-store: Chrome reports a streamed no-store body read by a reader as net::ERR_ABORTED.
   res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' });
