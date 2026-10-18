@@ -8,6 +8,12 @@
 </head>
 <body>
 <main class="shell">
+ <div class="app">
+ <nav class="chats" id="chats" aria-label="Chats">
+   <div class="bar"><span>chats</span><button type="button" class="key" id="new-chat" title="Start a new chat. All chats share one board (map, kanban).">+ new</button></div>
+   <ol class="chat-list" id="chat-list"></ol>
+   <div class="chats-foot"><button type="button" class="theme-toggle" id="theme-toggle"></button></div>
+ </nav>
  <div class="bench n1" id="bench">
   <section class="pane term" id="pane-chat" aria-label="Terminal">
     <div class="bar"><span id="brand">pilot</span><small id="meta">connecting…</small></div>
@@ -18,6 +24,7 @@
       <input id="input" name="text" spellcheck="false" placeholder="Type a message and press Enter" autofocus>
     </form>
   </section>
+ </div>
  </div>
   <footer class="status" id="status"><span id="models" aria-label="Active model per role">models…</span><span id="count"></span></footer>
 </main>

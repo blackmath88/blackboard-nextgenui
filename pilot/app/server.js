@@ -44,6 +44,8 @@ const MODULES = path.join(PILOT, 'modules.json');
 const STATE = path.join(PILOT, 'state.json');      // decisions, tasks, sources (proposed by the model or added by hand)
 const FLAGS = path.join(PILOT, 'flags.json');      // pilot-v0.9: /flag overrides of config.experiments (hand-editable)
 const FRAMES = path.join(PILOT, 'frames.json');    // pilot-v0.10: frame proposals and applied frames (hand-editable)
+const CHATS = path.join(PILOT, 'chats.json');      // pilot-ui: the chats of this project (hand-editable); lines carry `chat`
+const DEFAULT_CHAT = 'c-1';                         // lines written before chats existed belong to the first chat
 const EXTRACTION_SCHEMA = JSON.parse(fs.readFileSync(path.join(APP, 'schemas', 'extraction.schema.json'), 'utf8'));
 const BUILT = ['index', 'map', 'kanban'];   // panes this build can show; the controller only evaluates their rules
 const PORT = Number(config.port) || 4747;
@@ -84,10 +86,78 @@ function appendJsonl(file, obj) {
   return obj;
 }
 
-function appendLine(role, text, model, kind) {
+// pilot-ui: several chats share one board. Every transcript line names its chat; user and assistant lines get the chat
+// they were sent in, controller and system lines the chat you were last in (the last message or chat switch).
+let currentChat = DEFAULT_CHAT;
+const chatOf = (l) => (l && typeof l.chat === 'string' && l.chat) || DEFAULT_CHAT;
+function appendTranscript(line) { if (!line.chat) line.chat = currentChat; return appendJsonl(TRANSCRIPT, line); }
+
+function appendLine(role, text, model, kind, chat) {
   const line = { id: 'm-' + crypto.randomUUID().slice(0, 8), ts: new Date().toISOString(), role, text, model: model || null };
   if (kind) line.kind = kind;   // optional on system lines: blocked | stall | error (the page colours them)
-  return serial(() => appendJsonl(TRANSCRIPT, line));
+  line.chat = chat || currentChat;
+  return serial(() => appendTranscript(line));
+}
+
+// chats.json {rev, chats: [{id, title?, createdAt}]}. The list in /state also has every chat id found in the transcript
+// (the first chat exists implicitly), with its message count, last activity and a title: the stored one, else the first
+// sentence of its first message. A broken chats.json reads as its last good version and is never written.
+function readChats() {
+  const r = readJsonGood(CHATS, { rev: 0, chats: [] });
+  const doc = r.doc && typeof r.doc === 'object' && Array.isArray(r.doc.chats) ? r.doc : { rev: 0, chats: [] };
+  return { doc, rev: Number.isInteger(doc.rev) ? doc.rev : 0, chats: doc.chats.filter((c) => c && typeof c.id === 'string'), error: r.error };
+}
+const shortTitle = (t) => { const s = String(t || '').replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s/)[0]; return s.length > 48 ? s.slice(0, 45) + '…' : s; };
+function chatsSummary(lines) {
+  const stored = readChats().chats;
+  const by = new Map();
+  const add = (id, c = {}) => { if (!by.has(id)) by.set(id, { id, title: null, createdAt: null, messages: 0, lastTs: null, first: null }); Object.assign(by.get(id), c); };
+  add(DEFAULT_CHAT);
+  for (const c of stored) add(c.id, { title: typeof c.title === 'string' && c.title.trim() ? c.title.trim() : null, createdAt: c.createdAt || null });
+  for (const l of lines) {
+    if (l.role !== 'user' && l.role !== 'assistant') continue;
+    const id = chatOf(l); add(id);
+    const c = by.get(id);
+    if (l.role === 'user') { c.messages++; if (!c.first) c.first = l.text; }
+    c.lastTs = l.ts || c.lastTs; if (!c.createdAt) c.createdAt = l.ts || null;
+  }
+  return [...by.values()].map(({ first, ...c }) => ({ ...c, title: c.title || shortTitle(first) || 'new chat', named: !!c.title }));
+}
+const chatExists = (id) => typeof id === 'string' && chatsSummary(readTranscript()).some((c) => c.id === id);
+
+// POST /chats {action: "new", title?} | {action: "open", id} | {action: "rename", id, title}
+function chatAction(body) {
+  const action = body && body.action;
+  return serial(() => {
+    const r = readChats();
+    if (action === 'open') {
+      if (!chatExists(body.id)) return { code: 404, body: { error: `no chat "${body.id}"` } };
+      currentChat = body.id;
+      return { code: 200, body: { ok: true, chat: body.id } };
+    }
+    if (action !== 'new' && action !== 'rename') return { code: 400, body: { error: 'action must be new, open or rename' } };
+    if (r.error) return { code: 409, body: { error: `${r.error}; fix the file by hand first` } };
+    const title = typeof body.title === 'string' ? body.title.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+    const doc = { ...r.doc, chats: r.chats.slice() };
+    let id;
+    if (action === 'new') {
+      const used = new Set(chatsSummary(readTranscript()).map((c) => c.id));
+      let n = used.size + 1; while (used.has(`c-${n}`)) n++;
+      id = `c-${n}`;
+      doc.chats.push({ id, ...(title ? { title } : {}), createdAt: new Date().toISOString() });
+      currentChat = id;
+    } else {
+      id = body.id;
+      if (!chatExists(id)) return { code: 404, body: { error: `no chat "${id}"` } };
+      const c = doc.chats.find((x) => x.id === id);
+      if (c) { if (title) c.title = title; else delete c.title; }
+      else doc.chats.push({ id, ...(title ? { title } : {}), createdAt: new Date().toISOString() });
+    }
+    doc.rev = r.rev + 1;
+    atomicWrite(CHATS, JSON.stringify(doc, null, 2) + '\n'); lastGood['chats.json'] = JSON.parse(JSON.stringify(doc));
+    appendJsonl(METRICS, { ts: new Date().toISOString(), event: action === 'new' ? 'chat_new' : 'chat_rename', chat: id });
+    return { code: 200, body: { ok: true, chat: id, rev: doc.rev } };
+  });
 }
 
 function metric(event, fields) {
@@ -234,12 +304,12 @@ function runController() {
       if (prior.answer === 'always' && !removedSince(m, rule.module)) {   // consent already given for good (not after a removal)
         m.panes.push({ module: rule.module, addedAt: ts, atCount: n, rule: { metric: rule.metric, threshold: rule.threshold }, lastTouch: { at: ts, turn: fade.turnOf(lines), how: 'added' } });
         writeModules(m);
-        appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'controller', text: `${n} ${rule.metric}. Added the ${rule.module} pane (you said always).`, model: null, module: rule.module });
+        appendTranscript({ id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'controller', text: `${n} ${rule.metric}. Added the ${rule.module} pane (you said always).`, model: null, module: rule.module });
         appendJsonl(METRICS, { ts, event: 'controller_add', module: rule.module, count: n, answer: 'always', answerRef: prior.consentId || null, answerAt: prior.at || null });
         return;
       }
       const text = String(rule.ask || `Add the ${rule.module} pane?`).replace('{n}', n);
-      appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'controller', text, model: null, module: rule.module });
+      appendTranscript({ id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'controller', text, model: null, module: rule.module });
       m.pending = rule.module;
       writeModules(m);
       appendJsonl(METRICS, { ts, event: 'controller_ask', module: rule.module, metric: rule.metric, count: n, threshold: rule.threshold });
@@ -264,12 +334,12 @@ function runFades(m, rulesDoc, lines) {
     if (st.fadeDue) {
       entry.state = 'faded'; entry.fadedAt = ts; entry.fadedTurn = turn;
       changed = true;
-      appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'controller', text: `${entry.module} pane faded to a tab: untouched for ${st.idle} turns (fadeAfterTurns ${st.fadeAfter}). Click the tab to bring it back.`, model: null, pane: entry.module, event: 'fade' });
+      appendTranscript({ id: lineId(), ts, role: 'controller', text: `${entry.module} pane faded to a tab: untouched for ${st.idle} turns (fadeAfterTurns ${st.fadeAfter}). Click the tab to bring it back.`, model: null, pane: entry.module, event: 'fade' });
       appendJsonl(METRICS, { ts, event: 'pane_fade', module: entry.module, turn, idle: st.idle, fadeAfterTurns: st.fadeAfter, lastTouchTurn: st.lastTouch.turn, lastTouchRecorded: st.lastTouch.recorded });
     } else if (st.faded && st.holds.length) {
       unfade(entry);
       changed = true;
-      appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'controller', text: `${entry.module} pane is back: it holds a proposal (${st.holds.join(', ')}), and a tab must not hide a decision.`, model: null, pane: entry.module, event: 'unfade' });
+      appendTranscript({ id: lineId(), ts, role: 'controller', text: `${entry.module} pane is back: it holds a proposal (${st.holds.join(', ')}), and a tab must not hide a decision.`, model: null, pane: entry.module, event: 'unfade' });
       appendJsonl(METRICS, { ts, event: 'pane_unfade', module: entry.module, turn, reason: 'proposal', holds: st.holds });
       withdrawRemoval(m, entry.module, 'it holds a proposal', ts);
     }
@@ -290,7 +360,7 @@ function askRemoval(m, rulesDoc, lines) {
     entry.removalAsked = true;
     m.pending = entry.module; m.pendingKind = 'remove';
     writeModules(m);
-    appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'controller', text: `The ${entry.module} pane has been a tab for ${st.fadedFor} turns. Remove the ${entry.module} pane? (y removes it, the rule may offer it again later; n keeps the tab; x removes it for good)`, model: null, module: entry.module, question: 'remove' });
+    appendTranscript({ id: lineId(), ts, role: 'controller', text: `The ${entry.module} pane has been a tab for ${st.fadedFor} turns. Remove the ${entry.module} pane? (y removes it, the rule may offer it again later; n keeps the tab; x removes it for good)`, model: null, module: entry.module, question: 'remove' });
     appendJsonl(METRICS, { ts, event: 'controller_ask', question: 'remove', module: entry.module, turn, fadedFor: st.fadedFor, askRemoveAfterTurns: st.askRemoveAfter, fadedTurn: st.fadedTurn });
     return;
   }
@@ -304,7 +374,7 @@ function withdrawRemoval(m, mod, why, ts) {
   m.pending = null; delete m.pendingKind;
   const entry = m.panes.find((p) => p && p.module === mod);
   if (entry) delete entry.removalAsked;
-  appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `remove ${mod}: question withdrawn, ${why}`, model: null });
+  appendTranscript({ id: lineId(), ts, role: 'system', text: `remove ${mod}: question withdrawn, ${why}`, model: null });
   appendJsonl(METRICS, { ts, event: 'controller_withdraw', question: 'remove', module: mod, reason: why });
   return true;
 }
@@ -367,7 +437,7 @@ function answer(module, raw, seenRev) {
     m.pending = null;
     writeModules(m);
     const effect = { yes: 'pane added', always: 'pane added; will not ask again', no: 'will ask again when the count has doubled', never: 'will never ask again' }[ans];
-    appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'system', text: `${module}: ${ans}, ${effect}`, model: null });
+    appendTranscript({ id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'system', text: `${module}: ${ans}, ${effect}`, model: null });
     appendJsonl(METRICS, { ts, event: 'consent', id: consentId, module, answer: ans, count: n, metric: metricName });
     if (adds) appendJsonl(METRICS, { ts, event: 'controller_add', module, count: n, answer: ans, answerRef: consentId, answerAt: ts });
     return { code: 200, body: { ok: true, module, answer: ans } };
@@ -392,7 +462,7 @@ function answerRemoval(m, module, ans) {
   m.pending = null; delete m.pendingKind;
   writeModules(m);
   const effect = { yes: 'pane removed; its rule may offer it again once the count has doubled', no: 'kept as a tab; will not ask again', never: 'pane removed; its rule will never offer it again' }[ans];
-  appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `remove ${module}: ${ans}, ${effect}`, model: null });
+  appendTranscript({ id: lineId(), ts, role: 'system', text: `remove ${module}: ${ans}, ${effect}`, model: null });
   appendJsonl(METRICS, { ts, event: 'consent', question: 'remove', id: consentId, module, answer: ans, count: n, metric: rule.metric || 'messages', turn });
   if (ans !== 'no') appendJsonl(METRICS, { ts, event: 'pane_remove', module, answer: ans, answerRef: consentId, turn, fadedTurn: entry && entry.fadedTurn });
   return { code: 200, body: { ok: true, module, answer: ans, question: 'remove' } };
@@ -794,7 +864,7 @@ function frameAnswer(pane, id, action, seenRev) {
     if (action === 'dismiss') {
       delete f.pending[pane];
       const rev = writeFrames(f);
-      appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `${pane}: frame ${id} dismissed (${who}); nothing changed`, model: null });
+      appendTranscript({ id: lineId(), ts, role: 'system', text: `${pane}: frame ${id} dismissed (${who}); nothing changed`, model: null });
       appendJsonl(METRICS, { ts, event: 'frame_dismiss', id, module: pane, by: 'user', model: p.model || null, rev });
       return { code: 200, body: { ok: true, pane, id, action, rev } };
     }
@@ -809,7 +879,7 @@ function frameAnswer(pane, id, action, seenRev) {
     f.applied[pane] = { ...p, appliedBy: 'user', appliedAt: ts };
     delete f.pending[pane];
     const rev = writeFrames(f);
-    appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `${pane}: frame ${id} applied by you (${who}): ${frame.describe(p.intent)}. /frame reset ${pane} undoes it`, model: null });
+    appendTranscript({ id: lineId(), ts, role: 'system', text: `${pane}: frame ${id} applied by you (${who}): ${frame.describe(p.intent)}. /frame reset ${pane} undoes it`, model: null });
     appendJsonl(METRICS, { ts, event: 'frame_apply', id, module: pane, intent: p.intent, by: 'user', model: p.model || null, proposedAt: p.at || null, rev, ...(prev && prev.id ? { replaces: prev.id } : {}) });
     return { code: 200, body: { ok: true, pane, id, action, frame: f.applied[pane], rev } };
   });
@@ -831,7 +901,7 @@ function frameReset(panes) {
     if (!done.length) return { ok: true, lines: [`nothing to reset: no frame applied${panes.length === 1 ? ` to ${panes[0]}` : ''}`] };
     const rev = writeFrames(f);
     for (const [pane, a] of done) {
-      appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `${pane}: frame ${a.id} reset by you; the pane shows its own order again`, model: null });
+      appendTranscript({ id: lineId(), ts, role: 'system', text: `${pane}: frame ${a.id} reset by you; the pane shows its own order again`, model: null });
       appendJsonl(METRICS, { ts, event: 'frame_reset', id: a.id || null, module: pane, by: 'user', rev });
     }
     return { ok: true, lines: done.map(([pane, a]) => `${pane}: frame ${a.id} reset (kept in ${path.relative(APP, PILOT)}/frames.json resets.${pane})`) };
@@ -856,7 +926,7 @@ function frameLines() {
 // fields go along as handFields (except the ones this write sets), an item that came in through the file keeps
 // addedByFile. Call inside the write chain, right after writeState.
 function itemWrite(item, via, before, ts) {
-  const set = via === 'decide' ? ['status', 'decidedAt', 'decidedBy'] : [];
+  const set = via === 'decide' ? ['status', 'decidedAt', 'decidedBy'] : via === 'move' ? ['column', 'movedAt', 'movedBy'] : [];
   const handFields = before ? before.fields.filter((f) => !set.includes(f)) : [];
   const e = { ts, event: 'item_write', via, itemId: item.id, item: JSON.parse(JSON.stringify(item)) };
   if (handFields.length) e.handFields = handFields;
@@ -912,12 +982,40 @@ function decide(itemId, raw, seenRev) {
     item.status = status; item.decidedAt = ts; item.decidedBy = 'user';
     const rev = writeState(st.doc);
     itemWrite(item, 'decide', before, ts);
-    appendJsonl(TRANSCRIPT, { id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'system', text: `${itemId} ${status}: ${item.text}`, model: null });
+    appendTranscript({ id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'system', text: `${itemId} ${status}: ${item.text}`, model: null });
     appendJsonl(METRICS, { ts, event: 'decide', itemId, kind: item.kind, decision: status, decidedBy: 'user', author: item.author || null, model: item.model || null, rev });
     // pilot-v0.8: a decision on a card is a touch of the pane that shows it
     const mod = fade.paneOfKind(item.kind), m = readModules();
     if (mod && !m.error && visiblePanes(m).includes(mod) && applyTouch(m, mod, 'decide', ts, fade.turnOf(readTranscript())).changed) writeModules(m);
     return { code: 200, body: { ok: true, item, rev } };
+  });
+}
+
+// POST /move {itemId, column, rev?} (pilot-ui): you drag a task to another kanban column. Only confirmed tasks (or
+// tasks added by hand) move: a proposal is decided first. Records movedAt and movedBy: "user"; a move is a touch of
+// the kanban pane.
+const COLUMNS = ['todo', 'doing', 'done'];
+function moveItem(itemId, column, seenRev) {
+  return serial(() => {
+    if (!COLUMNS.includes(column)) return { code: 400, body: { error: `column must be ${COLUMNS.join(', ')}` } };
+    const st = readState();
+    if (st.error) return { code: 409, body: { error: `${st.error}; fix the file by hand first` } };
+    if (seenRev !== undefined && seenRev !== st.rev) return stale('state.json', seenRev, st.rev);
+    const item = st.doc.items.find((i) => i && i.id === itemId);
+    if (!item) return { code: 404, body: { error: `no item "${itemId}"` } };
+    if (item.kind !== 'task') return { code: 409, body: { error: `${itemId} is a ${item.kind}, only tasks move` } };
+    if ((item.status || 'confirmed') !== 'confirmed') return { code: 409, body: { error: `${itemId} is ${item.status}; confirm it before moving it` } };
+    const from = item.column || 'todo';
+    if (from === column) return { code: 200, body: { ok: true, item, rev: st.rev, changed: false } };
+    const ts = new Date().toISOString();
+    const before = stats.provenance(item, stats.ledgerOf(metricsEvents()).get(itemId));
+    item.column = column; item.movedAt = ts; item.movedBy = 'user';
+    const rev = writeState(st.doc);
+    itemWrite(item, 'move', before, ts);
+    appendJsonl(METRICS, { ts, event: 'move', itemId, from, to: column, by: 'user', rev });
+    const m = readModules();
+    if (!m.error && visiblePanes(m).includes('kanban') && applyTouch(m, 'kanban', 'decide', ts, fade.turnOf(readTranscript())).changed) writeModules(m);
+    return { code: 200, body: { ok: true, item, rev, changed: true } };
   });
 }
 
@@ -942,7 +1040,7 @@ function fileRev(name) {
   if (!name.endsWith('.json')) return { rev: null };
   try {
     const j = JSON.parse(raw);
-    if (['modules.json', 'roles.json', 'flags.json', 'frames.json'].includes(name)) lastGood[name] = j;   // keep the last good version fresh
+    if (['modules.json', 'roles.json', 'flags.json', 'frames.json', 'chats.json'].includes(name)) lastGood[name] = j;   // keep the last good version fresh
     return { rev: j && Number.isInteger(j.rev) ? j.rev : 0 };
   }
   catch (e) { return { rev: null, error: `${name} is not valid JSON: ${e.message}` }; }
@@ -999,6 +1097,7 @@ function statePayload(only) {
   const want = (f) => !only || only.includes(f);
   const out = { extracting: extracting > 0, framing: framing > 0 };
   if (want('transcript.jsonl')) { const lines = readTranscript(); out.transcript = lines.slice(-TAIL); out.total = lines.length; out.turn = fade.turnOf(lines); }
+  if (want('transcript.jsonl') || want('chats.json')) { out.chats = chatsSummary(readTranscript()); out.chatsRev = readChats().rev; out.defaultChat = DEFAULT_CHAT; }   // pilot-ui
   if (want('modules.json') || want('roles.json')) out.models = modelsSummary();
   let m = null, st = null;
   if (want('modules.json')) {
@@ -1019,7 +1118,7 @@ function statePayload(only) {
   if (want('state.json')) { st = readState(); Object.assign(out, { items: stats.withProvenance(st.items, metricsEvents()), stateRev: st.rev, stateError: st.error || null }); }
   // a broken hand-editable file: the page says "file X is not valid JSON, showing last good version" until fixed
   const fileErrors = {};
-  for (const [f, e] of [['state.json', (st || readState()).error], ['modules.json', (m || readModules()).error], ['roles.json', readJsonGood(ROLES, {}).error], ['flags.json', readFlags().error], ['frames.json', readFrames().error]]) if (e) fileErrors[f] = e;
+  for (const [f, e] of [['state.json', (st || readState()).error], ['modules.json', (m || readModules()).error], ['roles.json', readJsonGood(ROLES, {}).error], ['flags.json', readFlags().error], ['frames.json', readFrames().error], ['chats.json', readChats().error]]) if (e) fileErrors[f] = e;
   out.fileErrors = fileErrors;
   return out;
 }
@@ -1113,12 +1212,15 @@ function boardContext() {
 }
 
 async function handleChat(req, res) {
-  let text;
-  try { text = String(JSON.parse(await readBody(req)).text || '').trim(); } catch { return sendJson(res, 400, { error: 'expected JSON {text}' }); }
+  let text, chat;
+  try { const b = JSON.parse(await readBody(req)); text = String(b.text || '').trim(); chat = b.chat === undefined ? DEFAULT_CHAT : b.chat; } catch { return sendJson(res, 400, { error: 'expected JSON {text, chat?}' }); }
   if (!text) return sendJson(res, 400, { error: 'empty message' });
+  if (!chatExists(chat)) return sendJson(res, 400, { error: `no chat "${chat}"` });
+  currentChat = chat;
 
-  const userLine = await appendLine('user', text, null);
-  const history = readTranscript().filter((l) => l.role === 'user' || l.role === 'assistant').slice(-HISTORY)
+  // pilot-ui: the model sees only this chat's history (plus the shared board below)
+  const userLine = await appendLine('user', text, null, undefined, chat);
+  const history = readTranscript().filter((l) => (l.role === 'user' || l.role === 'assistant') && chatOf(l) === chat).slice(-HISTORY)
     .map((l) => ({ role: l.role, content: l.text }));
   const board = boardContext();
   if (board) history.unshift(board);
@@ -1131,12 +1233,12 @@ async function handleChat(req, res) {
   let replyLine = null;
   try {
     const { text: reply, candidate } = await callRole('chat', history, (d) => res.write(d), abort.signal);
-    replyLine = await appendLine('assistant', reply, candidate.name);
+    replyLine = await appendLine('assistant', reply, candidate.name, undefined, chat);
   } catch (err) {
     // Keep whatever arrived before the failure, then record the failure as a system line.
-    if (err.partial) await appendLine('assistant', err.partial, err.candidate && err.candidate.name);
+    if (err.partial) await appendLine('assistant', err.partial, err.candidate && err.candidate.name, undefined, chat);
     const msg = err.stall ? `reply stalled: ${err.message}; kept the partial reply, no fallback` : `chat failed: ${err.message || err}`;
-    await appendLine('system', msg, null, err.stall ? 'stall' : 'error');
+    await appendLine('system', msg, null, err.stall ? 'stall' : 'error', chat);
     console.error(msg);
     if (!res.writableEnded) res.write(`\n[${msg}]`);
   }
@@ -1308,6 +1410,20 @@ const server = http.createServer(async (req, res) => {
       try { body = JSON.parse(await readBody(req, 2000)); } catch { return sendJson(res, 400, { error: 'expected JSON {pane, id, action}' }); }
       const rev = body && body.rev !== undefined && body.rev !== null ? body.rev : undefined;
       const out = await frameAnswer(body && body.pane, body && body.id, body && body.action, rev);
+      return sendJson(res, out.code, out.body);
+    }
+    // pilot-ui: chats (new / open / rename) and moving a task between kanban columns
+    if (req.method === 'POST' && pathname === '/chats') {
+      let body;
+      try { body = JSON.parse(await readBody(req, 2000)); } catch { return sendJson(res, 400, { error: 'expected JSON {action, id?, title?}' }); }
+      const out = await chatAction(body);
+      return sendJson(res, out.code, out.body);
+    }
+    if (req.method === 'POST' && pathname === '/move') {
+      let body;
+      try { body = JSON.parse(await readBody(req, 2000)); } catch { return sendJson(res, 400, { error: 'expected JSON {itemId, column, rev?}' }); }
+      const rev = body && body.rev !== undefined && body.rev !== null ? body.rev : undefined;
+      const out = await moveItem(body && body.itemId, body && body.column, rev);
       return sendJson(res, out.code, out.body);
     }
     // pilot-v0.8: the page reports an interaction with a pane (a faded pane comes back)

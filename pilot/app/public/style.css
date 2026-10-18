@@ -63,11 +63,11 @@ body { margin: 0; background: var(--base); color: var(--text); font: 400 15px/1.
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .px { image-rendering: pixelated; flex: none; }
 
-.shell { height: 100%; max-width: 1280px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; }
-.pane { background: var(--panel); border: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; position: relative; }
-.pane .bar { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 3px 10px; background: var(--base); border-bottom: 1px solid var(--line); font: 400 20px/1.2 var(--px); color: var(--accent-fg); }
+.shell { height: 100%; max-width: 1520px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; }
+.pane, .chats { background: var(--panel); border: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; position: relative; }
+.pane .bar, .chats .bar { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 3px 10px; background: var(--base); border-bottom: 1px solid var(--line); font: 400 20px/1.2 var(--px); color: var(--accent-fg); }
 .pane .bar #brand { display: inline-flex; align-items: center; gap: 6px; }
-.pane .bar small { font: 400 12px var(--mono); color: var(--muted); }
+.pane .bar small, .chats .bar small { font: 400 12px var(--mono); color: var(--muted); }
 .pane .body { padding: 10px 12px; overflow: auto; }
 /* Pane layouts: fixed CSS grid templates for 1 to 4 panes (chat + up to 3 side panes). */
 .bench { flex: 1; min-height: 0; display: grid; gap: 8px; }
@@ -242,3 +242,28 @@ body { margin: 0; background: var(--base); color: var(--text); font: 400 15px/1.
 .item.framed { box-shadow: inset 4px 0 0 var(--lavender); padding-left: 12px; }   /* its own border (status) stays */
 .items .grp { margin: 2px 0 4px; color: var(--muted); font-size: 11.5px; text-transform: lowercase; letter-spacing: 0.04em; }
 .items .grp + .item::before { display: none; }
+
+/* ---- pilot-ui: chats sidebar (left), theme switch, kanban drag and drop ---- */
+.app { flex: 1; min-height: 0; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 8px; }
+.app > .bench { min-height: 0; }
+.chats .bar .key { padding: 0 8px; font-size: 12px; }
+.chat-list { list-style: none; margin: 0; padding: 6px; flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.chat { width: 100%; text-align: left; background: transparent; border: 1px solid transparent; border-left: 2px solid transparent; color: var(--text); padding: 4px 8px; cursor: pointer; font: 400 13px/1.35 var(--mono); display: flex; flex-direction: column; }
+.chat .ct { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat small { color: var(--muted); font-size: 11.5px; }
+.chat:hover { border-color: var(--line); }
+.chat[aria-current="true"] { border-color: var(--line); border-left-color: var(--peach); background: var(--base); }
+.chat:disabled { cursor: not-allowed; }
+.chat-rename { width: 100%; font: 400 13px var(--mono); color: var(--text); background: var(--base); border: 1px solid var(--focus); padding: 4px 8px; }
+.chats-foot { border-top: 1px solid var(--line); padding: 6px; }
+.theme-toggle { width: 100%; background: transparent; border: 1px solid var(--line); color: var(--text); padding: 3px 8px; cursor: pointer; font: 400 12.5px var(--mono); text-align: left; }
+.theme-toggle:hover { border-color: var(--lavender); }
+.item.movable { cursor: grab; }
+.item.dragging { opacity: .55; cursor: grabbing; }
+.cols .col { min-height: 3rem; border: 1px dashed transparent; padding: 2px; }
+.cols .col.drop { border-color: var(--focus); background: var(--base); }
+@media (max-width: 800px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .chats .chat-list { flex-direction: row; overflow-x: auto; max-height: none; }
+  .chats .chat-list li { flex: 0 0 auto; max-width: 14rem; }
+}
