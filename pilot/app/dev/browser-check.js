@@ -1351,6 +1351,7 @@ async function v12(page) {
   await click('#new-chat');
   await waitFor(`/^\\?chat=c-[0-9a-f]{6}$/.test(location.search)`);
   const nc = (await where()).split('=')[1];
+  await waitFor(`(document.querySelector('#chat-list .chat-link[aria-current="page"]') || {}).dataset?.chat === ${JSON.stringify(nc)} && !!document.querySelector('#log .ln.out.cmd')`);
   check('"+ new chat": a new chat c-xxxxxx, the URL follows, the log is empty but for the command, chats.json lists it (main stays first)', /^c-[0-9a-f]{6}$/.test(nc || '') && chatsDoc().chats[0].id === 'main' && chatsDoc().chats.some((c) => c.id === nc) && fs.existsSync(file(`chats/${nc}.jsonl`)) && !(await page.eval(`document.querySelectorAll('#log .ln:not(.out)').length`)), nc);
   check('the new chat is at the top of the list and current ("new chat", no messages)', (await listed()).startsWith(`${nc},`) && await current() === nc);
   await page.submit('Task: call the pharmacy about the receipts.', 300);
@@ -1365,14 +1366,14 @@ async function v12(page) {
 
   // ---- a card's chat tag opens that chat at the message ----
   await click('#pane-kanban .item[data-id="task-9"] .chat-tag');
-  await waitFor(`location.search === '?chat=c-invoices'`);
   const fm = items().find((i) => i.id === 'task-9').fromMessage;
+  await waitFor(`location.search === '?chat=c-invoices' && !!document.getElementById('msg-${fm}') && document.getElementById('msg-${fm}').classList.contains('flash')`);
   await sleep(200);
   check('the tag on task-9 opens c-invoices and marks the message it came from', await where() === '/?chat=c-invoices' && await page.eval(`document.getElementById('msg-${fm}') && document.getElementById('msg-${fm}').classList.contains('flash')`) && events().some((e) => e.event === 'chat_switch' && e.to === 'c-invoices' && e.how === 'tag'));
 
   // ---- back and forward ----
   await page.eval(`history.back()`);
-  await waitFor(`location.search === '?chat=${nc}'`);
+  await waitFor(`location.search === '?chat=${nc}' && document.getElementById('log').textContent.includes('call the pharmacy') && (document.querySelector('#chat-list .chat-link[aria-current="page"]') || {}).dataset?.chat === '${nc}'`);
   check('Back returns to the chat before (the log follows the URL)', await where() === `/?chat=${nc}` && await logHas('call the pharmacy') && await current() === nc);
 
   // ---- /why with a link into another chat ----

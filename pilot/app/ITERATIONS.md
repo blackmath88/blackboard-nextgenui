@@ -88,3 +88,26 @@ date, old plan, new plan and why.
 - Why: with the map, the index and the kanban all shown at 1280 × 800, the kanban was about 230 px high and showed one
   card per column (screenshot during the build). That is too cramped to try dragging. Fading two panes by hand would
   have left facts in the files that `/why` could not explain, so the history makes them fade under the real rules.
+
+## 2026-10-18 (v0.12) Several chats: smaller choices made while building
+- Old plan (brief): each item records `fromChat`; a sidebar like ChatGPT's; everything earlier unchanged on a
+  single-chat dir.
+- New plan, built: the same, with these choices.
+  - **`fromChat` is written once the project has `chats.json`.** A missing `fromChat` means main, which is what every
+    item of a single-chat dir would say. Writing `"fromChat": "main"` there broke the v0.6 check that `state.json` items
+    carry only the keys they had (verify-v0.6.sh, "keys only from the schema"). The page and `/why` resolve an item's chat
+    from `fromChat`, else from the chat that holds `fromMessage`.
+  - **The sidebar is closed while there is one chat.** The ☰ button opens it, and it opens by itself once `chats.json`
+    exists. An always-open sidebar shifted the v0.7 layout checks (labels, kanban widths at 800–1600 px) and the v0.11
+    drags.
+  - **With the sidebar open, the chat column narrows (1.2 : 1 instead of 1.6 : 1),** and the shell grows by the sidebar's
+    width. Without that, at 1280 px the kanban body was 365 px and its columns stacked (screenshot during the build).
+  - **The open question shows in every chat** ("asked in chat …", with its buttons) rather than disabling y/n/a/x in the
+    other chats. The pane it is about belongs to the project, and a key must never answer a question that is not on
+    screen.
+  - **"+ new chat" reuses an empty, untitled chat you have not used yet,** like ChatGPT, so clicking it twice does not
+    leave empty chats behind (they could not be deleted, only archived).
+  - **Chat commands write no transcript line** (`chat_*` events in `metrics.jsonl` only), so working in other chats
+    never changes `transcript.jsonl`, and the chat log stays a conversation.
+- Why: the brief's two hard lines are that a real `transcript.jsonl` is never touched and that every earlier check and
+  demo still passes on a single-chat dir.

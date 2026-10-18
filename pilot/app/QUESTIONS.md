@@ -200,3 +200,27 @@ by `/why task-N`, but it writes no transcript line. A frame reset that a move ca
 - Blocks: nothing. Options: keep (the chat stays a conversation); write one system line per move; or write one line
   per turn that summarises the moves.
 
+
+## 2026-10-18 (v0.12) Should the index rule count messages per chat?
+The controller counts messages in all chats, so the index question can come up in a chat with two messages, because the
+project has twelve. The index pane then lists only the chat you are in. Fading also counts turns in all chats.
+- Blocks: nothing. Options: keep (growth is the project's; CHANGELOG.md # pilot-v0.12); count `messages` per chat for
+  the index rule only (an index belongs to a log); or make it a rule setting (`"scope": "chat" | "project"`).
+
+## 2026-10-18 (v0.12) Do archived chats count?
+An archived chat's messages still count for the rules and for `/stats` (archiving hides, it does not remove). A chat
+archived because it was a test still pushes the counts up.
+- Blocks: nothing. Options: keep; leave archived chats out of the counts (the counts can then go down, which the
+  controller's "ask again when the count has doubled" never expected); or ask on archive.
+
+## 2026-10-18 (v0.12) A title call per new chat
+With a title candidate, every new chat costs one model call after its first reply (the demo config points it at the
+morrow fake; the default config has no candidate, so the first sentence is the title).
+- Blocks: nothing. Options: keep; title only on demand (`/chat title`); or propose the title (dashed, "suggested by
+  morrow") and let you accept it, like a frame. That would be stricter about "models only propose", and noisier.
+
+## 2026-10-18 (v0.12) Where do chats live once there are projects (v0.13)?
+This build keeps chats inside the pilot dir (`chats.json`, `chats/`). `chats.js`, `stats.js` and `why.js` take the dir
+as a parameter; the server still has one `PILOT` and module-level helpers built on it.
+- Blocks: v0.13 design. Options: a project = a pilot dir (`projects/<id>/` each with its own `chats.json`, board and
+  modules); or one dir with several boards. The first keeps every file as it is now.

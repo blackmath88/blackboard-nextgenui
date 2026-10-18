@@ -962,3 +962,48 @@ Run by the coordinator, not the builder, after the builder's last fix (`29e41ec`
 - Browser, demo v0.11:
   - A real mouse drag of task-4 ("print the claim form") from todo into doing wrote `column: doing`, `order`, `movedBy: user`; status stayed confirmed.
   - On the proposed task-8, Alt+→ moved it to doing; it stayed `proposed` and the live region said "task-8 moved to doing, position 3 of 3; still proposed."
+
+# pilot-v0.12
+
+Several chats in one project, a sidebar like ChatGPT's, one shared board. Everything runs against `dev/fake-model.js`
+(chat, extraction and the new `title` role).
+
+**Reproduce:** `bash pilot/app/dev/verify-v0.12.sh`. It has 54 checks; one of them runs the 43 checks of
+`browser-check.js v12` (41 + 2 global). It ends with `ALL v0.12 CHECKS PASSED` and exits non-zero on failure.
+- Own ports: server 4850, fakes 5851/5852; browser part 4855/5856/5857 and Chrome 9433; demo part shifted +300
+  (5086/6094/6095).
+- Own throwaway dirs: `.pilot-verify-v12/`, `.pilot-verify-v12b/`, `.pilot-demo-verify12/`. It never touches `.pilot/` or
+  a running demo (it was run next to demos from another checkout).
+- The fixture is generated: `node dev/make-fixture-v12.js` (deterministic, from `demo/fixtures/v0.11/`; the main
+  transcript is copied byte for byte).
+- The browser part alone: `node dev/browser-check.js v12` (`SHOT_DIR=<dir>` saves screenshots: start, new chat, drawer,
+  light).
+
+**Everything:** `cd pilot/app && npm run verify` (p0, p1, p2, v0.3–v0.12, browser p1 + p2; the v03–v12 browser checks
+run inside their verify scripts).
+
+## Definitions
+
+| Term | Definition |
+|---|---|
+| chat | `main` = `transcript.jsonl` (always the first chat); any other id `[a-z0-9][a-z0-9-]*` = `chats/<id>.jsonl`, listed in `chats.json` |
+| `chats.json` | `{rev, chats: [{id, file, createdAt, title?, titleBy?, titleModel?, titledAt?, archived?}]}`; created on the first `/chat new`; missing = one chat (main), exactly as before |
+| the chat of a request | the `chat` field of `POST /chat`, `/command`, `/answer`, `/move`, `/touch`, `/frame`, or `GET /state?chat=`; missing = main; unknown = 404 |
+| project-wide | counts, turns (fading) and the controller's rules use the lines of every chat, archived ones included; the index pane lists the current chat's messages |
+| chat of an item | `fromChat` (written once the project has `chats.json`), else the chat that holds `fromMessage`; missing = main |
+| who named a chat | "you" (`/chat new <title>`, `/chat rename`), "model · <name>" (the title role), "first message" (no title: its first sentence), "you (file edit)" (the title differs from the last `chat_new` / `chat_rename` the server wrote) |
+| archive | `archived: true` in `chats.json`: hidden from the list, nothing deleted, its messages still count; `/chat unarchive` |
+| Alt+S | focuses the sidebar (opens it or the drawer); matched on the key code; never while the chat input has text |
+
+## Checks
+
+| # | Check | How (section of `verify-v0.12.sh`) |
+|---|---|---|
+| 1 | A dir without `chats.json` (the v0.11 fixture): `/state` says one chat (main, `transcript.jsonl`); items carry no `chat`; a turn writes to `transcript.jsonl` and creates neither `chats.json` nor `chats/`; the item it proposes has no `fromChat`; an unknown chat or a path as id → 404, nothing written; `/chats` says how to start another. | 1 |
+| 2 | `/chat new` creates `chats.json` (rev 1: main first with `transcript.jsonl`, then the new chat) and an empty `chats/<id>.jsonl`; `chat_new {created: chats.json}`; a second `/chat new` reuses the still empty chat. A turn there: both lines in `chats/<id>.jsonl`, **`transcript.jsonl` byte for byte unchanged**, the model saw 1 message (only this chat); the task records `fromChat` and a `fromMessage` in that file; `/state?chat=` gives that chat, main still 117 lines; the title role (morrow fake) names it ("call the pharmacy about", `chat_rename by model`); the `turn` event carries the chat and counts all lines. A chat named with `/chat new mine` is never renamed by the title role. | 2 |
+| 3 | The controller counts all chats: 2 messages in main + 2 in a second chat reach index threshold 4; the question line is in `chats/<id>.jsonl`, not in `transcript.jsonl`; `/state` of main carries it as `pendingLine {chat}`; `/rules` says messages 4 / 4; answered y from main → pane added, the system line in main. `/chat new second` is named by you. No title role in the config → no title call. | 3 |
+| 4 | `/chat rename letter` → titleBy user, `chat_rename {by user, was: the first sentence}`; a hand edit of a title → "you (file edit)"; `/chat archive` → `archived: true`, hidden from `/chats`, the chat file unchanged; `/chats all` lists it and its messages still count; archiving the chat you are in names the chat to go to; main cannot be archived; `/chat unarchive` → back, `chat_archive {archived false}`; no file in `chats/` ever removed. A hand-added entry with a foreign `file` or a path as id is ignored (404). A broken `chats.json`: `fileErrors`, the last good list, `/chat new` refuses, the file untouched, a turn in a chat still works; fixed by hand → no error. | 4 |
+| 5 | SSE: a hand-appended line in `chats/<id>.jsonl` → `change {file: chats/<id>.jsonl, rev = its lines}`; a rename → `change {file: chats.json}`. `POST /metric chat_switch` → logged with `how` and `turn`; an unknown chat or from = to → 400. An index jump to a message in another chat is logged with its chat. | 5 |
+| 6 | On the demo fixture: `/why task-9` cites `chats/c-invoices.jsonl:1 m-f203` and "from chat c-invoices "invoices"" with `chats.json:N chats c-invoices`; `/why task-4` (older) cites `transcript.jsonl` and says the item names no chat; `/why index` says the rule counts all 4 chats (main 88, c-scratch 2, c-invoices 4, c-hospital 4); `/why kanban` counts turns over all chats (49); `why-cites.js` resolves every source (chat files, `chats.json` entries, links into other chats); `/stats` has five verdicts plus a chats block and equals `npm run stats`; the measures read every chat's lines; every fixture item uses only keys of the schema copy (`fromChat` added there). | 6 |
+| 7 | Browser (`browser-check.js v12`, real mouse clicks). **Sidebar:** open with chats.json: c-hospital, c-invoices, main (most recent first), main current at `/`, the title bar says "· letter"; bylines "first message · 4 msg", "model · morrow · 4 msg", "you · 88 msg"; "archived: 1 (show)". **Board:** the shared kanban with tasks from three chats, each card tagged (`chat · invoices`, …); at 1280 px the sidebar is its own column, the kanban keeps three columns, no horizontal scroll. **Switch:** a click on "invoices" → `?chat=c-invoices`, that chat's lines only, marked current, the board unchanged, `chat_switch how sidebar`. **New chat:** "+ new chat" → a new id in the URL, an empty log, listed first; "Task: …" sent there → task-12 on the board within about 1 s, dashed and tagged, `fromChat` in `state.json`, "1 messages in context", named by the title role; main byte for byte unchanged. **Tag:** the tag on task-9 opens c-invoices and marks the message. **Back** returns to the chat before. **/why task-9** cites `chats/c-invoices.jsonl`, and its "show" opens that chat at the message. **Two tabs:** tab 2 at `?chat=c-hospital`; a task sent in tab 1 shows on tab 2's board in about 1 s while tab 2 stays in its chat; tab 2's list follows by SSE; a reload keeps it there. **Open question:** a removal question asked in c-hospital shows in the other chat with y/n/x and "asked in chat …"; `n` from the empty input answers it, and the line goes to that chat. **Keys:** Alt+S from the empty input focuses the current chat, ↓ moves, Escape returns; Alt+S with text in the input does nothing. **Commands:** rename (by you), archive (hidden, file unchanged, you are moved), "archived: 2 (show)", unarchive. **820 px:** a closed drawer, ☰ opens it (fixed, no horizontal scroll), a pick opens the chat and closes it, Alt+S opens it and Escape closes it. **Light mode:** the current chat keeps its marker. Nothing deleted. No page errors, no outside requests. Contrast check with the six new pairs. | 7 |
+| 8 | `npm run demo -- v0.12` (shifted +300) serves within 30 s: 4 chats (1 archived), tasks from 3 chats, `chats/` seeded; a new chat and a task in it land on the board with `fromChat`; the try lines; Ctrl+C leaves nothing listening; `make-fixture-v12.js` is deterministic, its main transcript is v0.11's byte for byte, and the v0.11 fixture is untouched. | 8 |

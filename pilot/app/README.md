@@ -1,7 +1,8 @@
-# CLI Pilot v1 (steps P0 to P4 + P5 metrics, iteration pilot-v0.11)
+# CLI Pilot v1 (steps P0 to P4 + P5 metrics, iteration pilot-v0.12)
 
-**Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.11` (the kanban is drag and drop: drag a
-card to another column or place, or Alt+arrows on a focused card; the move is yours, written to `state.json`, and
+**Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.12` (several chats in one project: a sidebar
+like ChatGPT's, "+ new chat", the URL says `?chat=<id>`, and all chats share one board, where each card names its chat;
+v0.11, `npm run demo -- v0.11`: the kanban is drag and drop, a card to another column or place, or Alt+arrows on a focused card; the move is yours, written to `state.json`, and
 `/why task-N` lists it; v0.10, `npm run demo -- v0.10`: after a turn the model may
 suggest how the map shows its cards, a dashed note "suggested by morrow, not by you"; `f` applies it, `/frame reset`
 undoes it, `/why map` explains it; v0.9: pause on a finished line and the input offers "send?", Tab sends, Enter always does; v0.8: panes fade to tabs and are removed only with your answer; v0.7: `/why`; v0.6: authorship and `/stats`; v0.5: live files, two tabs; v0.4: proposals; v0.3: pins
@@ -56,6 +57,11 @@ In the page, type a message and press Enter. Lines starting with `/` are command
 | `/flag frame-proposals on\|off` | switch the frame-proposals experiment (pilot-v0.10); kept in `.pilot/flags.json` (default off) |
 | `/frame` | frames per pane (pilot-v0.10): the applied one (who suggested it, when you applied it) and the open proposal |
 | `/frame reset [map\|kanban]` | put a pane (or both) back in its own order; recorded in `.pilot/frames.json` `resets`; works with the flag off too |
+| `/chats [all]` | the chats of this project, most recent first (pilot-v0.12; `all` adds the archived ones) |
+| `/chat new [title]` | start a new chat (`chats.json` is created on the first one; main stays `transcript.jsonl`); an empty chat you have not used yet is reused |
+| `/chat <title or id>` | switch this tab to that chat (the URL says `?chat=<id>`) |
+| `/chat rename <title>` | name the chat you are in (shown as named by you) |
+| `/chat archive [chat]` / `/chat unarchive <chat>` | hide a chat from the list / bring it back; nothing is deleted, main cannot be archived |
 | `/help` | list commands |
 
 **Growth.** After each turn a deterministic controller checks `.pilot/rules.json` (seeded from
@@ -203,6 +209,27 @@ complete reply (after extraction), the `frame` role (in the config like every ro
 - **Other effects.** A move counts as a touch of the kanban (v0.8). It resets an applied kanban frame (v0.10; reason
   "manual move", also while that experiment is off). `/why task-N` lists the task's moves with sources.
 
+**Several chats (pilot-v0.12).** A project (one pilot dir) can hold several chats that share one board:
+- **Files.** `transcript.jsonl` is the first chat, `main`, and is never moved or rewritten. Further chats are
+  `chats/<id>.jsonl`, listed in `chats.json` (`{rev, chats: [{id, file, createdAt, title?, titleBy?, archived?}]}`, main
+  first). Both are created on the first new chat; a dir without `chats.json` is one chat, exactly as before. Hand edits
+  show live; a broken `chats.json` is read as its last good version and never written.
+- **The sidebar** on the left lists the chats, most recent activity first, with who named each one: "you", "model ·
+  morrow" (the `title` role, after the first reply, if it has a candidate), "first message" (no name: its first
+  sentence), "you (file edit)". "+ new chat" is at the top; archived chats sit behind "archived: n (show)". It is
+  closed while the project has one chat (☰ in the title bar opens it) and a drawer below 900 px. **Alt+S** (Option+S)
+  focuses it, never while the input has text; ↑/↓, Enter, Escape back.
+- **The URL holds the chat** (`/?chat=<id>`, main = `/`): a reload stays in it, Back/Forward work, each tab can be in
+  another chat.
+- **The model sees only the current chat.** System and controller lines go to the chat where things happened.
+- **The board is shared.** Items from every chat land in `state.json`; once there is more than one chat they record
+  `fromChat` (missing = main). Each card shows a chat tag; click it to open that chat at the message the card came
+  from. `/why <item>` cites `chats/<id>.jsonl:<line>`.
+- **Growth is the project's.** The rules count messages in all chats, fading counts turns in all chats, and an open
+  question shows in every chat ("asked in chat …"). The index pane lists the current chat. Why, and the alternative:
+  CHANGELOG.md # pilot-v0.12.
+- **Archive, never delete.** `/chat archive` hides a chat; its file stays and its messages still count.
+
 The status bar shows the active model per role; `frontier→morrow` means the configured candidate
 failed and the next one answered. Every model attempt is logged to `.pilot/metrics.jsonl`.
 
@@ -244,15 +271,16 @@ node -e 'const f=".pilot/rules.json",fs=require("fs"),r=JSON.parse(fs.readFileSy
 ## Demos and checks
 
 `npm run demo -- <version>` (`scripts/demo.js`) wipes and seeds a throwaway `.pilot-demo/` from
-`demo/fixtures/<version>/`, starts the fakes and the server on demo ports (v0.3: 4750, 5751, 5752; v0.4: 4754, 5754, 5755; v0.5: 4758, 5758, 5759; v0.6: 4764, 5764, 5765; v0.7: 4768, 5768, 5769; v0.8: 4772, 5772, 5773; v0.9: 4776, 5778, 5779; v0.10: 4778, 5783, 5784; v0.11: 4782, 5788, 5789), prints the URL
+`demo/fixtures/<version>/`, starts the fakes and the server on demo ports (v0.3: 4750, 5751, 5752; v0.4: 4754, 5754, 5755; v0.5: 4758, 5758, 5759; v0.6: 4764, 5764, 5765; v0.7: 4768, 5768, 5769; v0.8: 4772, 5772, 5773; v0.9: 4776, 5778, 5779; v0.10: 4778, 5783, 5784; v0.11: 4782, 5788, 5789; v0.12: 4786, 5794, 5795), prints the URL
 and what to try. Ctrl+C stops everything. An unknown version lists the available ones. It never touches `.pilot/`.
 
 `npm run verify` (`scripts/verify-all.sh`) runs every `dev/verify-*.sh` and the browser checks and prints a summary.
 It refuses to start while `pilot/app/.pilot/` exists, because the P0–P2 checks wipe it.
-`dev/verify-v0.3.sh` to `verify-v0.11.sh` use their own ports and dirs and are safe next to a running demo.
+`dev/verify-v0.3.sh` to `verify-v0.12.sh` use their own ports and dirs and are safe next to a running demo.
 The v0.6 demo fixture is generated by `node dev/make-fixture-v06.js` (synthetic, every line `"fixture": true`), the v0.8
 one by `node dev/make-fixture-v08.js` (from the v0.7 fixture), the v0.9 one by `node dev/make-fixture-v09.js` (from v0.8),
-the v0.10 one by `node dev/make-fixture-v10.js` (from v0.9), the v0.11 one by `node dev/make-fixture-v11.js` (from v0.10).
+the v0.10 one by `node dev/make-fixture-v10.js` (from v0.9), the v0.11 one by `node dev/make-fixture-v11.js` (from v0.10),
+the v0.12 one by `node dev/make-fixture-v12.js` (from v0.11; it has a `chats/` folder, which `demo.js` copies too).
 `node dev/contrast-check.js` checks the palette (WCAG AA, both themes).
 
 The older checks (each starts and stops everything itself and **wipes `.pilot/` first**;
@@ -272,6 +300,7 @@ bash pilot/app/dev/verify-v0.8.sh           # own ports/dirs; fading, touches, r
 bash pilot/app/dev/verify-v0.9.sh           # own ports/dirs; settled-input flag, heuristic, settle metrics, /stats block; browser-check.js v09
 bash pilot/app/dev/verify-v0.10.sh          # own ports/dirs; frame proposals: closed FrameIntent, apply/dismiss/reset, rejections, pins/stall, /why; browser-check.js v10
 bash pilot/app/dev/verify-v0.11.sh          # own ports/dirs; kanban moves: order rule, POST /move, stale/rejected, frame reset, /why; browser-check.js v11 (real drags, Alt+arrows)
+bash pilot/app/dev/verify-v0.12.sh          # own ports/dirs; several chats: lazy chats.json, main untouched, shared board, project-wide counts, /why; browser-check.js v12
 ```
 
 To start over by hand, stop the server and delete `pilot/app/.pilot/`.
@@ -281,12 +310,12 @@ To start over by hand, stop the server and delete `pilot/app/.pilot/`.
 | Method | Path | Does |
 |---|---|---|
 | GET | `/` | the page (only files under `public/` are served) |
-| GET | `/state` | `{transcript: last 500 lines, total, turn, models, panes (faded ones included), faded, pending, pendingKind, answers, removals, modulesRev, paneInfo (with fade), items (with prov when hand-edited), stateRev, stateError, flags (pilot-v0.9: {settledInput, settleMs, source, rev}; pilot-v0.10 adds frameProposals, frameSource), frames (pilot-v0.10: {rev, pending, applied, resets}), extracting, framing, fileErrors}`; `?only=state.json,modules.json,flags.json,…` returns only the parts of those files (plus `extracting`, `fileErrors`) |
+| GET | `/state` | pilot-v0.12: `?chat=<id>` (missing = main, unknown = 404) picks the chat whose lines are `transcript` / `total`; the part `chats.json` is `chats {exists, rev, list: [{id, file, title, titleBy, titleModel, createdAt, lastActivity, messages, lines, archived}]}`; `pendingLine {chat, line}` with the modules part; items carry `chat` once there is `chats.json`. Before: `{transcript: last 500 lines, total, turn, models, panes (faded ones included), faded, pending, pendingKind, answers, removals, modulesRev, paneInfo (with fade), items (with prov when hand-edited), stateRev, stateError, flags (pilot-v0.9: {settledInput, settleMs, source, rev}; pilot-v0.10 adds frameProposals, frameSource), frames (pilot-v0.10: {rev, pending, applied, resets}), extracting, framing, fileErrors}`; `?only=state.json,modules.json,flags.json,…` returns only the parts of those files (plus `extracting`, `fileErrors`) |
 | GET | `/events` | Server-Sent Events: `hello {revs, extracting}`, then `change {file, rev[, error]}` per changed file and `status {extracting}` |
-| POST | `/chat` | `{text}`: appends the user line, streams the reply as `text/plain`, appends the assistant line |
+| POST | `/chat` | `{text, chat?}`: appends the user line to that chat (pilot-v0.12; missing = main, unknown = 404), streams the reply (the model gets only that chat's history) as `text/plain`, appends the assistant line. pilot-v0.12: `/command`, `/answer`, `/move`, `/touch`, `/frame` take `chat` too; their system lines go there |
 | POST | `/command` | `{text: "/model chat morrow"}` → `{ok, lines}` (`/state.models.<role>` has `active`, `pinned`, `last`, `candidates`, `local`) |
 | POST | `/answer` | `{module: "index", answer: "y"}` (y/n/a/x or yes/no/always/never; the removal question takes y/n/x), or `{itemId: "dec-3", decision: "c"}` (c/r or confirm/reject; proposed items only, records `decidedAt`, `decidedBy: "user"`). Optional `rev` (of `modules.json` / `state.json`): stale → 409 `{stale: true, file, rev}`; a broken file → 409 |
 | POST | `/frame` | `{pane: "map" \| "kanban", id: "fr-1", action: "apply" \| "dismiss", rev?}` (pilot-v0.10): apply or dismiss the open frame proposal of that pane. Off → 409; a wrong id → 409; a stale `rev` (of `frames.json`) → 409 `{stale: true}`; a proposal that no longer fits the cards → 409, dropped |
 | POST | `/move` | `{itemId: "task-4", column: "todo" \| "doing" \| "done", index?: n, rev?}` (pilot-v0.11): you move a task; `index` = its place among the other cards of that column (0 = top; missing = the end). Writes `column`, `order`, `movedBy: "user"`, `movedAt` on that task only, `item_move`, a kanban touch; resets an applied kanban frame. Stale rev → 409 `{stale}`; a rejected task, a broken `state.json`, no kanban shown → 409; a decision/source, a bad column or index → 400; the same place → 200 `changed: false` |
 | POST | `/touch` | `{module, how}` (pilot-v0.8; how: click, focus, scroll, decide, tab): records a touch of a shown pane and brings a faded one back. The first touch of a pane per turn is written; later ones return `changed: false`. No rev. `chat` → 400, a pane not shown → 404 |
-| POST | `/metric` | `{event: "index_jump", target: "<message id>"}` (pilot-v0.6; the page sends it on an index click). pilot-v0.9, only while the settled-input flag is on: `settle_offer {offer, cue, chars, words, sinceKeyMs}`, `settle_accept {offerRef, sinceKeyMs, offerMs, chars}`, `settle_ignore {offerRef, how, offerMs}`, `enter_send {offerShowing, offerRef?, sinceKeyMs, chars}` (other fields dropped; one outcome per offer). Any other event or an unknown id → 400 |
+| POST | `/metric` | `{event: "index_jump", target: "<message id>"}` (pilot-v0.6; the page sends it on an index click). pilot-v0.9, only while the settled-input flag is on: `settle_offer {offer, cue, chars, words, sinceKeyMs}`, `settle_accept {offerRef, sinceKeyMs, offerMs, chars}`, `settle_ignore {offerRef, how, offerMs}`, `enter_send {offerShowing, offerRef?, sinceKeyMs, chars}` (other fields dropped; one outcome per offer). pilot-v0.12: `chat_switch {from, to, how}` (both chats in `chats.json`, from ≠ to); an index jump may target a message in any chat. Any other event or an unknown id → 400 |

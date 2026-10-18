@@ -4,6 +4,134 @@ P0 to P2 (skeleton, model roles, growth controller with consent and the index pa
 baseline, merged before the numbered iterations started; see `CHECKS.md` (# P0, # P1, # P2). Iterations are
 tagged `pilot-v0.N` by the coordinator; each one is runnable with `npm run demo -- v0.N`.
 
+## pilot-v0.12
+
+Several chats in one project, with a sidebar like ChatGPT's, asked for by Miro. His decision: projects have chats, and the
+chats of a project share its board. This iteration builds chats within one project (the pilot dir). Projects come in
+v0.13. Still untested with a real model (fakes only; the new `title` role runs against the morrow fake in the demo).
+
+**Adds**
+- **Files** (hand-editable, atomic, `rev`, watched; `chats.js` reads them, and every function takes the dir, so nothing
+  assumes a single pilot dir):
+  - `transcript.jsonl` stays the first chat, `main`. It is never moved, rewritten or migrated.
+  - Further chats live in `chats/<id>.jsonl`.
+  - `chats.json` `{rev, chats: [{id, file, createdAt, title?, titleBy?, titleModel?, titledAt?, archived?}]}` lists
+    them, `main` first. It is created on the first new chat, together with `chats/`.
+  - A dir without `chats.json` is one chat and behaves exactly as before. The earlier verify scripts and demos run
+    unchanged.
+  - Path safety: an id is `main` or `[a-z0-9][a-z0-9-]*`. The file always follows from the id. An entry whose `file`
+    says anything else is ignored.
+  - A broken `chats.json` is read as its last good version (`fileErrors`) and never written; `/chat new`, rename and
+    archive refuse until it is fixed.
+- **The sidebar** (`public/index.html`, `app.js`, `style.css`):
+  - Lists the chats, most recent activity first: the title, who named it, the number of messages and the last activity.
+    "+ new chat" sits at the top.
+  - The chat you are in is marked (`aria-current`, a lavender edge on the bar colour).
+  - Archived chats sit behind "archived: n (show)".
+  - Each chat is a real link (`/?chat=<id>`), so a middle click opens it in a new tab.
+  - It is closed while the project has one chat, so the page looks as before; the ☰ button in the title bar opens it.
+    It opens by itself once `chats.json` exists. Your toggle is kept in this browser.
+  - With the sidebar open, the shell grows by its width. The chat column narrows a little (1.2 : 1 instead of
+    1.6 : 1), so the kanban keeps three columns at 1280 px.
+  - Below 900 px it is a drawer over the page, opened with ☰ and closed by Escape or by picking a chat.
+  - The title bar and the browser tab title name the current chat.
+- **Keyboard:** `Alt+S` (Option+S) focuses the sidebar (opening it or the drawer if needed). It is matched on the key
+  code and never acts while the chat input has text. In the list, ↑/↓ move, Enter opens, Escape returns to the input.
+- **Commands:**
+  - `/chats [all]` lists the chats.
+  - `/chat new [title]` starts one. An empty, untitled chat you have not used yet is reused instead of piling up empty
+    chats.
+  - `/chat <title or id>` switches. An exact id wins, then an exact title, then a unique title prefix.
+  - `/chat rename <title>` names the chat you are in.
+  - `/chat archive [chat]` and `/chat unarchive <chat>` hide a chat from the list and bring it back.
+- **The URL holds the chat** (`/?chat=<id>`, main = `/`). A reload stays in it, Back/Forward move between chats, and each
+  tab can be in a different chat. The chat is never kept in localStorage, so two tabs never fight over it. An unknown
+  chat in the URL falls back to main, with a notice.
+- **Every write names its chat:** `chat` in `POST /chat`, `/command`, `/answer`, `/move`, `/touch` and `/frame`, and
+  `GET /state?chat=`. Missing means main, for curl and the older checks; an unknown chat gets 404. System and controller
+  lines go to the chat where the action happened. Nothing done in another chat touches `transcript.jsonl`.
+- **The model sees only the current chat's history** (the last 40 messages of that chat).
+- **The shared board.**
+  - Decisions, tasks and sources from every chat land in the same `state.json`.
+  - Once the project has more than one chat, a proposed item records `fromChat` next to `fromMessage`. The field is in
+    the schema copy, `pilot/app/schemas/state.schema.json`. A missing `fromChat` means main, as in every older item.
+  - `/state` gives each item its `chat`: `fromChat`, else the chat that holds `fromMessage`.
+  - With more than one chat, every card shows a chat tag, e.g. `chat · invoices`. It is a button: it opens that chat and
+    scrolls to the message the card came from.
+  - `/why <item>` cites the message in its own file and line (`chats/c-invoices.jsonl:1 m-f203`) and says which chat
+    (`chats.json:N chats c-invoices`). A `/why` "show m-…" link into another chat opens that chat first.
+    `dev/why-cites.js` resolves both.
+- **Titles and who named them.**
+  - The `title` role names a chat after its first reply, if the role has a candidate. Pins, local-only fallback and
+    `stallMs` apply, as for every role. The reply must be one line of 1 to 60 characters; anything else is logged as
+    `title_error` and changes nothing.
+  - Without a candidate (the default config), the title is the first sentence of the first message, the index pane's
+    rule. A model never renames a chat that has a title.
+  - Who named a chat is shown everywhere:
+    - "you": `/chat rename` or `/chat new <title>`;
+    - "model · morrow": the title role;
+    - "first message": no title yet;
+    - "you (file edit)": the title in `chats.json` differs from the last one the server wrote. `chat_new` and
+      `chat_rename` events are the ledger, as `item_write` is for items (v0.6).
+- **No delete.** `archived: true` only hides a chat from the list. Its file stays, and its messages still count for the
+  controller. `/chat unarchive` brings it back. Main cannot be archived.
+- **The open question is the project's.** `modules.json` `pending` is project-wide, but its line lives in the chat where
+  it was asked. `/state` sends it as `pendingLine {chat, line}`, and every other chat shows it at the end of the log,
+  with its buttons and "asked in chat …". So y/n/a/x from the empty input never answers a question that is not on
+  screen. The answer's system line goes to the chat where you answered.
+- **Metrics:** `chat_new {chat, file, from, title?, by?, created?}`, `chat_switch {from, to, how: sidebar | command |
+  tag | link | new | archive | back, turn}` (sent by the page via `POST /metric`; both chats must exist), `chat_rename
+  {chat, title, was, by: user | model, model?}`, `chat_archive {chat, archived}`, `title_error`. `turn` and `index_jump`
+  carry `chat` when it is not main.
+- **`/stats`:** the five P5 measures stay project-wide. Usefulness and quiet count the messages of every chat.
+  Continuity compares `server_start` with `turn`, and both now count the lines of all chats, so `/stats` reports no
+  lost lines. A "chats" block (measured, not judged) follows the experiments block, only when the project has
+  `chats.json` (or chat events): chats per file, and the chat events by kind.
+- **Live files:** the watcher also watches `chats/` (`fs.watch` is not recursive) and pushes `change {file:
+  "chats/<id>.jsonl", rev}`. The page reloads its transcript only for its own chat's file; any chat file, and
+  `chats.json`, refreshes the list (recency, titles, the project-wide turn).
+- **Demo** `npm run demo -- v0.12` (ports 4786, 5794, 5795): the v0.11 project with three chats ("letter" = main named
+  by you, "invoices" named by morrow, the hospital chat with no name yet) and an archived "scratch". The shared kanban
+  holds tasks from all three. The title role runs on the morrow fake. `dev/make-fixture-v12.js` (deterministic) copies
+  the main transcript byte for byte from v0.11. `scripts/demo.js` now copies folders too (`chats/`).
+- **Dev:**
+  - `dev/fake-model.js` answers title requests (`PILOT-TITLE`) with the first four words of the first message.
+  - `browser-check.js v12`.
+  - `contrast-check.js` has six more pairs (the sidebar and the chat tag; all existing tokens).
+  - `verify-v0.12.sh`.
+
+**Why**
+- Miro's request ("more than one chat, chat navigation like ChatGPT") and his decision: chats of one project share its
+  board.
+- **Why main stays `transcript.jsonl`:** a real `.pilot/` must never be moved or migrated, and a dir without chats must
+  keep working with every earlier script. A lazily created `chats.json` makes the first new chat the only moment
+  anything changes, and it only adds files.
+- **Why no delete:** the files are the truth, and the board, `/why` and `/stats` cite chat lines by file and line. A
+  deleted chat would leave items whose `fromMessage` points nowhere, and `/why` answers that say "not recorded" for
+  something that was recorded. Archiving hides without losing anything, and you can still remove a file by hand if you
+  really want to.
+- **Why the controller counts all chats (project-wide):**
+  - Growth is a property of the project. The panes and the board are shared, so the rules that grow them count what the
+    project holds: messages in all chats, decisions and tasks as before.
+  - Turns, and with them fading (v0.8), are project-wide too: a pane you have not touched for 8 messages in any chat
+    fades.
+  - The index pane lists the current chat's messages, because jumping back only makes sense within the log you see.
+  - Alternative considered: count per chat (each chat grows its own index; fading counts turns in the chat you are in).
+    That would make panes appear and fade as you switch chats, although the panes belong to the project, and a new
+    chat would start with no index although the project already has one. If dogfooding shows the index rule should be
+    per chat, only `counts()` and `fade.turnOf` change (see QUESTIONS.md).
+
+**Deliberately does not**
+- No projects (v0.13): one pilot dir is one project. `chats.js`, `stats.js` and `why.js` take the dir as a parameter;
+  the server still has one `PILOT`.
+- No delete, no rename from the sidebar (`/chat rename` or a hand edit), no drag to reorder chats, no search, no pinning.
+- No sidebar in the old single-chat layout unless you open it (☰), so every earlier layout check is unchanged.
+- No per-chat panes, rules or pending questions: one `modules.json` for the project.
+- No `fromChat` on items while the project has one chat (missing = main), so `state.json` stays exactly as before in
+  every earlier check.
+- No streaming of a reply to other tabs (as before): another tab in the same chat sees the user line, then the finished
+  reply.
+
 ## pilot-v0.11
 
 A kanban that is drag and drop, asked for by Miro. Moving a card is you arranging your own board, so it is authored by
