@@ -54,6 +54,19 @@ kbd { border: 1px solid var(--rule); border-radius: 3px; padding: 0 0.3em; backg
 .eyebrow { font: 500 13px/1.4 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 0 0 18px; }
 h1 { font: 400 clamp(40px, 9vw, 76px)/1 var(--serif); letter-spacing: -0.015em; margin: 0; }
 .lead { font: italic 400 clamp(20px, 3vw, 24px)/1.4 var(--serif); color: var(--muted); margin: 22px 0 0; max-width: 34ch; }
+.language-filter {
+  display: flex; align-items: center; gap: 12px; margin-top: 28px;
+  font: 500 12px/1 var(--sans); letter-spacing: 0.06em; text-transform: uppercase;
+}
+.language-filter-label { color: var(--muted); }
+.language-filter-options { display: inline-flex; padding: 3px; border: 1px solid var(--rule); border-radius: 999px; background: var(--sheet); }
+.language-filter button {
+  min-width: 44px; min-height: 34px; border: 0; border-radius: 999px; padding: 0 12px;
+  background: transparent; color: var(--muted); font: 600 12px/1 var(--sans); letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.language-filter button[aria-pressed="true"] { background: var(--ink); color: var(--page); }
+.language-filter button:hover:not([aria-pressed="true"]) { color: var(--ink); }
 
 /* Sections */
 .block { padding: 40px 0 8px; border-top: 1px solid var(--rule); margin-top: 32px; }
@@ -73,8 +86,13 @@ h2 { font: 500 clamp(26px, 4.4vw, 34px)/1.15 var(--serif); margin: 0 0 18px; dis
   content: ""; position: absolute; left: 13px; top: 0; bottom: 0;
   border-left: 2px solid var(--thread);
 }
-.leg:first-child::before { top: 14px; }
+.leg:first-child::before, .leg.is-first::before { top: 14px; }
 .leg.last::before {        /* the thread runs out: the path ends open */
+  border-left-style: dashed;
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent);
+          mask-image: linear-gradient(to bottom, #000 55%, transparent);
+}
+.leg.is-last::before {
   border-left-style: dashed;
   -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent);
           mask-image: linear-gradient(to bottom, #000 55%, transparent);
@@ -128,7 +146,7 @@ h3 a:hover { text-decoration: underline; text-decoration-color: var(--thread); }
   .leg { padding-left: 64px; }
   .leg::before { left: 19px; }
   .marker { left: -64px; width: 40px; height: 40px; line-height: 36px; font-size: 15px; top: -6px; }
-  .leg:first-child::before { top: 20px; }
+  .leg:first-child::before, .leg.is-first::before { top: 20px; }
   .baton::before { left: -45px; width: 26px; }
 }
 

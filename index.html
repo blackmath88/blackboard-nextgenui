@@ -10,6 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/style.css">
+<script src="assets/language-filter.js" defer></script>
 </head>
 <body>
 <a class="skip" href="#path">Skip to the path</a>
@@ -18,6 +19,13 @@
   <p class="eyebrow">blackboard-nextgenui · a collection</p>
   <h1>Who decides the interface?</h1>
   <p class="lead">Four explainers and one build plan, handed on like a relay: each piece takes one question, works on it, and passes the next one on.</p>
+  <nav class="language-filter" aria-label="Choose the language of the entries">
+    <span class="language-filter-label">Entries</span>
+    <div class="language-filter-options">
+      <button type="button" data-language="en" aria-pressed="true">EN</button>
+      <button type="button" data-language="de" aria-pressed="false">DE</button>
+    </div>
+  </nav>
 </header>
 
 <main>
@@ -43,10 +51,10 @@
 
   <section class="block" id="path" aria-labelledby="path-h" tabindex="-1">
     <h2 id="path-h"><span class="num">3</span>The path</h2>
-    <p class="prose note">Read top to bottom. Between the pieces, the question each one leaves open is handed on.</p>
+    <p class="prose note" id="path-note" aria-live="polite">Showing the English entries. Choose DE to see the German explainers.</p>
 
     <ol class="relay">
-      <li class="leg">
+      <li class="leg" data-lang="de">
         <article class="piece" aria-labelledby="p1">
           <p class="meta"><span class="marker" aria-hidden="true">1</span><span class="lang" title="Written in German">German</span> · <span>blackboard, agenda, chalk</span></p>
           <h3 id="p1"><a href="explainers/01-blackboard/index.html">Blackboard</a></h3>
@@ -57,7 +65,7 @@
         <p class="baton"><span class="k">Hands on</span> How does the Enter key disappear?</p>
       </li>
 
-      <li class="leg">
+      <li class="leg" data-lang="de">
         <article class="piece" aria-labelledby="p2">
           <p class="meta"><span class="marker" aria-hidden="true">2</span><span class="lang" title="Written in German">German</span> · <span>stage, signals, view transitions</span></p>
           <h3 id="p2"><a href="explainers/02-morph/index.html">Morph</a></h3>
@@ -68,7 +76,7 @@
         <p class="baton"><span class="k">Hands on</span> Where does the view end and authority begin?</p>
       </li>
 
-      <li class="leg">
+      <li class="leg" data-lang="de">
         <article class="piece" aria-labelledby="p3">
           <p class="meta"><span class="marker" aria-hidden="true">3</span><span class="lang" title="Written in German">German</span> · <span>scroll and codex, marginal glosses</span></p>
           <h3 id="p3"><a href="explainers/03-rolle-und-kodex/index.html">Rolle und Kodex</a></h3>
@@ -79,7 +87,7 @@
         <p class="baton"><span class="k">Hands on</span> What would prove it?</p>
       </li>
 
-      <li class="leg">
+      <li class="leg" data-lang="en">
         <article class="piece" aria-labelledby="p4">
           <p class="meta"><span class="marker" aria-hidden="true">4</span><span class="lang">English</span> · <span>pixel art, amber terminal</span></p>
           <h3 id="p4"><a href="explainers/04-growing-workbench/index.html">Growing workbench</a></h3>
@@ -90,7 +98,7 @@
         <p class="baton"><span class="k">Hands on</span> How do panes go away again?</p>
       </li>
 
-      <li class="leg last">
+      <li class="leg last" data-lang="en">
         <article class="piece" aria-labelledby="p5">
           <p class="meta"><span class="marker" aria-hidden="true">5</span><span class="lang">English</span> · <span>plain Markdown, JSON Schemas</span></p>
           <h3 id="p5"><a href="pilot/cli-pilot-v1/README.md">CLI Pilot v1</a></h3>
