@@ -1089,6 +1089,29 @@ function serveStatic(req, res, pathname) {
   });
 }
 
+// The board as a system message for the chat role: confirmed decisions, open tasks with their column, sources, each
+// with its id. Proposed and rejected items are left out (a missing status means added by hand, i.e. confirmed). A broken
+// state.json reads as its last good items (readState); an empty board adds nothing.
+const BOARD_MAX = 8;   // per kind, so the message stays small
+function boardContext() {
+  let items;
+  try { items = readState().items; } catch { return null; }
+  const live = items.filter((i) => (i.status || 'confirmed') === 'confirmed');
+  const list = (title, its, fmt) => {
+    if (!its.length) return [];
+    const shown = its.slice(-BOARD_MAX).map((i) => `- ${i.id}: ${fmt(i)}`);
+    return [`${title}:`, ...shown, ...(its.length > BOARD_MAX ? [`- (${its.length - BOARD_MAX} older not shown)`] : [])];
+  };
+  const lines = [
+    ...list('Confirmed decisions', live.filter((i) => i.kind === 'decision'), (i) => i.text),
+    ...list('Open tasks', live.filter((i) => i.kind === 'task' && i.column !== 'done'), (i) => `[${i.column || 'todo'}] ${i.text}`),
+    ...list('Sources', live.filter((i) => i.kind === 'source'), (i) => i.url ? `${i.text} <${i.url}>` : i.text),
+  ];
+  if (!lines.length) return null;
+  return { role: 'system', content: ['Project board (the user\'s confirmed state):', ...lines,
+    'Treat confirmed decisions as current constraints. If a request conflicts with one, say so and name its id.'].join('\n') };
+}
+
 async function handleChat(req, res) {
   let text;
   try { text = String(JSON.parse(await readBody(req)).text || '').trim(); } catch { return sendJson(res, 400, { error: 'expected JSON {text}' }); }
@@ -1097,6 +1120,8 @@ async function handleChat(req, res) {
   const userLine = await appendLine('user', text, null);
   const history = readTranscript().filter((l) => l.role === 'user' || l.role === 'assistant').slice(-HISTORY)
     .map((l) => ({ role: l.role, content: l.text }));
+  const board = boardContext();
+  if (board) history.unshift(board);
 
   // no-cache, not no-store: Chrome reports a streamed no-store body read by a reader as net::ERR_ABORTED.
   res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' });
