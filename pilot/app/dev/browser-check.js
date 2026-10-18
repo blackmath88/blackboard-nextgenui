@@ -1173,6 +1173,11 @@ async function v11(page) {
   await page.key('ArrowRight', 1); await settled();
   await page.key('ArrowRight', 1); await settled();
   check('Alt+→ twice: task-4 todo -> doing -> done, focus stays on it', item('task-4').column === 'done' && (await colOf(page, 'done')).split(',').includes('task-4') && await page.eval(`document.activeElement.dataset.id === 'task-4'`), await board());
+  n0 = moves();
+  await page.key('ArrowDown', 1); await page.key('ArrowDown', 1); await settled(); await sleep(300);
+  check('two quick Alt+↓ (no wait between): both written in order, task-4 third in done, no stale refusal', moves() === n0 + 2 && (await colOf(page, 'done')).split(',')[2] === 'task-4'
+    && events().filter((e) => e.event === 'item_move' && e.id === 'task-4' && e.from === 'done' && e.to === 'done').length === 2 && !/not moved/.test(await said()), `${await colOf(page, 'done')}; "${await said()}"`);
+  await page.eval(`document.querySelector('${card('task-4')}').focus()`);
   await page.key('ArrowDown'); 
   check('a plain ↓ still moves focus to the next card (no move)', await page.eval(`document.activeElement.dataset.id !== 'task-4'`) && item('task-4').column === 'done');
   n0 = moves();

@@ -33,7 +33,7 @@ real model (fakes only; moving cards uses no model at all).
 - **Optimistic, then the file decides.**
   - The card moves at once. `POST /move {itemId, column, index, rev}` follows; `index` is the place among the other cards
     of the target column, 0 = top.
-  - Moves are queued, so quick Alt presses go out in order, each with the rev the page saw last.
+  - Moves are queued, so quick Alt presses (and key repeat) go out in order; each carries the rev of the previous move's answer.
   - File events wait while a drag or a move is in flight, then the page reloads.
   - A refused move (stale rev → 409 `{stale}`, a rejected task, anything else) shows the notice and snaps the card back.
     The page re-renders even when the file did not change.
@@ -81,7 +81,7 @@ real model (fakes only; moving cards uses no model at all).
     there through a recorded move); done task-1, task-2. task-6 is rejected and off the board;
   - experiments are off.
 - **Dev:**
-  - `dev/verify-v0.11.sh` (41 checks, one of them runs the 39 checks of `browser-check.js v11`: 37 + 2 global);
+  - `dev/verify-v0.11.sh` (41 checks, one of them runs the 40 checks of `browser-check.js v11`: 38 + 2 global);
   - `browser-check.js`: `page.key(k, modifiers)` and ArrowLeft/ArrowRight.
 
 **Why**

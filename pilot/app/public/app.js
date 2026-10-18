@@ -708,6 +708,8 @@ function moveCard(card, col, index) {
         sigs.panes = null;   // snap back even when the file did not change (the screen did)
       } else {
         const body = await res.json();
+        // the next queued move goes out with this rev (file events wait until the queue is empty)
+        if (Number.isInteger(body.rev)) state.stateRev = body.rev;
         if (body.changed !== false) announce(`${id} moved to ${col}, position ${index + 1} of ${n}${body.item && body.item.status === 'proposed' ? '; still proposed' : ''}.`);
         if (body.frameReset) showFlash(`kanban: frame ${body.frameReset.id} (suggested by ${body.frameReset.model || 'a model'}) reset by your manual move; the pane shows your order`);
       }

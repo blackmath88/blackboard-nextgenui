@@ -25,9 +25,9 @@ server() { PILOT_DIR=$DIR PILOT_CONFIG="$T/conf.json" node server.js >> "$T/serv
 stop_server() { [ -n "$SERVER" ] && { kill $SERVER 2>/dev/null; wait $SERVER 2>/dev/null; SERVER=""; }; }
 cmd() { curl -s -X POST localhost:4840/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
 lines() { cmd "$1" | q 'x.lines.join("\n")'; }
-mv() { curl -s -w '\n%{http_code}' -X POST localhost:4840/move -H 'content-type: application/json' -d "$1"; }
-code() { mv "$1" | tail -1; }
-body() { mv "$1" | head -1; }
+post_move() { curl -s -w '\n%{http_code}' -X POST localhost:4840/move -H 'content-type: application/json' -d "$1"; }
+code() { post_move "$1" | tail -1; }
+body() { post_move "$1" | head -1; }
 st() { curl -s "localhost:4840/state${1:-}"; }
 ev() { qa "$1" < "$DIR/metrics.jsonl"; }
 item() { node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1]));const i=s.items.find(i=>i.id===process.argv[2]);console.log(String((x=>eval(process.argv[3]))(i)))' "$DIR/state.json" "$1" "$2"; }
@@ -77,14 +77,14 @@ fake 5841 frontier; fake 5842 morrow; sleep 0.3
 server
 check "the fixture: the kanban shown, map and index tabs; board todo task-4,task-5,task-7,task-8 | doing task-3 | done task-1,task-2" "$(st | q 'x.panes.includes("kanban") && !x.faded.includes("kanban") && x.faded.includes("map") && x.faded.includes("index") && ["todo","doing","done"].map(c=>require("./public/board.js").column(x.items,c).map(i=>i.id).join(",")).join(" | ")==="task-4,task-5,task-7,task-8 | task-3 | task-1,task-2"')"
 R0=$(rev); cp $DIR/state.json "$T/before.json"
-OUT=$(mv "{\"itemId\":\"task-4\",\"column\":\"doing\",\"index\":1,\"rev\":$R0}")
+OUT=$(post_move "{\"itemId\":\"task-4\",\"column\":\"doing\",\"index\":1,\"rev\":$R0}")
 check "move task-4 to doing below task-3 -> 200 {changed, from todo, to doing, index 1}, rev +1" "$(tail -1 <<< "$OUT" | grep -qx 200 && head -1 <<< "$OUT" | q 'x.changed===true && x.from==="todo" && x.to==="doing" && x.index===1' | grep -q true && [ "$(rev)" = $((R0+1)) ] && echo true)"
 check "state.json: task-4 column doing, order 8 (after task-3's 7), movedBy user, movedAt; status/decidedAt/decidedBy unchanged" "$(item task-4 'i.column==="doing" && i.order===8 && i.movedBy==="user" && !isNaN(Date.parse(i.movedAt)) && i.status==="confirmed" && i.decidedAt==="2026-10-16T18:35:00.000Z" && i.decidedBy==="user"')"
 check "no other item changed (the move writes only the moved task)" "$(node -e 'const a=require(process.argv[1]).items,b=JSON.parse(require("fs").readFileSync(process.argv[2])).items;console.log(a.length===b.length&&a.every((x,i)=>x.id==="task-4"||JSON.stringify(x)===JSON.stringify(b[i])))' "$T/before.json" "$PWD/$DIR/state.json")"
 check "metrics: item_move {id task-4, from todo, to doing, order 8, by user}, item_write via move, pane_touch kanban how move (first touch of turn 44)" "$(ev 'x.some(e=>e.event==="item_move"&&e.id==="task-4"&&e.from==="todo"&&e.to==="doing"&&e.order===8&&e.by==="user"&&e.index===1) && x.some(e=>e.event==="item_write"&&e.via==="move"&&e.itemId==="task-4"&&e.item.order===8) && x.some(e=>e.event==="pane_touch"&&e.module==="kanban"&&e.how==="move"&&e.turn===44)')"
 sleep 0.4
 check "the server's own write is no file edit: no file_edit for task-4, /state task-4 has no prov" "$(ev '!x.some(e=>e.event==="file_edit"&&e.itemId==="task-4")' | grep -q true && st '?only=state.json' | q '!x.items.find(i=>i.id==="task-4").prov')"
-OUT=$(mv "{\"itemId\":\"task-5\",\"column\":\"done\",\"index\":0,\"rev\":$R0}")
+OUT=$(post_move "{\"itemId\":\"task-5\",\"column\":\"done\",\"index\":0,\"rev\":$R0}")
 check "a stale rev -> 409 {stale: true, file: state.json}; nothing written" "$(tail -1 <<< "$OUT" | grep -qx 409 && head -1 <<< "$OUT" | q 'x.stale===true && x.file==="state.json"' | grep -q true && item task-5 'i.column==="todo" && i.movedBy===undefined' | grep -q true && [ "$(rev)" = $((R0+1)) ] && echo true)"
 R1=$(rev)
 SAME="{\"itemId\":\"task-4\",\"column\":\"doing\",\"index\":1,\"rev\":$R1}"
@@ -96,7 +96,7 @@ N0=$(nev decide)
 check "the proposed task-8 moves to done and stays proposed (no decidedAt, no decidedBy, no decide event)" "$( [ "$(code '{"itemId":"task-8","column":"done","index":0}')" = 200 ] && item task-8 'i.column==="done" && i.status==="proposed" && !i.decidedAt && !i.decidedBy' | grep -q true && [ "$(nev decide)" = "$N0" ] && ev 'x.some(e=>e.event==="item_move"&&e.id==="task-8"&&e.status==="proposed")')"
 check "/state still counts it as a proposal (status proposed, the pane holds it)" "$(st | q 'x.items.find(i=>i.id==="task-8").status==="proposed" && x.paneInfo.kanban.fade.holds.includes("task-8")')"
 R2=$(rev)
-OUT=$(mv '{"itemId":"task-6","column":"doing"}')
+OUT=$(post_move '{"itemId":"task-6","column":"doing"}')
 check "the rejected task-6 -> 409 'rejected tasks are not on the board and cannot be moved', nothing written" "$(tail -1 <<< "$OUT" | grep -qx 409 && has 'cannot be moved' "$OUT" && [ "$(rev)" = "$R2" ] && item task-6 'i.column==="todo" && !i.movedBy')"
 check "a decision -> 400; a bad column -> 400; a bad index -> 400; an unknown id -> 404" "$( [ "$(code '{"itemId":"dec-1","column":"done"}')" = 400 ] && [ "$(code '{"itemId":"task-1","column":"later"}')" = 400 ] && [ "$(code '{"itemId":"task-1","column":"todo","index":-1}')" = 400 ] && [ "$(code '{"itemId":"task-1","column":"todo","index":1.5}')" = 400 ] && [ "$(code '{"itemId":"task-99","column":"todo"}')" = 404 ] && [ "$(rev)" = "$R2" ] && echo true)"
 
@@ -109,7 +109,7 @@ cp $DIR/state.json "$T/good.json"; printf '{"rev": 3, "items": [' > $DIR/state.j
 check "a broken state.json: move -> 409, the file untouched" "$( [ "$(code '{"itemId":"task-5","column":"done"}')" = 409 ] && [ "$(cat $DIR/state.json)" = '{"rev": 3, "items": [' ] && echo true)"
 cp "$T/good.json" $DIR/state.json; sleep 0.3
 edit modules.json 'x.answers.kanban.answer="no";'
-check "no kanban shown (answer no by hand): move -> 409 'no kanban pane shown'" "$(OUT=$(mv '{"itemId":"task-5","column":"done"}'); tail -1 <<< "$OUT" | grep -qx 409 && has 'no kanban pane shown' "$OUT" && echo true)"
+check "no kanban shown (answer no by hand): move -> 409 'no kanban pane shown'" "$(OUT=$(post_move '{"itemId":"task-5","column":"done"}'); tail -1 <<< "$OUT" | grep -qx 409 && has 'no kanban pane shown' "$OUT" && echo true)"
 edit modules.json 'x.answers.kanban.answer="always";const k=x.panes.find(p=>p.module==="kanban");k.state="faded";k.fadedAt=new Date().toISOString();k.fadedTurn=44;'
 check "the kanban a tab (by hand): a move is a touch and brings it back (pane_touch move, unfaded)" "$( [ "$(code '{"itemId":"task-5","column":"doing","index":0}')" = 200 ] && st | q '!x.faded.includes("kanban")' | grep -q true && ev 'x.some(e=>e.event==="pane_touch"&&e.module==="kanban"&&e.how==="move"&&e.unfaded===true)')"
 
