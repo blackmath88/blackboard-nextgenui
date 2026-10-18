@@ -164,3 +164,39 @@ shown and not a tab. With a local model that is a second background call per tur
 The "CLI Pilot v1" card in the story section of the root `index.html` still says "steps P0 to P2 are done, P3 and P4 are next". The coordinator may not change story sections, only the iterations list (which is current).
 - Blocks: nothing; the overview contradicts itself until it is fixed.
 - Options: one-line edit, e.g. "The build is in `pilot/app/`, in tagged iterations up to pilot-v0.10 (see Pilot iterations below)."
+
+## 2026-10-18 (v0.11) Should a manual move reset a frame while the experiment is off?
+A manual move resets an applied kanban frame (`resets.kanban.reason: "manual move"`), also while `frame-proposals` is
+off. While off, the applied frame is not shown, but it stays in `frames.json` (v0.10) and comes back when the flag is
+on. If the move did not reset it, the frame would then cover the order you made yourself.
+- Blocks: nothing. Options: keep; reset only while the flag is on; or reset every applied frame when the flag goes off
+  (that also answers the v0.10 question "an applied frame while the flag is off").
+
+## 2026-10-18 (v0.11) Where does a card land when you drop it on a framed kanban?
+With a kanban frame applied, a column shows the frame's order. A move resets the frame, so the column falls back to
+your order (`order`, else file order), and the card lands at the place you dropped it in that order, not among the
+neighbours you saw. The UI says the frame was reset by your move.
+- Blocks: nothing (needs the experiment on and a kanban frame applied).
+- Options: keep; when a move resets a frame, write the frame's displayed order into `order` for the cards of that column
+  (this writes cards you did not move, and makes them `movedBy: user`); or place the card next to the neighbour above
+  it in what you saw.
+
+## 2026-10-18 (v0.11) Touch: swipe moves a card, or scrolls the pane?
+Task cards have `touch-action: none`, so on a touch screen a swipe that starts on a card drags it. The pane scrolls only
+from its headings and the gaps between cards, which is awkward with many cards on a phone.
+- Blocks: nothing on a desktop. Options: keep; long press (about 300 ms) to start a drag, and a swipe scrolls; or drag
+  only by a small handle on each card.
+
+## 2026-10-18 (v0.11) No renumbering, so order values can run out of precision
+A move sets only the moved card's `order`, to the midpoint between its neighbours. No other card is rewritten, so no
+other card changes author. Moving cards again and again between the same two neighbours halves the gap each time.
+After about 50 such moves the two numbers no longer differ, and the tie falls back to file order.
+- Blocks: nothing in practice. Options: keep; renumber a column when a gap gets below 1e-9 (that writes the other cards
+  with `item_write via move` but leaves their `movedBy` alone); or store order as a fraction string.
+
+## 2026-10-18 (v0.11) Should a move leave a line in the chat?
+A move is logged in `metrics.jsonl` (`item_move`), written to `state.json`, announced to screen readers, and explained
+by `/why task-N`, but it writes no transcript line. A frame reset that a move causes does write one.
+- Blocks: nothing. Options: keep (the chat stays a conversation); write one system line per move; or write one line
+  per turn that summarises the moves.
+

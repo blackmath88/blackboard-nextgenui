@@ -15,8 +15,10 @@
 // .pilot-verify-v10b/ seeded from demo/fixtures/v0.10/, the dev config with experiments.frameProposals false (the page
 // switches it on with /flag); the morrow fake answers frame requests with its default --frame=good (SHOT_DIR=<dir> saves
 // screenshots).
+// v11 (pilot-v0.11 kanban drag and drop): ports 4845/5846/5847, Chrome 9423, dir .pilot-verify-v11b/ seeded from
+// demo/fixtures/v0.11/ with its config (kanban shown); real mouse drags, Alt+arrows, touch, a second tab (SHOT_DIR=<dir>).
 // Needs Node 22+ (global WebSocket) and Google Chrome. No dependencies.
-// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|v07|v08|v09|v10|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
+// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|v07|v08|v09|v10|v11|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
 'use strict';
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -82,11 +84,12 @@ async function connectTab(target) {
       if (r.result.exceptionDetails) throw new Error(r.result.exceptionDetails.text + ' ' + expr);
       return r.result.result.value;
     },
-    async key(k) {
-      const ARROWS = { ArrowUp: 38, ArrowDown: 40, Tab: 9, Escape: 27 };
+    // modifiers (pilot-v0.11): CDP bit field, Alt = 1, Ctrl = 2, Meta = 4, Shift = 8
+    async key(k, modifiers = 0) {
+      const ARROWS = { ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, Tab: 9, Escape: 27 };
       if (ARROWS[k]) {
-        await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: k, code: k, windowsVirtualKeyCode: ARROWS[k] });
-        await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: ARROWS[k] });
+        await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: k, code: k, windowsVirtualKeyCode: ARROWS[k], modifiers });
+        await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: ARROWS[k], modifiers });
         return;
       }
       const enter = k === 'Enter';
@@ -1072,7 +1075,222 @@ async function v10(page) {
   check('no frame write touched state.json items or modules.json panes', events().filter((e) => e.event === 'item_write').length === writes0 && JSON.parse(fs.readFileSync(file('modules.json'), 'utf8')).panes.length === 3);
 }
 
-const SCENARIOS = { p1, p2, v03, v04, v05, v06, v07, v08, v09, v10 };
+
+// pilot-v0.11: drag and drop on the kanban, the keyboard way, a stale move, a second tab, a hand edit, a frame reset by a
+// move, touch, reduced motion. Real input only: Input.dispatchMouseEvent / dispatchKeyEvent / dispatchTouchEvent.
+async function v11(page) {
+  const file = (f) => path.join(APP, ENV.dir, f);
+  await stop('server');
+  const fix = path.join(APP, 'demo', 'fixtures', 'v0.11');
+  for (const f of fs.readdirSync(fix)) if (!['demo.json', 'pilot.config.json'].includes(f)) fs.copyFileSync(path.join(fix, f), file(f));
+  await startServer();
+  const waitFor = async (expr, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await page.eval(expr)) return Date.now() - t0; await sleep(20); } return null; };
+  const events = () => fs.readFileSync(file('metrics.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const items = () => JSON.parse(fs.readFileSync(file('state.json'), 'utf8')).items;
+  const item = (id) => items().find((i) => i.id === id);
+  const shot = async (name) => { if (!process.env.SHOT_DIR) return; const r = await page.send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.SHOT_DIR, name), Buffer.from(r.result.data, 'base64')); };
+  const colOf = (p, c) => p.eval(`[...document.querySelectorAll('#pane-kanban .col.${c} .item')].map((x) => x.dataset.id).join(',')`);
+  const board = async (p = page) => `${await colOf(p, 'todo')} | ${await colOf(p, 'doing')} | ${await colOf(p, 'done')}`;
+  const moves = () => page.net.filter((n) => n.url.endsWith('/move') && n.method === 'POST').length;
+  const said = () => page.eval(`document.getElementById('announce').textContent`);
+  const box = (sel) => page.eval(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); el.scrollIntoView({ block: 'nearest' }); const r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), top: r.top, bottom: r.bottom }; })()`);
+  const card = (id) => `#pane-kanban .item[data-id="${id}"]`;
+  const mouse = (type, x, y, buttons) => page.send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' && !buttons ? 'none' : 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1 });
+  // a real drag: press on `from`, move in steps to `to` (each a {x, y}), optionally look at the page mid-drag, release
+  async function drag(from, to, mid, { release = true } = {}) {
+    await mouse('mouseMoved', from.x, from.y, 0);
+    await mouse('mousePressed', from.x, from.y, 1);
+    const steps = 10;
+    for (let i = 1; i <= steps; i++) { await mouse('mouseMoved', Math.round(from.x + (to.x - from.x) * i / steps), Math.round(from.y + (to.y - from.y) * i / steps), 1); await sleep(16); }
+    const seen = mid ? await mid() : null;
+    if (release) await mouse('mouseReleased', to.x, to.y, 0);
+    return seen;
+  }
+  const settled = () => waitFor(`!document.querySelector('.item.dragging')`, 2000).then(() => sleep(250));
+  const midDrag = () => page.eval(`(() => { const l = document.querySelector('#pane-kanban .drop-line'); const t = document.querySelector('#pane-kanban .col.drop-target'); return { line: !!l, lineCol: l && l.closest('.col').dataset.col, before: l && l.nextElementSibling && l.nextElementSibling.dataset.id || null, target: t && t.dataset.col, ghost: !!document.querySelector('body > .drag-ghost'), dragging: (document.querySelector('.item.dragging') || {}).dataset?.id || null }; })()`);
+
+  await page.goto(URL);
+  await waitFor(`document.getElementById('meta').textContent.includes('live')`);
+  const start = await board();
+  check('the kanban is shown with seven tasks: todo task-4,task-5,task-7,task-8 | doing task-3 | done task-1,task-2 (task-6 rejected, not on the board)', start === 'task-4,task-5,task-7,task-8 | task-3 | task-1,task-2', start);
+  await shot('v11-start.png');
+  const writes0 = events().filter((e) => e.event === 'item_write').length;
+
+  // ---- a real mouse drag: task-4 onto doing, below task-3 ----
+  const t3 = await box(card('task-3')), doing = await box('#pane-kanban .col.doing > .items');
+  const from = await box(card('task-4'));
+  const mid = await drag(from, { x: doing.x, y: Math.round(Math.max(t3.bottom + 6, doing.bottom - 6)) }, midDrag);
+  check('mid-drag: a copy follows the pointer, the card is dimmed, doing is the outlined drop target, the bar sits after task-3', mid.ghost && mid.dragging === 'task-4' && mid.target === 'doing' && mid.line && mid.lineCol === 'doing' && mid.before === null, JSON.stringify(mid));
+  const optimistic = await board();
+  check('drop: the card is in doing at once (optimistic)', optimistic.split(' | ')[1] === 'task-3,task-4', optimistic);
+  await settled();
+  let it = item('task-4');
+  check('state.json: task-4 column doing, order after task-3 (7 -> 8), movedBy user, movedAt; status still confirmed', it.column === 'doing' && it.order === 8 && it.movedBy === 'user' && !!it.movedAt && it.status === 'confirmed', JSON.stringify(it));
+  check('metrics.jsonl: item_move {id task-4, from todo, to doing, order 8} and item_write via move; a kanban touch this turn', events().some((e) => e.event === 'item_move' && e.id === 'task-4' && e.from === 'todo' && e.to === 'doing' && e.order === 8)
+    && events().some((e) => e.event === 'item_write' && e.via === 'move' && e.itemId === 'task-4') && events().some((e) => e.event === 'pane_touch' && e.module === 'kanban' && e.turn === 44));
+  check('the card reads as yours, not as a file edit (no "file edit" on task-4) and keeps focus', !(await page.eval(`document.querySelector('${card('task-4')}').textContent.includes('file edit')`)) && await page.eval(`document.activeElement.dataset.id === 'task-4'`));
+  check(`announced: "${await said()}"`, /^task-4 moved to doing, position 2 of 2\.$/.test(await said()));
+  await shot('v11-dragged.png');
+
+  // ---- reorder within a column: task-7 above task-5 ----
+  const t5 = await box(card('task-5'));
+  await drag(await box(card('task-7')), { x: t5.x, y: Math.round(t5.top + 3) });
+  await settled();
+  check('reorder within todo: task-7 above task-5 (todo task-7,task-5,task-8), only task-7 written', (await colOf(page, 'todo')) === 'task-7,task-5,task-8' && item('task-7').movedBy === 'user' && item('task-5').movedBy === undefined && item('task-5').order === undefined, await colOf(page, 'todo'));
+
+  // ---- a proposed card moves and stays proposed ----
+  const done1 = await box(card('task-1'));
+  await drag(await box(card('task-8')), { x: done1.x, y: Math.round(done1.top + 3) });
+  await settled();
+  it = item('task-8');
+  check('the dashed task-8 moved to the top of done and stays proposed (dashed, c/r keys, no decidedAt)', (await colOf(page, 'done')).startsWith('task-8,') && it.status === 'proposed' && !it.decidedAt && !it.decidedBy
+    && await page.eval(`(() => { const c = document.querySelector('${card('task-8')}'); return c.dataset.proposed === '1' && getComputedStyle(c).borderTopStyle === 'dashed' && !!c.querySelector('[data-decision="confirm"]'); })()`), JSON.stringify(it));
+
+  // ---- cancel: Escape mid-drag, and a drop outside the columns ----
+  let n0 = moves(), b0 = await board();
+  await drag(await box(card('task-5')), await box('#pane-kanban .col.done > .items'), null, { release: false });
+  await page.key('Escape');
+  await mouse('mouseReleased', 0, 0, 0);
+  await settled();
+  check('Escape mid-drag cancels: no POST /move, the board unchanged', moves() === n0 && await board() === b0);
+  await drag(await box(card('task-5')), await box('#log'));
+  await settled();
+  check('a drop outside the columns (on the chat) cancels: no POST /move', moves() === n0 && await board() === b0);
+
+  // ---- the keyboard way ----
+  await page.eval(`document.querySelector('${card('task-4')}').focus()`);
+  await page.key('ArrowLeft', 1);
+  await settled();
+  check('Alt+← on task-4 (doing, position 2): back to todo at position 2', (await colOf(page, 'todo')).split(',')[1] === 'task-4' && item('task-4').column === 'todo' && await page.eval(`document.activeElement.dataset.id === 'task-4'`), `${await board()}; "${await said()}"`);
+  check('announced via aria-live: "task-4 moved to todo, position 2 of 3."', await said() === 'task-4 moved to todo, position 2 of 3.' && await page.eval(`document.getElementById('announce').getAttribute('aria-live') === 'polite'`), await said());
+  await page.key('ArrowUp', 1); await settled();
+  check('Alt+↑: task-4 to the top of todo', (await colOf(page, 'todo')).startsWith('task-4,'), await colOf(page, 'todo'));
+  n0 = moves();
+  await page.key('ArrowUp', 1); await sleep(150);
+  check('Alt+↑ at the top: nothing sent, announced "already at the top of todo"', moves() === n0 && /already at the top of todo/.test(await said()), await said());
+  await page.key('ArrowLeft', 1); await sleep(150);
+  check('Alt+← in the first column: nothing sent, announced', moves() === n0 && /already in the first column/.test(await said()), await said());
+  await page.key('ArrowRight', 1); await settled();
+  await page.key('ArrowRight', 1); await settled();
+  check('Alt+→ twice: task-4 todo -> doing -> done, focus stays on it', item('task-4').column === 'done' && (await colOf(page, 'done')).split(',').includes('task-4') && await page.eval(`document.activeElement.dataset.id === 'task-4'`), await board());
+  await page.key('ArrowDown'); 
+  check('a plain ↓ still moves focus to the next card (no move)', await page.eval(`document.activeElement.dataset.id !== 'task-4'`) && item('task-4').column === 'done');
+  n0 = moves();
+  await page.type('hello'); await page.key('ArrowLeft', 1); await page.key('ArrowUp', 1); await sleep(150);
+  check('Alt+arrows in the chat input never move a card (input kept, no POST /move)', moves() === n0 && await page.eval(`document.getElementById('input').value === 'hello'`));
+  await page.eval(`document.getElementById('input').value = ''`);
+  await page.eval(`document.querySelector('#pane-kanban .toggle').click()`);
+  await waitFor(`!!document.querySelector('${card('task-6')}')`, 2000);
+  await page.eval(`document.querySelector('${card('task-6')}').focus()`);
+  await page.key('ArrowRight', 1); await sleep(150);
+  check('a rejected task (shown with "rejected: 1 (show)") cannot be moved: nothing sent, announced', moves() === n0 && /task-6 is rejected/.test(await said()) && item('task-6').column === 'todo', await said());
+  const r6 = await box(card('task-6'));
+  await drag(r6, await box('#pane-kanban .col.done > .items'));
+  await settled();
+  check('… nor dragged', moves() === n0 && item('task-6').column === 'todo');
+  await page.eval(`document.querySelector('#pane-kanban .toggle').click()`);
+  const r = await (await fetch(URL + 'move', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ itemId: 'task-6', column: 'done' }) })).json();
+  check('the server refuses it too (409 rejected)', /rejected/.test(r.error || ''), r.error);
+
+  // ---- empty column: doing emptied, then a card dropped into it ----
+  const t3b = await box(card('task-3'));
+  await drag(t3b, await box('#pane-kanban .col.done > .items'));
+  await settled();
+  check('doing is empty now (task-3 dragged to done)', (await colOf(page, 'doing')) === '', await board());
+  const empty = await box('#pane-kanban .col.doing > .items');
+  const mid2 = await drag(await box(card('task-5')), empty, midDrag);
+  await settled();
+  check('an empty column is a drop zone: outlined, the bar inside it, the card lands there', mid2.target === 'doing' && mid2.lineCol === 'doing' && (await colOf(page, 'doing')) === 'task-5' && item('task-5').column === 'doing', JSON.stringify(mid2));
+
+  // ---- stale rev: the server refuses, the card snaps back, a notice ----
+  n0 = moves(); b0 = await board();
+  await page.eval(`state.stateRev = 1`);
+  await drag(await box(card('task-7')), await box('#pane-kanban .col.doing > .items'));
+  await waitFor(`!document.getElementById('notice').hidden`, 3000); await settled();
+  check('a stale rev: POST /move -> 409, the notice says so, the card snaps back, the file unchanged', moves() === n0 + 1 && await board() === b0 && item('task-7').column === 'todo'
+    && /changed since this page last saw it/.test(await page.eval(`document.getElementById('notice').textContent`)) && /not moved/.test(await said()), `${b0} -> ${await board()}; ${await said()}`);
+
+  // ---- a second tab follows ----
+  const tab2 = await page.newTab();
+  await tab2.goto(URL);
+  await sleep(500);
+  check('a second tab shows the same board', await board(tab2) === await board(), await board(tab2));
+  await page.eval(`document.querySelector('${card('task-7')}').focus()`);
+  await page.key('ArrowRight', 1);
+  const t0 = Date.now(); let synced = false;
+  for (let i = 0; i < 50 && !synced; i++) { synced = (await colOf(tab2, 'doing')).split(',').includes('task-7'); if (!synced) await sleep(40); }
+  check(`a move in tab 1 shows in tab 2 (${Date.now() - t0} ms)`, synced, await board(tab2));
+  // a move in tab 2 makes tab 1's rev old; tab 1 follows by SSE, so its next move is not stale
+  await tab2.eval(`document.querySelector('${card('task-7')}').focus()`);
+  await tab2.key('ArrowLeft', 1);
+  await waitFor(`[...document.querySelectorAll('#pane-kanban .col.todo .item')].some((x) => x.dataset.id === 'task-7')`, 2000);
+  n0 = moves();
+  await page.eval(`document.querySelector('${card('task-7')}').focus()`);
+  await page.key('ArrowRight', 1); await settled();
+  check('after a move in tab 2, tab 1 is current (SSE): its next move is written (no 409)', moves() === n0 + 1 && item('task-7').column === 'doing' && /^task-7 moved to doing/.test(await said()), await said());
+  tab2.close();
+
+  // ---- a hand edit of column/order shows live and reads "you (file edit)" ----
+  const s = JSON.parse(fs.readFileSync(file('state.json'), 'utf8'));
+  const t2 = s.items.find((i) => i.id === 'task-2'); t2.column = 'doing'; t2.order = -50;
+  fs.writeFileSync(file('state.json'), JSON.stringify(s, null, 2));
+  const hand = await waitFor(`(document.querySelector('#pane-kanban .col.doing .item') || {}).dataset?.id === 'task-2'`, 2000);
+  check(`a hand edit (task-2 to doing, order -50) shows at the top of doing (${hand} ms) and reads "edited by you (file edit): column, order"`, hand !== null
+    && await page.eval(`document.querySelector('${card('task-2')}').textContent.includes('edited by you (file edit): column, order')`), await board());
+
+  // ---- an applied kanban frame is reset by a manual move ----
+  await page.submit('/flag frame-proposals on', 800);
+  fs.writeFileSync(file('frames.json'), JSON.stringify({ rev: 1, pending: {}, applied: { kanban: { id: 'fr-1', pane: 'kanban', intent: { pane: 'kanban', focus: 'task-1', order: ['task-1'] }, author: 'model', model: 'morrow', modelId: 'fake-morrow', at: new Date().toISOString(), appliedBy: 'user', appliedAt: new Date().toISOString() } }, resets: {} }, null, 2));
+  await waitFor(`!!document.querySelector('#pane-kanban .frame-applied')`, 2000);
+  check('an applied kanban frame shows its line and marks task-1', await page.eval(`!!document.querySelector('#pane-kanban .item.framed[data-id="task-1"]')`));
+  await page.eval(`document.querySelector('${card('task-5')}').focus()`);
+  await page.key('ArrowLeft', 1);
+  await waitFor(`!document.querySelector('#pane-kanban .frame-applied')`, 3000); await settled();
+  const fr = JSON.parse(fs.readFileSync(file('frames.json'), 'utf8'));
+  check('a manual move resets it: frames.json resets.kanban {reason "manual move"}, frame_reset logged, the frame line gone, the UI says so', !fr.applied.kanban && fr.resets.kanban.reason === 'manual move' && fr.resets.kanban.frame === 'fr-1'
+    && events().some((e) => e.event === 'frame_reset' && e.reason === 'manual move' && e.id === 'fr-1') && /reset by your manual move/.test(await page.eval(`document.getElementById('notice').textContent`))
+    && await page.eval(`[...document.querySelectorAll('.ln.system')].some((l) => l.textContent.includes('kanban: frame fr-1 reset by your manual move'))`), JSON.stringify(fr.resets));
+  await page.submit('/flag frame-proposals off', 600);
+
+  // ---- /why task-N lists the moves ----
+  await page.submit('/why task-4', 900);
+  const why = await page.eval(`[...document.querySelectorAll('.ln.out.why-fact')].map((l) => l.textContent)`);
+  const mv = why.filter((l) => /^moved by you/.test(l));
+  check(`/why task-4 lists its ${mv.length} moves with sources (metrics.jsonl:N item_move task-4)`, mv.length >= 5 && mv.every((l) => /\[metrics\.jsonl:\d+ item_move task-4\]/.test(l)) && why.some((l) => /^on the kanban now: done/.test(l)), mv.slice(0, 2).join(' | '));
+
+  // ---- touch (pointer events from touch input) ----
+  await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+  const tf = await box(card('task-7')), tt = await box('#pane-kanban .col.done > .items');
+  const touch = (type, x, y) => page.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+  await touch('touchStart', tf.x, tf.y);
+  for (let i = 1; i <= 10; i++) { await touch('touchMove', Math.round(tf.x + (tt.x - tf.x) * i / 10), Math.round(tf.y + (tt.y - tf.y) * i / 10)); await sleep(16); }
+  await touch('touchEnd');
+  await settled();
+  check('a touch drag moves task-7 to done', item('task-7').column === 'done', await board());
+  await page.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+
+  // ---- reduced motion ----
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await page.goto(URL);
+  await waitFor(`document.getElementById('meta').textContent.includes('live')`);
+  await page.eval(`document.querySelector('${card('task-7')}').focus()`);
+  await page.key('ArrowLeft', 1);
+  const anim = await page.eval(`getComputedStyle(document.querySelector('${card('task-7')}')).animationName`);
+  await settled();
+  check('reduced motion: the moved card gets no highlight animation (it still moves)', anim === 'none' && item('task-7').column === 'doing', anim);
+  await page.send('Emulation.setEmulatedMedia', { features: [] });
+
+  // ---- narrow widths ----
+  for (const w of [820, 390]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width: w, height: 800, deviceScaleFactor: 1, mobile: false });
+    await sleep(250);
+    check(`${w} px: no horizontal scroll with the kanban`, !(await page.eval(`document.documentElement.scrollWidth > innerWidth`)));
+  }
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  check('no move wrote status, decidedAt or decidedBy (item_write via move only carries what it moved)', events().filter((e) => e.event === 'item_write' && e.via === 'move').every((e) => { const before = events().filter((x) => x.event === 'item_write' && x.itemId === e.itemId && x.ts < e.ts).pop(); return !before || (before.item.status === e.item.status && before.item.decidedAt === e.item.decidedAt); }) && events().filter((e) => e.event === 'item_write').length > writes0);
+}
+
+const SCENARIOS = { p1, p2, v03, v04, v05, v06, v07, v08, v09, v10, v11 };
 const ENVS = {
   v03: () => {
     const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
@@ -1156,6 +1374,15 @@ const ENVS = {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v10b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4835/', fakes: [5836, 5837], dir: '.pilot-verify-v10b', config: file, cdp: 9413 };
+  },
+  // pilot-v0.11: the v0.11 demo config (kanban shown, experiments off, a frame role) on this scenario's ports
+  v11: () => {
+    const c = JSON.parse(fs.readFileSync(path.join(APP, 'demo', 'fixtures', 'v0.11', 'pilot.config.json'), 'utf8'));
+    c.port = 4845;
+    for (const r of Object.values(c.roles)) for (const k of r.candidates) k.baseUrl = k.baseUrl.replace(':5788/', ':5846/').replace(':5789/', ':5847/');
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v11b-')), 'config.json');
+    fs.writeFileSync(file, JSON.stringify(c));
+    return { url: 'http://127.0.0.1:4845/', fakes: [5846, 5847], dir: '.pilot-verify-v11b', config: file, cdp: 9423 };
   },
 };
 

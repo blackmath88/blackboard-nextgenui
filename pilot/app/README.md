@@ -1,10 +1,12 @@
-# CLI Pilot v1 (steps P0 to P4 + P5 metrics, iteration pilot-v0.10)
+# CLI Pilot v1 (steps P0 to P4 + P5 metrics, iteration pilot-v0.11)
 
-**Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.10` (experiment: after a turn the model may
+**Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.11` (the kanban is drag and drop: drag a
+card to another column or place, or Alt+arrows on a focused card; the move is yours, written to `state.json`, and
+`/why task-N` lists it; v0.10, `npm run demo -- v0.10`: after a turn the model may
 suggest how the map shows its cards, a dashed note "suggested by morrow, not by you"; `f` applies it, `/frame reset`
 undoes it, `/why map` explains it; v0.9: pause on a finished line and the input offers "send?", Tab sends, Enter always does; v0.8: panes fade to tabs and are removed only with your answer; v0.7: `/why`; v0.6: authorship and `/stats`; v0.5: live files, two tabs; v0.4: proposals; v0.3: pins
 and fallback), open the printed URL, follow the "try this" lines. A tagged iteration without touching your checkout:
-`bash pilot/app/scripts/try.sh pilot-v0.10`.
+`bash pilot/app/scripts/try.sh pilot-v0.10` (or a later tag).
 **Extraction (since pilot-v0.4) is untested with a real model:** it runs against the fake extractor in `dev/fake-model.js`.
 What changed per iteration: `CHANGELOG.md`; checks: `CHECKS.md`; open questions: `QUESTIONS.md`.
 
@@ -115,6 +117,8 @@ and the page then reloads everything.
 - pilot-v0.8: `pane_touch`, `pane_fade`, `pane_unfade`, `pane_remove`, `controller_withdraw`; `controller_ask` and
   `consent` with `question: "remove"` for the removal question
 - `item_write` and `file_edit`
+- pilot-v0.11: `item_move {id, from, to, order, fromIndex, index, between, status, by: "user", turn, rev}` (with an
+  `item_write` via `move`)
 - pilot-v0.9, only while the experiment is on: `settle_offer`, `settle_accept`, `settle_ignore`, `enter_send`; `flag`
   on every `/flag` switch
 
@@ -181,6 +185,24 @@ complete reply (after extraction), the `frame` role (in the config like every ro
 - Off: no frame call, no file, no note, the cards in their own order, `f` is just a key. An applied frame stays in
   `frames.json` and shows again when the flag is on.
 
+**Kanban, drag and drop (pilot-v0.11).** Moving a card is you arranging your own board:
+- **Drag** a task card to another column, or to another place in its column. Mouse, pen and touch all work (pointer
+  events, no library). A bar shows where the card lands, and empty columns take drops too. Escape, or a drop outside
+  the columns, cancels.
+- **Keys** on a focused card (Tab, a click, or ↓ from the empty input): `Alt+←` / `Alt+→` move it to the previous / next
+  column, `Alt+↑` / `Alt+↓` move it up or down. They never act from the chat input. Each move is announced to screen
+  readers (an `aria-live` region).
+- **What is written.** The card moves at once and `POST /move` writes it with the page's last `rev`, on that task only:
+  `column`, `order` (a number), `movedBy: "user"` and `movedAt`. It is logged as `item_move` in `metrics.jsonl`.
+- **Refusals.** A stale rev (409) reloads the page, shows a notice and snaps the card back.
+- **A move decides nothing.** A proposed task stays proposed (dashed). Rejected tasks are not on the board and cannot be
+  moved.
+- **Order.** Columns sort by `order`, else by file order (`public/board.js`, shared by the page and the server). Without
+  any `order`, the board looks exactly as before.
+- **Hand edits.** Edit `column` or `order` in `state.json` by hand and it shows live, as "you (file edit)".
+- **Other effects.** A move counts as a touch of the kanban (v0.8). It resets an applied kanban frame (v0.10; reason
+  "manual move", also while that experiment is off). `/why task-N` lists the task's moves with sources.
+
 The status bar shows the active model per role; `frontier→morrow` means the configured candidate
 failed and the next one answered. Every model attempt is logged to `.pilot/metrics.jsonl`.
 
@@ -222,15 +244,15 @@ node -e 'const f=".pilot/rules.json",fs=require("fs"),r=JSON.parse(fs.readFileSy
 ## Demos and checks
 
 `npm run demo -- <version>` (`scripts/demo.js`) wipes and seeds a throwaway `.pilot-demo/` from
-`demo/fixtures/<version>/`, starts the fakes and the server on demo ports (v0.3: 4750, 5751, 5752; v0.4: 4754, 5754, 5755; v0.5: 4758, 5758, 5759; v0.6: 4764, 5764, 5765; v0.7: 4768, 5768, 5769; v0.8: 4772, 5772, 5773; v0.9: 4776, 5778, 5779; v0.10: 4778, 5783, 5784), prints the URL
+`demo/fixtures/<version>/`, starts the fakes and the server on demo ports (v0.3: 4750, 5751, 5752; v0.4: 4754, 5754, 5755; v0.5: 4758, 5758, 5759; v0.6: 4764, 5764, 5765; v0.7: 4768, 5768, 5769; v0.8: 4772, 5772, 5773; v0.9: 4776, 5778, 5779; v0.10: 4778, 5783, 5784; v0.11: 4782, 5788, 5789), prints the URL
 and what to try. Ctrl+C stops everything. An unknown version lists the available ones. It never touches `.pilot/`.
 
 `npm run verify` (`scripts/verify-all.sh`) runs every `dev/verify-*.sh` and the browser checks and prints a summary.
 It refuses to start while `pilot/app/.pilot/` exists, because the P0–P2 checks wipe it.
-`dev/verify-v0.3.sh` to `verify-v0.10.sh` use their own ports and dirs and are safe next to a running demo.
+`dev/verify-v0.3.sh` to `verify-v0.11.sh` use their own ports and dirs and are safe next to a running demo.
 The v0.6 demo fixture is generated by `node dev/make-fixture-v06.js` (synthetic, every line `"fixture": true`), the v0.8
 one by `node dev/make-fixture-v08.js` (from the v0.7 fixture), the v0.9 one by `node dev/make-fixture-v09.js` (from v0.8),
-the v0.10 one by `node dev/make-fixture-v10.js` (from v0.9).
+the v0.10 one by `node dev/make-fixture-v10.js` (from v0.9), the v0.11 one by `node dev/make-fixture-v11.js` (from v0.10).
 `node dev/contrast-check.js` checks the palette (WCAG AA, both themes).
 
 The older checks (each starts and stops everything itself and **wipes `.pilot/` first**;
@@ -249,6 +271,7 @@ bash pilot/app/dev/verify-v0.7.sh           # own ports/dirs; /why, cited source
 bash pilot/app/dev/verify-v0.8.sh           # own ports/dirs; fading, touches, removal consent, /why fading; browser-check.js v08
 bash pilot/app/dev/verify-v0.9.sh           # own ports/dirs; settled-input flag, heuristic, settle metrics, /stats block; browser-check.js v09
 bash pilot/app/dev/verify-v0.10.sh          # own ports/dirs; frame proposals: closed FrameIntent, apply/dismiss/reset, rejections, pins/stall, /why; browser-check.js v10
+bash pilot/app/dev/verify-v0.11.sh          # own ports/dirs; kanban moves: order rule, POST /move, stale/rejected, frame reset, /why; browser-check.js v11 (real drags, Alt+arrows)
 ```
 
 To start over by hand, stop the server and delete `pilot/app/.pilot/`.
@@ -264,5 +287,6 @@ To start over by hand, stop the server and delete `pilot/app/.pilot/`.
 | POST | `/command` | `{text: "/model chat morrow"}` → `{ok, lines}` (`/state.models.<role>` has `active`, `pinned`, `last`, `candidates`, `local`) |
 | POST | `/answer` | `{module: "index", answer: "y"}` (y/n/a/x or yes/no/always/never; the removal question takes y/n/x), or `{itemId: "dec-3", decision: "c"}` (c/r or confirm/reject; proposed items only, records `decidedAt`, `decidedBy: "user"`). Optional `rev` (of `modules.json` / `state.json`): stale → 409 `{stale: true, file, rev}`; a broken file → 409 |
 | POST | `/frame` | `{pane: "map" \| "kanban", id: "fr-1", action: "apply" \| "dismiss", rev?}` (pilot-v0.10): apply or dismiss the open frame proposal of that pane. Off → 409; a wrong id → 409; a stale `rev` (of `frames.json`) → 409 `{stale: true}`; a proposal that no longer fits the cards → 409, dropped |
+| POST | `/move` | `{itemId: "task-4", column: "todo" \| "doing" \| "done", index?: n, rev?}` (pilot-v0.11): you move a task; `index` = its place among the other cards of that column (0 = top; missing = the end). Writes `column`, `order`, `movedBy: "user"`, `movedAt` on that task only, `item_move`, a kanban touch; resets an applied kanban frame. Stale rev → 409 `{stale}`; a rejected task, a broken `state.json`, no kanban shown → 409; a decision/source, a bad column or index → 400; the same place → 200 `changed: false` |
 | POST | `/touch` | `{module, how}` (pilot-v0.8; how: click, focus, scroll, decide, tab): records a touch of a shown pane and brings a faded one back. The first touch of a pane per turn is written; later ones return `changed: false`. No rev. `chat` → 400, a pane not shown → 404 |
 | POST | `/metric` | `{event: "index_jump", target: "<message id>"}` (pilot-v0.6; the page sends it on an index click). pilot-v0.9, only while the settled-input flag is on: `settle_offer {offer, cue, chars, words, sinceKeyMs}`, `settle_accept {offerRef, sinceKeyMs, offerMs, chars}`, `settle_ignore {offerRef, how, offerMs}`, `enter_send {offerShowing, offerRef?, sinceKeyMs, chars}` (other fields dropped; one outcome per offer). Any other event or an unknown id → 400 |

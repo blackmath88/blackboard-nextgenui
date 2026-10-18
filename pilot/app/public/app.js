@@ -24,6 +24,11 @@
 // (state.frames.applied.<pane>) only arranges the cards: order first, focus marked and scrolled to, group sub-headings;
 // nothing is hidden. Its line says who suggested it and that you applied it; reset = /frame reset <pane>.
 // Off: no note, no frame line, cards in their own order, f is just a key.
+// pilot-v0.11: you arrange your own kanban. Drag a task card (pointer events: mouse, pen and touch; no library) to another
+// column or another place in its column, or press Alt+←/→ (previous/next column) and Alt+↑/↓ (up/down) on a focused
+// card. The card moves at once (optimistic) and POST /move writes it with the page's last state.json rev; a refused move
+// (stale rev, a rejected task) reloads and the card snaps back. Columns sort by public/board.js (order, else file order).
+// Moves are announced in an aria-live region (#announce). File events wait while a drag or a move is in flight.
 'use strict';
 const $ = (id) => document.getElementById(id);
 const bench = $('bench'), log = $('log'), form = $('form'), input = $('input');
@@ -335,10 +340,14 @@ function renderKanban(body) {
   const cols = document.createElement('div');
   cols.className = 'cols';
   const tasks = itemsFor(['task']);
-  for (const col of ['todo', 'doing', 'done']) {
+  for (const col of Board.COLUMNS) {
     const c = document.createElement('div');
     c.className = `col ${col}`;
-    c.append(heading(col), itemList(tasks.filter((t) => (t.column || 'todo') === col), col === 'todo' && !tasks.length ? 'No tasks yet.' : '—', appliedFrame('kanban')));
+    c.dataset.col = col;
+    // pilot-v0.11: your order (public/board.js: order, else file order); an applied frame arranges on top of it
+    const list = itemList(Board.sort(tasks.filter((t) => Board.columnOf(t) === col), state.items || []), col === 'todo' && !tasks.length ? 'No tasks yet.' : '—', appliedFrame('kanban'));
+    list.querySelectorAll('.item:not(.rejected)').forEach((card) => { card.setAttribute('aria-describedby', 'kb-help'); card.title = `${card.title ? `${card.title}\n` : ''}drag, or Alt+arrows, to move`; });
+    c.append(heading(col), list);
     cols.append(c);
   }
   body.replaceChildren(...frameNodes('kanban'), cols);
@@ -609,7 +618,8 @@ async function loadState(files) {
 // edits) and `status` {extracting}. EventSource reconnects by itself; after a reconnect the page reloads everything.
 // Without SSE (no EventSource, never connected, or dropped) the page refreshes after each action, as before.
 function onFiles(files) {
-  if (streaming) { files.forEach((f) => deferred.add(f)); return; }
+  // pilot-v0.11: also while a drag or a move is in flight (a re-render would drop the dragged card or snap it back early)
+  if (streaming || drag || moving) { files.forEach((f) => deferred.add(f)); return; }
   loadState(files).catch(() => {});
 }
 function connectEvents() {
@@ -653,6 +663,161 @@ document.addEventListener('keydown', () => { lastKeyAt = Date.now(); }, true);
 bench.addEventListener('focusin', (e) => {
   const m = paneOf(e.target);
   if (m && !restoring && Date.now() - lastKeyAt < 500) sendTouch(m, 'focus');
+});
+
+// ---- pilot-v0.11: moving tasks on the kanban (drag and drop, Alt+arrows). Only you move cards; a move decides nothing.
+const announcer = $('announce');
+function announce(text) { announcer.textContent = ''; setTimeout(() => { announcer.textContent = text; }, 30); }   // re-set: the same text is read again
+let drag = null;     // {card, id, pointerId, x0, y0, started, ghost, line, dx, dy, target: {col, box, index}}
+let moving = 0;      // moves sent and not yet reloaded
+let moveChain = Promise.resolve();
+const kanbanCard = (el) => (el && el.closest ? el.closest('#pane-kanban:not(.faded) .item') : null);
+const colCards = (box, except) => [...box.querySelectorAll(':scope > .item')].filter((c) => c !== except && !c.classList.contains('rejected'));
+function flushDeferred() { if (!drag && !moving && !streaming && deferred.size) { const f = [...deferred]; deferred.clear(); onFiles(f); } }
+// Puts the card at position `index` among the other cards of `box` (optimistic; the reload after the write confirms it).
+function placeCard(card, box, index) {
+  const others = colCards(box, card);
+  box.querySelectorAll(':scope > .empty').forEach((p) => p.remove());
+  const at = others[index];
+  if (at) box.insertBefore(card, at); else if (others.length) others[others.length - 1].after(card); else box.prepend(card);
+}
+function refocus(id) {
+  const el = bench.querySelector(`#pane-kanban .item[data-id="${CSS.escape(id)}"]`);
+  if (el) { restoring = true; el.focus({ preventScroll: true }); restoring = false; el.scrollIntoView({ block: 'nearest' }); }
+  return el;
+}
+// Moves `card` to column `col`, position `index` among that column's other cards: at once on screen, then POST /move
+// (queued, so quick Alt+arrow presses go out in order, each with the rev the page saw last).
+function moveCard(card, col, index) {
+  const id = card.dataset.id, box = bench.querySelector(`#pane-kanban .col[data-col="${col}"] > .items`);
+  if (!box) return;
+  const from = card.closest('.col').dataset.col;
+  const hadFocus = document.activeElement === card;
+  placeCard(card, box, index);
+  if (hadFocus) refocus(id);
+  if (!reducedMotion.matches) { card.classList.remove('moved'); void card.offsetWidth; card.classList.add('moved'); }
+  const n = colCards(box).length;
+  moving++;
+  moveChain = moveChain.then(async () => {
+    try {
+      const res = await fetch('/move', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ itemId: id, column: col, index, rev: state.stateRev }) });
+      if (!res.ok) {
+        const body = await res.clone().json().catch(() => ({}));
+        await writeFailed(res);
+        announce(`${id} not moved: ${body.stale ? 'the board changed meanwhile, reloaded' : body.error || `HTTP ${res.status}`}. It is back in ${from}.`);
+        sigs.panes = null;   // snap back even when the file did not change (the screen did)
+      } else {
+        const body = await res.json();
+        if (body.changed !== false) announce(`${id} moved to ${col}, position ${index + 1} of ${n}${body.item && body.item.status === 'proposed' ? '; still proposed' : ''}.`);
+        if (body.frameReset) showFlash(`kanban: frame ${body.frameReset.id} (suggested by ${body.frameReset.model || 'a model'}) reset by your manual move; the pane shows your order`);
+      }
+    } catch (err) { addLine('system', `move failed: ${err.message}`); sigs.panes = null; }
+    moving--;
+    if (!moving && drag) Object.keys(PARTS).forEach((f) => deferred.add(f));   // a new drag started: reload when it ends
+    else if (!moving) {
+      deferred.clear();
+      await loadState().catch(() => {});
+      // the re-render made new cards: keep focus on the moved one (unless you went elsewhere meanwhile) and its highlight
+      const a = document.activeElement;
+      const el = !a || a === document.body || (a.dataset && a.dataset.id === id) ? refocus(id) : bench.querySelector(`#pane-kanban .item[data-id="${CSS.escape(id)}"]`);
+      if (el && !reducedMotion.matches && !el.classList.contains('moved')) el.classList.add('moved');
+    }
+  });
+}
+// Drag: pointerdown on a task card (not on its buttons or links) arms it; it starts after 5 px of movement, so a click
+// still focuses the card. The card stays in place (dimmed) while a copy follows the pointer; the drop target is the
+// column under the pointer (empty columns too), the bar shows the place. Escape or a drop outside the columns cancels.
+bench.addEventListener('pointerdown', (e) => {
+  const card = kanbanCard(e.target);
+  if (!card || drag || card.classList.contains('rejected') || (e.pointerType === 'mouse' && e.button !== 0) || e.target.closest('button, a')) return;
+  drag = { card, id: card.dataset.id, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, started: false, target: null };
+  // capture: the release reaches the page even outside the window (a drag must never stay armed, it holds file events)
+  try { card.setPointerCapture(e.pointerId); } catch { /* not capturable: window listeners still see the pointer */ }
+});
+bench.addEventListener('lostpointercapture', (e) => { if (drag && e.pointerId === drag.pointerId) endDrag(drag.started && !!drag.target); });
+window.addEventListener('blur', () => { if (drag) endDrag(false); });
+function dragTarget(x, y) {
+  const el = document.elementFromPoint(x, y);
+  const col = el && el.closest ? el.closest('#pane-kanban .col[data-col]') : null;
+  if (!col) return null;
+  const box = col.querySelector(':scope > .items');
+  const others = colCards(box, drag.card);
+  let index = 0;
+  for (const c of others) { const r = c.getBoundingClientRect(); if (y > r.top + r.height / 2) index++; }
+  return { col: col.dataset.col, box, index, others };
+}
+function showTarget(t) {
+  bench.querySelectorAll('#pane-kanban .col.drop-target').forEach((c) => { if (!t || c.dataset.col !== t.col) c.classList.remove('drop-target'); });
+  if (!t) { drag.line.remove(); return; }
+  t.box.closest('.col').classList.add('drop-target');
+  const at = t.others[t.index];
+  if (at) t.box.insertBefore(drag.line, at); else if (t.others.length) t.others[t.others.length - 1].after(drag.line); else t.box.prepend(drag.line);
+}
+function endDrag(drop) {
+  const d = drag;
+  drag = null;
+  document.body.classList.remove('dragging-card');
+  if (d && d.started) {
+    d.ghost.remove(); d.line.remove(); d.card.classList.remove('dragging');
+    bench.querySelectorAll('#pane-kanban .col.drop-target').forEach((c) => c.classList.remove('drop-target'));
+    const t = drop && d.target;
+    if (t && d.card.isConnected) moveCard(d.card, t.col, t.index);
+    else announce(`${d.id}: move cancelled, it stays where it was.`);
+  }
+  flushDeferred();
+}
+window.addEventListener('pointermove', (e) => {
+  if (!drag || e.pointerId !== drag.pointerId) return;
+  if (!drag.started) {
+    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 5) return;
+    const r = drag.card.getBoundingClientRect();
+    drag.started = true;
+    drag.dx = drag.x0 - r.left; drag.dy = drag.y0 - r.top;
+    drag.ghost = drag.card.cloneNode(true);
+    drag.ghost.removeAttribute('id'); drag.ghost.removeAttribute('tabindex'); drag.ghost.setAttribute('aria-hidden', 'true');
+    drag.ghost.classList.add('drag-ghost'); drag.ghost.classList.remove('selected', 'moved');
+    drag.ghost.style.width = `${r.width}px`;
+    document.body.append(drag.ghost);
+    drag.line = document.createElement('div'); drag.line.className = 'drop-line'; drag.line.setAttribute('aria-hidden', 'true');
+    drag.card.classList.add('dragging');
+    document.body.classList.add('dragging-card');
+    const sel = document.getSelection(); if (sel) sel.removeAllRanges();   // a mouse drag must not leave text selected
+  }
+  e.preventDefault();
+  drag.ghost.style.left = `${e.clientX - drag.dx}px`; drag.ghost.style.top = `${e.clientY - drag.dy}px`;
+  drag.target = dragTarget(e.clientX, e.clientY);
+  showTarget(drag.target);
+});
+window.addEventListener('pointerup', (e) => { if (drag && e.pointerId === drag.pointerId) endDrag(true); });
+window.addEventListener('pointercancel', (e) => { if (drag && e.pointerId === drag.pointerId) endDrag(false); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drag && drag.started) { e.preventDefault(); endDrag(false); } }, true);
+// A drag ends with a click on the card; it focuses the card, which is right (the moved card has focus).
+
+// Keyboard (required for accessibility): on a focused task card, never from the chat input or a button.
+//   Alt+← / Alt+→  previous / next column (same position, or the end if that column is shorter)
+//   Alt+↑ / Alt+↓  up / down within the column
+// (Plain arrows still move focus between cards, c/r still decide, f still applies a frame: none of them uses Alt.)
+const MOVE_KEYS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+document.addEventListener('keydown', (e) => {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing || !MOVE_KEYS[e.key]) return;
+  const card = kanbanCard(e.target);
+  if (!card || e.target !== card) return;
+  e.preventDefault();
+  const id = card.dataset.id;
+  if (card.classList.contains('rejected')) { announce(`${id} is rejected: rejected tasks are not on the board and cannot be moved.`); return; }
+  const [dc, dr] = MOVE_KEYS[e.key];
+  const col = card.closest('.col').dataset.col, ci = Board.COLUMNS.indexOf(col);
+  const i = colCards(card.parentElement).indexOf(card);
+  if (dc) {
+    const to = Board.COLUMNS[ci + dc];
+    if (!to) { announce(`${id} is already in the ${dc < 0 ? 'first' : 'last'} column, ${col}.`); return; }
+    const box = bench.querySelector(`#pane-kanban .col[data-col="${to}"] > .items`);
+    moveCard(card, to, Math.min(i, colCards(box, card).length));
+  } else {
+    const n = colCards(card.parentElement).length;
+    if (i + dr < 0 || i + dr >= n) { announce(`${id} is already at the ${dr < 0 ? 'top' : 'bottom'} of ${col}.`); return; }
+    moveCard(card, col, i + dr);
+  }
 });
 
 async function sendAnswer(module, word) {

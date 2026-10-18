@@ -18,6 +18,9 @@
 // After a turn the `frame` role may return a FrameIntent (schemas/frame-intent.schema.json, checked by frame.js): how a
 // shown map or kanban presents its cards. It is kept as a proposal in .pilot/frames.json; only you apply it (f in that
 // pane, POST /frame) or dismiss it; /frame reset undoes an applied one. It never touches modules.json or state.json.
+// pilot-v0.11: you arrange your own kanban (POST /move, from drag and drop or Alt+arrows in the page): column, order,
+// movedBy "user", movedAt on that task only (public/board.js has the order rule); item_move in metrics.jsonl; a touch of
+// the kanban; a move never decides anything, and it resets an applied kanban frame (reason "manual move").
 // Node 20+, no dependencies. All paths resolve against this file's folder.
 'use strict';
 const http = require('http');
@@ -28,6 +31,7 @@ const stats = require('./stats.js');
 const why = require('./why.js');
 const fade = require('./fade.js');
 const frame = require('./frame.js');
+const board = require('./public/board.js');   // pilot-v0.11: the kanban order rule, shared with the page
 
 const APP = __dirname;
 const PUBLIC = path.join(APP, 'public');
@@ -856,7 +860,7 @@ function frameLines() {
 // fields go along as handFields (except the ones this write sets), an item that came in through the file keeps
 // addedByFile. Call inside the write chain, right after writeState.
 function itemWrite(item, via, before, ts) {
-  const set = via === 'decide' ? ['status', 'decidedAt', 'decidedBy'] : [];
+  const set = via === 'decide' ? ['status', 'decidedAt', 'decidedBy'] : via === 'move' ? MOVE_FIELDS : [];
   const handFields = before ? before.fields.filter((f) => !set.includes(f)) : [];
   const e = { ts, event: 'item_write', via, itemId: item.id, item: JSON.parse(JSON.stringify(item)) };
   if (handFields.length) e.handFields = handFields;
@@ -919,6 +923,61 @@ function decide(itemId, raw, seenRev) {
     if (mod && !m.error && visiblePanes(m).includes(mod) && applyTouch(m, mod, 'decide', ts, fade.turnOf(readTranscript())).changed) writeModules(m);
     return { code: 200, body: { ok: true, item, rev } };
   });
+}
+
+// ---- pilot-v0.11: the person arranges their own kanban (drag and drop, Alt+arrows). public/board.js has the order rule.
+// POST /move {itemId, column, index, rev?}: index = the position among the other cards of the target column (0 = top).
+// Writes column, order, movedBy "user", movedAt on that task only (never status, decidedAt or decidedBy: a move confirms
+// or rejects nothing, a proposed task stays proposed). A rejected task is not on the board and cannot be moved. Counts as
+// a touch of the kanban (v0.8). An applied kanban frame (v0.10) is reset: you arranged the pane yourself.
+const MOVE_FIELDS = ['column', 'order', 'movedBy', 'movedAt'];
+function move(itemId, column, index, seenRev) {
+  return serial(() => {
+    if (!board.COLUMNS.includes(column)) return { code: 400, body: { error: `column must be one of ${board.COLUMNS.join(', ')}` } };
+    if (index !== undefined && !(Number.isInteger(index) && index >= 0)) return { code: 400, body: { error: 'index must be a whole number >= 0 (the position in the column, 0 = top)' } };
+    const st = readState();
+    if (st.error) return { code: 409, body: { error: `${st.error}; fix the file by hand first` } };
+    if (seenRev !== undefined && seenRev !== st.rev) return stale('state.json', seenRev, st.rev);
+    const item = st.doc.items.find((i) => i && i.id === itemId);
+    if (!item) return { code: 404, body: { error: `no item "${itemId}"` } };
+    if (item.kind !== 'task') return { code: 400, body: { error: `${itemId} is a ${item.kind}; only tasks are on the kanban` } };
+    if (item.status === 'rejected') return { code: 409, body: { error: `${itemId} is rejected: rejected tasks are not on the board and cannot be moved` } };
+    const m = readModules();
+    if (!m.error && !visiblePanes(m).includes('kanban')) return { code: 409, body: { error: 'no kanban pane shown (it grows only with your answer)' } };
+    const items = st.items;
+    const it = items.find((i) => i.id === itemId);
+    const from = board.columnOf(it), fromIndex = board.indexOf(items, it);
+    const p = board.place(items, it, column, index);
+    if (from === column && fromIndex === p.index) return { code: 200, body: { ok: true, changed: false, item, rev: st.rev } };
+    const ts = new Date().toISOString();
+    const before = stats.provenance(item, stats.ledgerOf(metricsEvents()).get(itemId));   // hand edits so far
+    item.column = column; item.order = p.order; item.movedBy = 'user'; item.movedAt = ts;
+    const rev = writeState(st.doc);
+    itemWrite(item, 'move', before, ts);
+    const turn = fade.turnOf(readTranscript());
+    appendJsonl(METRICS, { ts, event: 'item_move', id: itemId, from, to: column, order: p.order, fromIndex, index: p.index, between: p.neighbours, status: item.status || null, by: 'user', turn, rev });
+    // a move is a touch of the kanban (only the first touch per turn is written, see applyTouch)
+    if (!m.error && applyTouch(m, 'kanban', 'move', ts, turn).changed) writeModules(m);
+    const frameReset = resetFrameByMove(ts);
+    return { code: 200, body: { ok: true, changed: true, item, rev, from, to: column, index: p.index, ...(frameReset ? { frameReset } : {}) } };
+  });
+}
+// Inside the write chain. An applied kanban frame is reset when you move a card yourself (also while the experiment is
+// off: otherwise it would come back over your order when the flag goes on). A broken frames.json never blocks the move.
+function resetFrameByMove(ts) {
+  const f = readFrames();
+  if (f.error) {
+    if (lastGood['frames.json'] && lastGood['frames.json'].applied && lastGood['frames.json'].applied.kanban) appendJsonl(METRICS, { ts, event: 'frame_error', reason: 'frames', module: 'kanban', error: `${f.error}; a manual move could not reset the kanban frame` });
+    return null;
+  }
+  const a = f.applied.kanban;
+  if (!a) return null;
+  delete f.applied.kanban;
+  f.resets.kanban = { at: ts, by: 'user', frame: a.id || null, reason: 'manual move' };
+  const rev = writeFrames(f);
+  appendJsonl(TRANSCRIPT, { id: lineId(), ts, role: 'system', text: `kanban: frame ${a.id} reset by your manual move (suggested by ${a.model || 'a model'}); the pane shows your order now`, model: null });
+  appendJsonl(METRICS, { ts, event: 'frame_reset', id: a.id || null, module: 'kanban', by: 'user', reason: 'manual move', rev });
+  return { id: a.id || null, model: a.model || null };
 }
 
 // ---- live files (pilot-v0.5): fs.watch on the pilot dir -> SSE {file, rev} ----
@@ -1283,6 +1342,15 @@ const server = http.createServer(async (req, res) => {
       try { body = JSON.parse(await readBody(req, 2000)); } catch { return sendJson(res, 400, { error: 'expected JSON {pane, id, action}' }); }
       const rev = body && body.rev !== undefined && body.rev !== null ? body.rev : undefined;
       const out = await frameAnswer(body && body.pane, body && body.id, body && body.action, rev);
+      return sendJson(res, out.code, out.body);
+    }
+    // pilot-v0.11: you move a task on the kanban (drag and drop or Alt+arrows)
+    if (req.method === 'POST' && pathname === '/move') {
+      let body;
+      try { body = JSON.parse(await readBody(req, 2000)); } catch { return sendJson(res, 400, { error: 'expected JSON {itemId, column, index}' }); }
+      const rev = body && body.rev !== undefined && body.rev !== null ? body.rev : undefined;
+      const index = body && body.index !== undefined && body.index !== null ? body.index : undefined;
+      const out = await move(body && body.itemId, body && body.column, index, rev);
       return sendJson(res, out.code, out.body);
     }
     // pilot-v0.8: the page reports an interaction with a pane (a faded pane comes back)

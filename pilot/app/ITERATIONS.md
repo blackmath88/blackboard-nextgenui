@@ -13,6 +13,7 @@ date, old plan, new plan and why.
 | pilot-v0.8 | panes can go | |
 | pilot-v0.9 | Enter diffused (behind a flag) | |
 | pilot-v0.10 | frame proposals (behind a flag) | |
+| pilot-v0.11 | kanban with drag and drop (asked for by Miro) | added after the plan above |
 
 ## Changes to the plan
 
@@ -77,3 +78,13 @@ date, old plan, new plan and why.
     look at the pane before answering must not forfeit the question for good, and must not answer it.
 - Why: fading is reversible and silent; removal is not, so it needs consent like growth. That keeps "every pane earned
   and consented" true in both directions.
+
+## 2026-10-18 (v0.11) The demo shows the kanban alone in the side column
+- Old plan (brief): "a kanban already consented, with ~6 tasks spread over the columns", built on the v0.10 workbench.
+- New plan: the v0.11 fixture adds seven synthetic turns to the v0.10 history. In them the map and the index fade to
+  tabs under the v0.8 rules (fadeAfterTurns 8, with `pane_fade` events and controller lines), and the kanban comes back
+  because a new proposal (task-8) lands in it. The side column then holds the kanban alone, with seven tasks on the
+  board.
+- Why: with the map, the index and the kanban all shown at 1280 × 800, the kanban was about 230 px high and showed one
+  card per column (screenshot during the build). That is too cramped to try dragging. Fading two panes by hand would
+  have left facts in the files that `/why` could not explain, so the history makes them fade under the real rules.

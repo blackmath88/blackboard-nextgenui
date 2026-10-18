@@ -890,3 +890,64 @@ Run by the coordinator, not the builder.
   - "apply" reordered the map (dec-2 first); items stayed byte-identical.
   - `/why map` named the frame, the model, the message, who applied it and when, each with a source.
   - `/frame reset map` restored the original order and kept the reset in `frames.json`.
+
+# pilot-v0.11
+
+Kanban with drag and drop. Everything runs against `dev/fake-model.js`; moving cards uses no model at all.
+
+**Reproduce:** `bash pilot/app/dev/verify-v0.11.sh`. It has 41 checks; one of them runs the 39 checks of
+`browser-check.js v11` (37 + 2 global). It ends with `ALL v0.11 CHECKS PASSED` and exits non-zero on failure.
+- Own ports: server 4840, fakes 5841/5842; browser part 4845/5846/5847 and Chrome 9423; demo part shifted +300
+  (5082/6088/6089).
+- Own throwaway dirs: `.pilot-verify-v11/`, `.pilot-verify-v11b/`, `.pilot-demo-verify11/`. It never touches `.pilot/`
+  or a running demo (it was run next to two demos from another checkout).
+- The fixture is generated: `node dev/make-fixture-v11.js` (deterministic, from `demo/fixtures/v0.10/`).
+- The browser part alone: `node dev/browser-check.js v11` (`SHOT_DIR=<dir>` saves screenshots).
+
+**Everything:** `cd pilot/app && npm run verify` (p0, p1, p2, v0.3–v0.11, browser p1 + p2; the v03–v11 browser checks
+run inside their verify scripts).
+Last run (Node v25.9.0, Chrome, macOS, 2026-10-18): `npm run verify` all passed (p0–p2, v0.3–v0.11, browser p1 + p2), no
+earlier assertion adapted. After two small drag fixes (pointer capture, clearing a text selection), `browser-check.js`
+v11, v04, v05, v08 and v10 were run again and passed. `npm run demo -- v0.3` to `-- v0.11` (with `DEMO_PORT_SHIFT=100`,
+next to two demos from another checkout) each served `/state` within about 1 s, and SIGINT left no listener and no fake.
+
+## Definitions
+
+| Term | Definition |
+|---|---|
+| board | the tasks of `state.json` that are not rejected, by column (`column`, missing = todo) |
+| order rule | `public/board.js`: a task's key is `order` (a number) or else its position in `items`; ties keep file order |
+| move | `POST /move {itemId, column, index, rev?}`; `index` = the place among the other cards of the target column (0 = top) |
+| what a move writes | on that task only: `column`, `order` (the midpoint between its new neighbours; top: next − 1; bottom: previous + 1; alone: its file position), `movedBy: "user"`, `movedAt`; `rev` + 1; `item_write via move`; `item_move {id, from, to, order, fromIndex, index, between, status, by, turn, rev}` |
+| keyboard | on a focused task card: `Alt+←/→` previous/next column (same row, clamped), `Alt+↑/↓` up/down; never from the input or a button |
+
+## Checks
+
+| # | Check | How (section of `verify-v0.11.sh`) |
+|---|---|---|
+| 1 | The order rule, as a node table: no `order` anywhere = file order (the board before v0.11), a task without a column is in todo; rejected tasks and decisions are not on the board; the end of a column = previous + 1; the top = next − 1; between = the midpoint; an empty column = the card's file position; an index past the end is clamped; `order` and file positions mix; ties keep file order; `indexOf` is null for a rejected task. | 1 |
+| 2 | The schema copy has `order` (number), `movedBy` (enum user), `movedAt` (date-time), still `additionalProperties: false`; the original under `pilot/cli-pilot-v1/schemas` is unchanged; every fixture item uses only known keys. | 2 |
+| 3 | `POST /move` task-4 → doing below task-3 → 200, rev + 1; `state.json`: column doing, order 8, movedBy user, movedAt, status/decidedAt/decidedBy unchanged; **no other item changed**; `item_move`, `item_write via move` and `pane_touch kanban how move` (the first touch of turn 44); no `file_edit` and no `prov` for the server's own write. A stale rev → 409 `{stale, file: state.json}`, nothing written. The same place again → 200 `changed: false`, no write. Without rev (curl) → accepted (task-7 to the top of todo, order 10). | 3 |
+| 4 | The proposed task-8 moves to done and **stays proposed** (no decidedAt/decidedBy, no `decide` event; the kanban still holds it). The rejected task-6 → 409 "cannot be moved", nothing written. A decision, a bad column, index −1 or 1.5 → 400; an unknown id → 404. | 4 |
+| 5 | A hand edit of task-1's column/order shows in `/state` with `prov.fields` column, order and logs `file_edit`; `/why task-1` says "column / order edited by you (file edit)" and where it is now; a page move afterwards makes those fields the server's again. A broken `state.json` → 409, the file untouched. No kanban shown (answer "no" by hand) → 409. The kanban a tab (by hand) → the move is a touch and brings it back (`pane_touch move, unfaded`). | 5 |
+| 6 | **Frame reset by a move**, with the experiment off: an applied kanban frame (written by hand) → the move answers `frameReset: fr-1`; `frames.json` has no `applied.kanban` and `resets.kanban {by user, frame fr-1, reason "manual move"}`; `frame_reset {reason: manual move}` and the system line "kanban: frame fr-1 reset by your manual move (suggested by morrow); the pane shows your order now"; `/why kanban` and `/why task-2` say so with sources. Without a frame, `frames.json` is not written. A broken `frames.json` never blocks a move (200, file untouched, `frame_error`). | 6 |
+| 7 | A second client (`dev/sse-probe.js`) gets `change {file: state.json, rev}` after a move. `/why task-4` lists where it is and both moves, each citing `metrics.jsonl:N item_move task-4`; `/why task-3` (moved in the fixture) and `/why task-6` ("not on the kanban"). Every source of `/why`, all panes and all items resolves (`why-cites.js`). `/stats` still has five verdict lines and equals `npm run stats`. Every item still uses only keys of the schema copy. | 7 |
+| 8 | **Page** (`browser-check.js v11`, real input over CDP): the fixture board; a real mouse drag of task-4 onto doing (mid-drag: a copy follows the pointer, the card is dimmed, doing is outlined, the bar sits after task-3; on drop the card is there at once, then the file says doing / order 8 / movedBy user, `item_move`, a kanban touch, no "file edit" on the card, focus on it, announced); a reorder within todo writes only the moved card; the dashed task-8 dragged to done stays proposed (dashed, c/r keys); Escape mid-drag and a drop on the chat cancel (no POST); `Alt+←` / `Alt+↑` / `Alt+→` ×2 move task-4 and keep focus, edges send nothing and say why, a plain ↓ only moves focus; `Alt+arrows` in the chat input do nothing; the rejected task-6 (shown) can be neither moved by key nor dragged, and the server refuses it; an emptied column is a drop zone; a stale rev (`state.stateRev = 1` in the page) → 409, the notice, the card snaps back, the file unchanged; a second tab follows a move in about 0.2 s and a move in tab 2 does not make tab 1's next move stale; a hand edit (task-2 to doing, order −50) shows at the top of doing and reads "edited by you (file edit): column, order"; an applied kanban frame is reset by an Alt move (file, event, notice, system line); `/why task-4` in the page lists its moves with sources; a touch drag (`Input.dispatchTouchEvent`) moves a card; with reduced motion the moved card gets no animation; 820 and 390 px have no horizontal scroll; no move changed status/decidedAt/decidedBy. | 8 |
+| 9 | Contrast still passes (the drag styles add no text colour; the drag shadow is a token). | 8 |
+| 10 | **Demo:** `npm run demo -- v0.11` serves `/state` within about 1 s: the kanban shown, map and index tabs, 7 tasks on the board, task-8 proposed, experiments off; a move works at once; the try lines name dragging to doing, reordering, the keyboard way, a second tab and `/why task-3`; Ctrl+C leaves no process; `make-fixture-v11.js` is deterministic and the v0.10 fixture is untouched. | 9 |
+| 11 | Old checks still passing: p0, p1, p2, v0.3–v0.10, browser p1/p2/v03–v10. | `npm run verify` |
+
+## Deviations
+
+1. Pointer events, not the HTML5 drag-and-drop API (the brief allows either). HTML5 drag events do not fire for touch, and
+   headless Chrome cannot drive them with real mouse input, so the real-drag check would not be possible.
+2. `touch-action: none` on task cards: on a touch screen, swiping on a card drags it instead of scrolling the pane. The
+   pane still scrolls from its headings and gaps (QUESTIONS.md: a long press would be the alternative).
+3. A move writes no transcript line (only `metrics.jsonl`, `state.json` and `/why`). The frame reset it causes does.
+4. The brief asks that a move count as a `pane_touch` for the kanban. The server records it as `how: "move"`, but only
+   the first touch per turn is written (v0.8), and in the page a pointerdown (`click`) or a key-moved focus (`focus`)
+   usually comes first. So the browser check looks for a kanban touch in that turn, and the server checks look for
+   `how: "move"`.
+5. The frame is also reset while the frame-proposals experiment is off (QUESTIONS.md).
+6. The demo fixture adds seven synthetic turns, so that the map and the index fade to tabs under the v0.8 rules and the
+   kanban gets the whole side column. With all three panes shown at 1280 × 800, one card per column was visible.

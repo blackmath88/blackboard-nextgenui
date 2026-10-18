@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "pilot state.json (pilot/app copy; pilot-v0.4 adds decidedBy)",
+  "title": "pilot state.json (pilot/app copy; pilot-v0.4 adds decidedBy; pilot-v0.11 adds order, movedBy, movedAt)",
   "type": "object",
   "required": ["rev", "items"],
   "additionalProperties": false,
@@ -25,6 +25,9 @@
           "decidedAt": { "type": "string", "format": "date-time" },
           "decidedBy": { "enum": ["user"], "description": "who confirmed or rejected the item (pilot-v0.4 extension; only the user decides)" },
           "column": { "enum": ["todo", "doing", "done"], "description": "tasks only" },
+          "order": { "type": "number", "description": "tasks only (pilot-v0.11 extension): the place in its column, lower = higher up; missing = the item's position in items (public/board.js)" },
+          "movedBy": { "enum": ["user"], "description": "who last moved the task on the kanban (pilot-v0.11 extension; only the user arranges the board)" },
+          "movedAt": { "type": "string", "format": "date-time", "description": "when it was last moved (pilot-v0.11 extension)" },
           "url": { "type": "string", "description": "sources only" }
         },
         "allOf": [

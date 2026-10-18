@@ -1,0 +1,12 @@
+{
+  "fakes": [
+    { "name": "frontier", "port": 5788 },
+    { "name": "morrow", "port": 5789 }
+  ],
+  "try": [
+    "Open {url}. The kanban has the side column (the map and the index faded to tabs) with seven tasks: todo has four (task-8 is dashed: proposed by morrow, not decided), doing has task-3, done has two. Drag \"print the claim form\" (task-4) onto \"doing\": a line shows where it lands, it moves at once, and {dir}/state.json now says column \"doing\", an order, movedBy \"user\" and movedAt.",
+    "Reorder within a column: drag a card above or below another one. Drag the dashed task-8 too: it moves and stays proposed (a move confirms nothing).",
+    "The keyboard way: click a card (or Tab to it), then Alt+→ / Alt+← moves it to the next / previous column, Alt+↑ / Alt+↓ moves it up or down. A screen reader hears each move. Alt+arrows never act from the chat input.",
+    "Open {url} in a second tab and move a card in one of them: the other follows within about 0.2 s. Then type /why task-3 (or press \"why?\" on the card): it lists each move, who made it and when, with sources."
+  ]
+}

@@ -20,6 +20,7 @@
   --focus: var(--sky);
   --caret: var(--peach);
   --scan: rgba(0, 0, 0, .18);             /* scanline overlay (decoration only) */
+  --shadow: rgba(0, 0, 0, .35);           /* pilot-v0.11: the card copy that follows the pointer while dragging */
   /* pixel sprite colours (pixel.js uses these names) */
   --px-a: var(--lavender); --px-d: var(--muted); --px-c: var(--sky); --px-w: var(--text);
   --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
@@ -242,3 +243,19 @@ body { margin: 0; background: var(--base); color: var(--text); font: 400 15px/1.
 .item.framed { box-shadow: inset 4px 0 0 var(--lavender); padding-left: 12px; }   /* its own border (status) stays */
 .items .grp { margin: 2px 0 4px; color: var(--muted); font-size: 11.5px; text-transform: lowercase; letter-spacing: 0.04em; }
 .items .grp + .item::before { display: none; }
+
+/* pilot-v0.11: drag and drop on the kanban. A card you can move shows a grab cursor; while dragging, the card stays in
+   place dimmed, a copy follows the pointer, the column under it is outlined and a bar shows where it lands. Empty columns
+   are drop zones too (min-height). touch-action none on task cards: a touch drag moves the card instead of scrolling
+   the pane (scroll the pane on its headings or gaps). No colour is new: --focus and --line only. */
+.side.kanban .item:not(.rejected) { cursor: grab; touch-action: none; }
+.side.kanban .col .items { min-height: 2.6em; padding-bottom: 4px; }
+.side.kanban .col.drop-target { outline: 1px dashed var(--focus); outline-offset: 2px; }
+.item.dragging { opacity: .35; }
+.drag-ghost { position: fixed; z-index: 50; pointer-events: none; margin: 0; background: var(--panel); opacity: .92; box-shadow: 0 6px 18px var(--shadow); cursor: grabbing; }
+body.dragging-card, body.dragging-card * { cursor: grabbing !important; user-select: none; }
+.drop-line { height: 3px; margin: -1px 0 5px; background: var(--focus); border-radius: 2px; }
+.item.moved { animation: moved 700ms ease-out; }
+@keyframes moved { from { box-shadow: 0 0 0 3px var(--focus); } to { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .item.moved { animation: none; } }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

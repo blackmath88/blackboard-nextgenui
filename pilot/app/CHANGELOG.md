@@ -4,6 +4,104 @@ P0 to P2 (skeleton, model roles, growth controller with consent and the index pa
 baseline, merged before the numbered iterations started; see `CHECKS.md` (# P0, # P1, # P2). Iterations are
 tagged `pilot-v0.N` by the coordinator; each one is runnable with `npm run demo -- v0.N`.
 
+## pilot-v0.11
+
+A kanban that is drag and drop, asked for by Miro. Moving a card is you arranging your own board, so it is authored by
+you, goes through the server with the page's last `rev`, and never confirms or rejects anything. Still untested with a
+real model (fakes only; moving cards uses no model at all).
+
+**Adds**
+- **Drag and drop on the kanban** (`public/app.js`, pointer events, no library):
+  - drag a task card to another column, or to another place in its column;
+  - the card stays in place, dimmed, while a copy follows the pointer;
+  - the column under the pointer is outlined and a bar shows where the card lands. Empty columns are drop zones too;
+  - the drag starts after 5 px of movement, so a click still focuses the card. Buttons and links on a card never
+    start a drag;
+  - Escape, or a drop outside the columns, cancels. Nothing is sent then;
+  - mouse, pen and touch all produce pointer events, so all three work. Task cards have `touch-action: none`, so a
+    touch drag on a card moves it instead of scrolling the pane.
+- **The keyboard way** (required for accessibility). On a focused task card:
+  - `Alt+←` / `Alt+→` moves it to the previous / next column, keeping its row, or to the end if that column is shorter;
+  - `Alt+↑` / `Alt+↓` moves it up / down in its column;
+  - at an edge nothing is sent, and the page says why ("already at the top of todo");
+  - the keys never act from the chat input or from a button. They don't clash with plain arrows (focus between cards),
+    `c`/`r` (decide) or `f` (frame), none of which use Alt;
+  - every move, refusal and cancel is announced in a new visually hidden `aria-live="polite"` region (`#announce`),
+    e.g. "task-4 moved to todo, position 2 of 3.";
+  - task cards point at a hidden help text through `aria-describedby`. No new Tab stop: the v0.10 Tab path is
+    unchanged.
+- **Optimistic, then the file decides.**
+  - The card moves at once. `POST /move {itemId, column, index, rev}` follows; `index` is the place among the other cards
+    of the target column, 0 = top.
+  - Moves are queued, so quick Alt presses go out in order, each with the rev the page saw last.
+  - File events wait while a drag or a move is in flight, then the page reloads.
+  - A refused move (stale rev → 409 `{stale}`, a rejected task, anything else) shows the notice and snaps the card back.
+    The page re-renders even when the file did not change.
+  - The moved card keeps focus and gets a short highlight, none with `prefers-reduced-motion`.
+- **What a move writes** (`server.js` `move()`, inside the write chain):
+  - on that task only: `column`, `order` (a number), `movedBy: "user"`, `movedAt`. Never `status`, `decidedAt` or
+    `decidedBy`, and no other card;
+  - `rev` + 1;
+  - an `item_write` with `via: "move"` (the v0.6 write ledger), so the card reads "you" and not "you (file edit)", and
+    a hand edit of `column`/`order` made before a page move stops counting as one;
+  - `item_move {id, from, to, order, fromIndex, index, between, status, by: "user", turn, rev}` in `metrics.jsonl`.
+- **What a move refuses:**
+  - 409: a rejected task (rejected tasks are not on the board; with "rejected: n (show)" on, they are shown but can't
+    be dragged or moved by key), a stale rev, a broken `state.json`, a kanban that is not shown;
+  - 400: a decision or source, a bad column, a bad index;
+  - 404: an unknown id;
+  - the same place again: 200 `changed: false`, nothing written;
+  - without `rev` (curl) a move is accepted, like `/answer`.
+- **A proposed task can be moved and stays proposed**: dashed, with its c/r keys, still holding its pane open (v0.8).
+- **The order rule** (`public/board.js`, one file loaded by the page and required by the server, so both sort alike):
+  - a task's place is its `order` when it has one, else its position in `state.json` `items`. Without any `order` the
+    board is in file order, exactly as before;
+  - a move sets the moved task's `order` to the midpoint between its new neighbours (top: the next one − 1; bottom: the
+    previous one + 1; alone in the column: its own file position). No card is renumbered.
+- **Interplay:**
+  - a move is a touch of the kanban (v0.8, `applyTouch(…, "move")`). A kanban that is a tab comes back. Only the
+    first touch per turn is written; in the page the pointerdown or focus before a drag or a key is usually that first
+    touch;
+  - an applied kanban frame (v0.10) is reset by a manual move: `frames.json` gets `resets.kanban {at, by: "user",
+    frame, reason: "manual move"}`, `frame_reset` has the same reason, a system line says why, and the page shows a
+    notice: "kanban: frame fr-1 … reset by your manual move; the pane shows your order". This also happens while the
+    experiment is off (see QUESTIONS.md). A broken `frames.json` never blocks a move: the move happens, the file
+    stays as it is, and a `frame_error` is logged.
+- **Files stay the truth.** A hand edit of `column` or `order` shows within about 0.2 s (v0.5) and reads "edited by you
+  (file edit): column, order" (v0.6). Two tabs stay in sync through SSE. A tab whose rev is old gets 409 and reloads.
+- **`/why task-N`** adds where the task is now ("on the kanban now: doing, position 1 of 2 (order 7)") and every move,
+  e.g. "moved by you from todo to doing (position 2) at … (through the page; still proposed: a move decides nothing)
+  [metrics.jsonl:N item_move task-4]". A move that reset a frame says so, and cites the `frame_reset`. A rejected task:
+  "not on the kanban". `/why kanban` says when a frame was reset by your manual move.
+- **The schema copy** `schemas/state.schema.json` (pilot/app only; the original under `pilot/cli-pilot-v1` is
+  untouched) gains `order` (number), `movedBy` (enum `user`) and `movedAt` (date-time). Its title says so.
+- **Demo `v0.11`** (`dev/make-fixture-v11.js`, from the v0.10 fixture, seven more synthetic turns):
+  - the kanban has the whole side column, because the map and the index faded to tabs under the v0.8 rules;
+  - seven tasks are on the board: todo task-4, task-5, task-7 (yours), task-8 (proposed, dashed); doing task-3 (moved
+    there through a recorded move); done task-1, task-2. task-6 is rejected and off the board;
+  - experiments are off.
+- **Dev:**
+  - `dev/verify-v0.11.sh` (41 checks, one of them runs the 39 checks of `browser-check.js v11`: 37 + 2 global);
+  - `browser-check.js`: `page.key(k, modifiers)` and ArrowLeft/ArrowRight.
+
+**Why**
+- Moving a card is the clearest case of the person arranging their own workbench: it is theirs (authored by "you"), it
+  lives in the hand-editable file, and it carries no judgement. That is why it may never confirm or reject. A model's
+  frame (v0.10) is someone else's arrangement, so when you arrange the pane yourself, yours wins and the frame goes.
+- Native pointer events instead of HTML5 drag and drop: HTML5 drag events do not fire for touch, and they cannot be
+  driven by real input in headless Chrome. D8 rules out a docking library; a drag and drop library is out for the same
+  reason.
+
+**Deliberately does not**
+- No transcript line per move: moves are in `metrics.jsonl`, `state.json` and `/why`, so the chat stays readable. A frame
+  reset by a move does write a system line, like `/frame reset`.
+- No renumbering: a move writes only the moved card, so no other card changes author. Repeated midpoints between the same
+  two neighbours lose precision after about 50 moves (QUESTIONS.md).
+- No drag between panes, no moving decisions or sources, no new columns, no multi-select.
+- No auto-scroll at the pane edge while dragging.
+- No undo beyond moving the card back (by drag, key or hand edit).
+- No change to what `c`/`r`/`f` or plain arrows do.
+
 ## pilot-v0.10
 
 Frame proposals: an experiment behind a flag, never the default. 02-morph's rule, applied to the pilot: a model may only

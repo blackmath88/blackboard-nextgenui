@@ -11,6 +11,8 @@
 // pilot-v0.10: /why map and /why kanban also explain a frame (frames.json): the applied one (what it does, which model
 // suggested it after which message, that you applied it and when), an open proposal, the last reset. Only when there is
 // one on file: without frames the explanations are exactly as before.
+// pilot-v0.11: /why task-N also says where the task sits on the kanban and lists every move you made (item_move), and a
+// kanban frame reset by a manual move says so.
 // Node 20+, no dependencies. server.js requires it for /why.
 'use strict';
 const fs = require('fs');
@@ -18,6 +20,7 @@ const path = require('path');
 const stats = require('./stats.js');
 const fade = require('./fade.js');
 const frame = require('./frame.js');
+const board = require('./public/board.js');   // pilot-v0.11: the kanban order rule
 
 const MODULES = ['index', 'map', 'kanban'];   // panes this build can show (server.js BUILT)
 const TITLES = { chat: 'chat', index: 'index', map: 'reasoning map', kanban: 'kanban' };
@@ -325,7 +328,7 @@ function frameFacts(ctx, mod) {
   }
   if (!a && r) {
     const row = ev(ctx, (e) => e.event === 'frame_reset' && e.module === mod).pop();
-    out.push({ text: `no frame applied: frame ${r.frame || '?'} was reset by you at ${r.at || '?'}; the pane shows its own order`, cite: [frameCite(ctx, 'resets', mod), ...(row ? [jl('metrics.jsonl', row, `frame_reset ${row.obj.id || mod}`)] : [])] });
+    out.push({ text: `no frame applied: frame ${r.frame || '?'} was reset by ${r.reason === 'manual move' ? 'your manual move (you arranged the pane yourself)' : 'you'} at ${r.at || '?'}; the pane shows ${r.reason === 'manual move' ? 'your' : 'its own'} order`, cite: [frameCite(ctx, 'resets', mod), ...(row ? [jl('metrics.jsonl', row, `frame_reset ${row.obj.id || mod}`)] : [])] });
   }
   const rej = ev(ctx, (e) => e.event === 'frame_reject' && e.module === mod);
   if (out.length && rej.length) {
@@ -400,12 +403,38 @@ function explainItem(ctx, it) {
     out.push({ text: `status "${status}": no decide event in metrics.jsonl${it.decidedBy ? `; the file says decidedBy ${it.decidedBy}${it.decidedAt ? ` at ${it.decidedAt}` : ''}` : ''}`, cite: [itemCite(ctx, it.id), `metrics.jsonl (no decide ${it.id})`] });
   }
 
+  // pilot-v0.11: where a task sits on the kanban, and every move you made through the page
+  if (it.kind === 'task') out.push(...moveFacts(ctx, it));
+
   // other fields changed by hand
   for (const f of fields.filter((x) => !['status', 'decidedAt', 'decidedBy'].includes(x))) {
     const fe = fileEditFor(ctx, it.id, (e) => (e.fields || []).includes(f));
     const was = last ? `the server wrote ${fmt(last.obj.item[f])}, ` : '';
     out.push({ text: `${f} edited by you (file edit)${when(fe)}: ${was}the file says ${fmt(it[f])}`, cite: [itemCite(ctx, it.id), ...(last ? [jl('metrics.jsonl', last, `item_write ${it.id}`)] : []), ...whenCite(fe, it.id)] });
   }
+  return out;
+}
+
+// pilot-v0.11: a task's place on the board (public/board.js, the same rule the page sorts by) and its move history
+// (item_move events; a move that reset an applied kanban frame says so). Hand edits of column/order are reported by the
+// "edited by you (file edit)" lines below, like any other field.
+function moveFacts(ctx, it) {
+  const out = [];
+  if ((it.status || 'confirmed') === 'rejected') out.push({ text: 'not on the kanban: rejected tasks are not shown on the board and cannot be moved', cite: [itemCite(ctx, it.id)] });
+  else {
+    const col = board.columnOf(it), n = board.column(ctx.items, col).length, i = board.indexOf(ctx.items, it);
+    out.push({ text: `on the kanban now: ${col}, position ${i === null ? '?' : i + 1} of ${n}${board.hasOrder(it) ? ` (order ${it.order})` : ' (no order field: file order)'}`, cite: [itemCite(ctx, it.id)] });
+  }
+  const moves = ev(ctx, (e) => e.event === 'item_move' && e.id === it.id);
+  for (const mv of moves) {
+    const e = mv.obj;
+    const where = `${e.from === e.to ? `within ${e.to}` : `from ${e.from} to ${e.to}`} (position ${(e.index ?? 0) + 1})`;
+    const reset = ev(ctx, (r) => r.event === 'frame_reset' && r.module === 'kanban' && r.reason === 'manual move' && r.ts === e.ts)[0];
+    out.push({ text: `moved by you ${where} at ${e.ts} (through the page; ${e.status === 'proposed' ? 'still proposed: a move decides nothing' : 'a move decides nothing'})${reset ? `; this reset kanban frame ${reset.obj.id || '?'}` : ''}`,
+      cite: [jl('metrics.jsonl', mv, `item_move ${it.id}`), ...(reset ? [jl('metrics.jsonl', reset, `frame_reset ${reset.obj.id || 'kanban'}`)] : [])] });
+  }
+  if (!moves.length) out.push({ text: 'never moved through the page (no item_move in metrics.jsonl)', cite: [`metrics.jsonl (no item_move ${it.id})`] });
+  else if (it.movedBy && it.movedAt) out.push({ text: `the file says movedBy ${it.movedBy === 'user' ? 'you' : it.movedBy} at ${it.movedAt}`, cite: [itemCite(ctx, it.id)] });
   return out;
 }
 
