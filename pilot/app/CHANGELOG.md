@@ -21,6 +21,10 @@ Tested against the fakes only.
     as its last good version and never written. Metrics: `chat_new`, `chat_rename`.
   - **Log and index** show the open chat only; a pending controller question shows in every chat. Chat switching is
     blocked while a reply streams.
+  - **Per-chat tail.** `GET /state?chat=<id>` sends that chat's lines (plus the open controller question), so an older
+    chat never looks empty after others grew past 500 lines. Every page write sends an `x-pilot-chat` header, so
+    controller and system lines land in the right chat after a server restart or with tabs in different chats. A
+    "show m-…" link in `/why` opens the message's chat first (`POST /chats {action: "find", msg}`).
   - **API.** `POST /chat {text, chat?}` (default `c-1`; an unknown chat is 400). `POST /chats {action: "new", title?}
     | {action: "open", id} | {action: "rename", id, title}`. `/state` gains `chats`, `chatsRev`, `defaultChat`.
 - **Theme switch** under the chat list: auto → light → dark, in sync with `/theme`.
