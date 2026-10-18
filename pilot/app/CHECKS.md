@@ -970,8 +970,9 @@ Several chats in one project, a sidebar like ChatGPT's, one shared board. Everyt
 
 **Reproduce:** `bash pilot/app/dev/verify-v0.12.sh`. It has 54 checks; one of them runs the 43 checks of
 `browser-check.js v12` (41 + 2 global). It ends with `ALL v0.12 CHECKS PASSED` and exits non-zero on failure.
-- Own ports: server 4850, fakes 5851/5852; browser part 4855/5856/5857 and Chrome 9433; demo part shifted +300
-  (5086/6094/6095).
+- Own ports: server 4910, fakes 5911/5912; browser part 4855/5856/5857 and Chrome 9433; demo part shifted +300
+  (5086/6094/6095). None of them is a port of a demo shifted by 100 (what the coordinator uses next to Miro's demos)
+  or by 300.
 - Own throwaway dirs: `.pilot-verify-v12/`, `.pilot-verify-v12b/`, `.pilot-demo-verify12/`. It never touches `.pilot/` or
   a running demo (it was run next to demos from another checkout).
 - The fixture is generated: `node dev/make-fixture-v12.js` (deterministic, from `demo/fixtures/v0.11/`; the main
@@ -981,6 +982,10 @@ Several chats in one project, a sidebar like ChatGPT's, one shared board. Everyt
 
 **Everything:** `cd pilot/app && npm run verify` (p0, p1, p2, v0.3–v0.12, browser p1 + p2; the v03–v12 browser checks
 run inside their verify scripts).
+Last run (Node v25.9.0, Chrome, macOS, 2026-10-18): `npm run verify` all passed (p0–p2, v0.3–v0.12, browser p1 + p2), no
+earlier assertion adapted. `browser-check.js v12` passed four times in a row after its waits were tightened. `npm run
+demo -- v0.3` to `-- v0.12` (with `DEMO_PORT_SHIFT=100`, next to two demos from another checkout) each served `/state`
+within about 0.3 s, and SIGINT left no listener and no fake.
 
 ## Definitions
 

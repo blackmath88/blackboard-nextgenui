@@ -6,7 +6,7 @@
 # deleted), unarchive; path safety and a broken chats.json; SSE for chats/ files; /why citations into chats/<id>.jsonl;
 # /stats (five verdicts, a chats block, continuity over all chats); chat_switch; the title role; the page
 # (browser-check.js v12); the v0.12 demo.
-# Against dev/fake-model.js only. Own ports (server 4850, fakes 5851/5852; browser part 4855/5856/5857 + Chrome 9433;
+# Against dev/fake-model.js only. Own ports (server 4910, fakes 5911/5912, clear of every demo shifted +100 or +300; browser part 4855/5856/5857 + Chrome 9433;
 # demo part shifted +300: 5086/6094/6095) and own dirs (.pilot-verify-v12*/, .pilot-demo-verify12/), so it never touches
 # .pilot/ or a running demo.
 # Usage (from anywhere): bash pilot/app/dev/verify-v0.12.sh
@@ -21,20 +21,20 @@ check() { if [ "$2" = "true" ]; then echo "PASS $1"; else echo "FAIL $1"; FAILS=
 q() { node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const x=JSON.parse(s);console.log(String($1))})"; }
 qa() { node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const x=s.trim().split('\n').filter(Boolean).map(l=>JSON.parse(l));console.log(String($1))})"; }
 fake() { node dev/fake-model.js "$1" "$2" > "$T/fake-$1.log" 2>&1 & PIDS+=($!); }
-server() { PILOT_DIR=$DIR PILOT_CONFIG="$T/conf.json" node server.js >> "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); for i in $(seq 1 50); do curl -s -m 1 localhost:4850/state > /dev/null && return; sleep 0.1; done; }
+server() { PILOT_DIR=$DIR PILOT_CONFIG="$T/conf.json" node server.js >> "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); for i in $(seq 1 50); do curl -s -m 1 localhost:4910/state > /dev/null && return; sleep 0.1; done; }
 stop_server() { [ -n "$SERVER" ] && { kill $SERVER 2>/dev/null; wait $SERVER 2>/dev/null; SERVER=""; }; }
-post() { curl -s -w '\n%{http_code}' -X POST "localhost:4850$1" -H 'content-type: application/json' -d "$2"; }
-cmd() { curl -s -X POST localhost:4850/command -H 'content-type: application/json' -d "{\"text\":\"$1\",\"chat\":\"${2:-main}\"}"; }
+post() { curl -s -w '\n%{http_code}' -X POST "localhost:4910$1" -H 'content-type: application/json' -d "$2"; }
+cmd() { curl -s -X POST localhost:4910/command -H 'content-type: application/json' -d "{\"text\":\"$1\",\"chat\":\"${2:-main}\"}"; }
 lines() { cmd "$1" "${2:-main}" | q 'x.lines.join("\n")'; }
-say() { curl -s -X POST localhost:4850/chat -H 'content-type: application/json' -d "{\"text\":\"$1\",\"chat\":\"${2:-main}\"}" > /dev/null; sleep "${3:-1.2}"; }
-st() { curl -s "localhost:4850/state${1:-}"; }
+say() { curl -s -X POST localhost:4910/chat -H 'content-type: application/json' -d "{\"text\":\"$1\",\"chat\":\"${2:-main}\"}" > /dev/null; sleep "${3:-1.2}"; }
+st() { curl -s "localhost:4910/state${1:-}"; }
 ev() { qa "$1" < "$DIR/metrics.jsonl"; }
 has() { grep -qE -- "$1" <<< "$2"; }
 sha() { shasum "$DIR/transcript.jsonl" | cut -d' ' -f1; }
-conf() { node -e 'const c=require("./demo/fixtures/v0.12/pilot.config.json");c.port=4850;for(const r of Object.values(c.roles))for(const k of r.candidates)k.baseUrl=k.baseUrl.replace(":5794/",":5851/").replace(":5795/",":5852/");if(process.argv[2]==="notitle")c.roles.title.candidates=[];require("fs").writeFileSync(process.argv[1],JSON.stringify(c,null,2))' "$T/conf.json" "${1:-}"; }
+conf() { node -e 'const c=require("./demo/fixtures/v0.12/pilot.config.json");c.port=4910;for(const r of Object.values(c.roles))for(const k of r.candidates)k.baseUrl=k.baseUrl.replace(":5794/",":5911/").replace(":5795/",":5912/");if(process.argv[2]==="notitle")c.roles.title.candidates=[];require("fs").writeFileSync(process.argv[1],JSON.stringify(c,null,2))' "$T/conf.json" "${1:-}"; }
 newchat() { cmd "/chat new ${1:-}" "${2:-main}" | q 'x.chat'; }
 
-fake 5851 frontier; fake 5852 morrow; sleep 0.3
+fake 5911 frontier; fake 5912 morrow; sleep 0.3
 
 echo "== 1. a dir without chats.json behaves as before (one chat, main = transcript.jsonl)"
 rm -rf $DIR; mkdir $DIR; for f in transcript.jsonl metrics.jsonl state.json modules.json rules.json; do cp demo/fixtures/v0.11/$f $DIR/; done
@@ -44,8 +44,8 @@ check "items in /state carry no chat field while there is one chat" "$(st '?only
 say 'Task: buy a folder for the receipts.' main 1.5
 check "a turn in main: the lines go to transcript.jsonl, no chats.json and no chats/ appear" "$( [ ! -e $DIR/chats.json ] && [ ! -e $DIR/chats ] && [ "$(grep -c . $DIR/transcript.jsonl)" -ge 119 ] && echo true)"
 check "the item proposed from main has no fromChat (missing = main; state.json keys as before)" "$(node -e 'const s=require("./'$DIR'/state.json");const t=s.items.find(i=>i.text==="buy a folder for the receipts");console.log(!!t && !("fromChat" in t))')"
-check "an unknown chat: GET /state?chat=nope -> 404, POST /chat with it -> 404, nothing written" "$( [ "$(curl -s -o /dev/null -w '%{http_code}' 'localhost:4850/state?chat=nope')" = 404 ] && [ "$(post /chat '{"text":"hi","chat":"nope"}' | tail -1)" = 404 ] && [ ! -e $DIR/chats ] && echo true)"
-check "a path as chat id (../transcript) -> 404" "$( [ "$(curl -s -o /dev/null -w '%{http_code}' 'localhost:4850/state?chat=..%2Ftranscript')" = 404 ] && echo true)"
+check "an unknown chat: GET /state?chat=nope -> 404, POST /chat with it -> 404, nothing written" "$( [ "$(curl -s -o /dev/null -w '%{http_code}' 'localhost:4910/state?chat=nope')" = 404 ] && [ "$(post /chat '{"text":"hi","chat":"nope"}' | tail -1)" = 404 ] && [ ! -e $DIR/chats ] && echo true)"
+check "a path as chat id (../transcript) -> 404" "$( [ "$(curl -s -o /dev/null -w '%{http_code}' 'localhost:4910/state?chat=..%2Ftranscript')" = 404 ] && echo true)"
 check "/chats says one chat so far and how to start another" "$(has 'one chat so far: /chat new' "$(lines /chats)" && echo true)"
 stop_server
 
@@ -100,7 +100,7 @@ check "/chat unarchive second: back in the list (archived removed); metrics chat
 check "nothing was ever removed from chats/ (files only added)" "$( [ "$(ls $DIR/chats | wc -l)" -ge "$N0" ] && echo true)"
 cp $DIR/chats.json "$T/chats.good"
 node -e 'const f="'$DIR'/chats.json",fs=require("fs"),x=JSON.parse(fs.readFileSync(f));x.chats.push({id:"evil",file:"../../server.js"},{id:"../up",file:"chats/../up.jsonl"});fs.writeFileSync(f,JSON.stringify(x,null,2))'; sleep 0.3
-check "a hand-added entry whose file is not chats/<id>.jsonl, or whose id is a path, is ignored (not listed, 404)" "$(st '?only=chats.json' | q '!x.chats.list.some(c=>c.id==="evil"||c.id==="../up")' | grep -q true && [ "$(curl -s -o /dev/null -w '%{http_code}' 'localhost:4850/state?chat=evil')" = 404 ] && echo true)"
+check "a hand-added entry whose file is not chats/<id>.jsonl, or whose id is a path, is ignored (not listed, 404)" "$(st '?only=chats.json' | q '!x.chats.list.some(c=>c.id==="evil"||c.id==="../up")' | grep -q true && [ "$(curl -s -o /dev/null -w '%{http_code}' 'localhost:4910/state?chat=evil')" = 404 ] && echo true)"
 printf '{"rev": 9, "chats": [' > $DIR/chats.json; sleep 0.3
 check "a broken chats.json: fileErrors names it, the list is the last good version, /chat new refuses, the file is untouched" "$(st | q 'x.fileErrors["chats.json"] && x.chats.list.length>=3' | grep -q true && cmd '/chat new' main | q '!x.ok && /not valid JSON/.test(x.lines[0])' | grep -q true && [ "$(cat $DIR/chats.json)" = '{"rev": 9, "chats": [' ] && echo true)"
 B="{\"text\":\"still here\",\"chat\":\"$C2\"}"
@@ -109,7 +109,7 @@ cp "$T/chats.good" $DIR/chats.json; sleep 0.3
 check "fixed by hand: no fileErrors" "$(st | q '!x.fileErrors["chats.json"]')"
 
 echo "== 5. SSE: chats/<id>.jsonl and chats.json changes reach another client; chat_switch"
-node dev/sse-probe.js listen 4850 1500 "$T/sse.jsonl" & PROBE=$!; PIDS+=($!); sleep 0.4
+node dev/sse-probe.js listen 4910 1500 "$T/sse.jsonl" & PROBE=$!; PIDS+=($!); sleep 0.4
 echo '{"id":"m-hand0001","ts":"2026-10-18T12:00:00.000Z","role":"user","text":"a line added by hand","model":null}' >> $DIR/chats/$C2.jsonl
 cmd '/chat rename second again' $C2 > /dev/null
 wait $PROBE 2>/dev/null
@@ -128,7 +128,7 @@ check "/why task-9: from message m-f203 [chats/c-invoices.jsonl:1 m-f203]; from 
 check "/why task-4 (older, no fromChat): the message is cited in transcript.jsonl, and the item names no chat" "$(has 'transcript\.jsonl:[0-9]+ m-f' "$(lines '/why task-4')" && has 'the item names no chat \(older than pilot-v0.12\); its message is in main "letter"' "$(lines '/why task-4')" && echo true)"
 check "/why index: the rule counts messages in all 4 chats; the pane lists the chat you are in" "$(has 'the rule counts messages in all 4 chats \(main 88, c-scratch 2, c-invoices 4, c-hospital 4\); the pane lists the messages of the chat you are in' "$(lines '/why index')" && echo true)"
 check "/why kanban: the turns since are counted over all chats" "$(has 'transcript\.jsonl \+ chats/\*\.jsonl user lines ×49 \(all chats\)' "$(lines '/why kanban')" && echo true)"
-node dev/why-cites.js http://127.0.0.1:4850 $DIR > "$T/cites.txt"; tail -1 "$T/cites.txt" | sed 's/^/   /'
+node dev/why-cites.js http://127.0.0.1:4910 $DIR > "$T/cites.txt"; tail -1 "$T/cites.txt" | sed 's/^/   /'
 check "every source /why cites resolves (why-cites.js: chats/<id>.jsonl lines, chats.json entries, links into other chats)" "$(grep -q '^CITES OK' "$T/cites.txt" && echo true)"
 S=$(lines /stats)
 check "/stats: five verdict lines, then a chats block (measured): 4 chats (1 archived), the chat events; equal to npm run stats" "$( [ "$(echo "$S" | grep -cE '^[a-z]+ +(PASS|NOT YET) ')" -eq 5 ] && has '^chats \(measured, not judged' "$S" && has '4 chats \(1 archived\): main 88 messages, c-scratch 2 messages, c-invoices 4 messages, c-hospital 4 messages' "$S" && has 'chat_new 3, chat_switch 3 \(archive 1, new 2\)|chat_new 3, chat_switch 3 \(new 2, archive 1\)' "$S" && [ "$(npm run -s stats -- $DIR)" = "$S" ] && echo true)"
