@@ -125,6 +125,16 @@ function chatsSummary(lines) {
   }
   return [...by.values()].map(({ first, ...c }) => ({ ...c, title: c.title || shortTitle(first) || 'new chat', named: !!c.title }));
 }
+// The lines of one chat, plus the latest controller question still pending (wherever it was asked), in file order.
+function chatTail(lines, chat) {
+  const m = readModules();
+  const remove = m.pendingKind === 'remove';
+  let q = -1;
+  if (m.pending) lines.forEach((l, i) => { if (l.role === 'controller' && l.module === m.pending && (l.question === 'remove') === remove) q = i; });
+  return lines.filter((l, i) => chatOf(l) === chat || i === q);
+}
+// Which chat a message is in (for "show m-…" links to another chat); null when there is no such message.
+function chatOfMessage(id) { const l = readTranscript().find((x) => x.id === id); return l ? chatOf(l) : null; }
 const chatExists = (id) => typeof id === 'string' && chatsSummary(readTranscript()).some((c) => c.id === id);
 
 // POST /chats {action: "new", title?} | {action: "open", id} | {action: "rename", id, title}
@@ -132,12 +142,16 @@ function chatAction(body) {
   const action = body && body.action;
   return serial(() => {
     const r = readChats();
+    if (action === 'find') {
+      const c = typeof body.msg === 'string' ? chatOfMessage(body.msg) : null;
+      return c ? { code: 200, body: { ok: true, chat: c } } : { code: 404, body: { error: `no message "${body.msg}"` } };
+    }
     if (action === 'open') {
       if (!chatExists(body.id)) return { code: 404, body: { error: `no chat "${body.id}"` } };
       currentChat = body.id;
       return { code: 200, body: { ok: true, chat: body.id } };
     }
-    if (action !== 'new' && action !== 'rename') return { code: 400, body: { error: 'action must be new, open or rename' } };
+    if (action !== 'new' && action !== 'rename') return { code: 400, body: { error: 'action must be new, open, rename or find' } };
     if (r.error) return { code: 409, body: { error: `${r.error}; fix the file by hand first` } };
     const title = typeof body.title === 'string' ? body.title.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
     const doc = { ...r.doc, chats: r.chats.slice() };
@@ -1150,10 +1164,15 @@ function handleEvents(req, res) {
 
 // GET /state[?only=transcript.jsonl,state.json,modules.json,roles.json]: everything, or only the parts that belong to
 // the named files (the page reloads only what changed). extracting and fileErrors are always included.
-function statePayload(only) {
+function statePayload(only, chat) {
   const want = (f) => !only || only.includes(f);
   const out = { extracting: extracting > 0, framing: framing > 0 };
-  if (want('transcript.jsonl')) { const lines = readTranscript(); out.transcript = lines.slice(-TAIL); out.total = lines.length; out.turn = fade.turnOf(lines); }
+  if (want('transcript.jsonl')) {
+    const lines = readTranscript();
+    // pilot-ui: ?chat=<id> sends that chat's tail (plus the open controller question, which shows in every chat)
+    const shown = chat ? chatTail(lines, chat) : lines;
+    out.transcript = shown.slice(-TAIL); out.total = shown.length; out.turn = fade.turnOf(lines);
+  }
   if (want('transcript.jsonl') || want('chats.json')) { out.chats = chatsSummary(readTranscript()); out.chatsRev = readChats().rev; out.defaultChat = DEFAULT_CHAT; }   // pilot-ui
   if (want('modules.json') || want('roles.json')) out.models = modelsSummary();
   let m = null, st = null;
@@ -1480,9 +1499,15 @@ const server = http.createServer(async (req, res) => {
       try { secrets.update(body.name, req.method === 'DELETE' ? undefined : body.value.trim()); return sendJson(res, 200, { keys: keyStatus() }); }
       catch (e) { return sendJson(res, 409, { error: e.message }); }
     }
+    // pilot-ui: every write from the page names the chat it was made in (x-pilot-chat), so controller and system lines
+    // land there, also after a server restart or with tabs open in different chats
+    if (req.method === 'POST' && req.headers['x-pilot-chat']) {
+      let hc = ''; try { hc = decodeURIComponent(String(req.headers['x-pilot-chat'])); } catch { /* ignore a bad header */ }
+      if (hc && chatExists(hc)) currentChat = hc;
+    }
     if (req.method === 'GET' && pathname === '/state') {
       const only = searchParams.has('only') ? searchParams.get('only').split(',').filter(Boolean) : null;
-      return sendJson(res, 200, statePayload(only));
+      return sendJson(res, 200, statePayload(only, searchParams.get('chat') || null));
     }
     if (req.method === 'GET' && pathname === '/events') return handleEvents(req, res);
     if (req.method === 'POST' && pathname === '/answer') {

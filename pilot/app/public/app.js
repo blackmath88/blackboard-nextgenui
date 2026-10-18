@@ -51,6 +51,7 @@ const chatList = $('chat-list'), newChatBtn = $('new-chat'), themeBtn = $('theme
 let activeChat = null;      // the open chat; kept in this browser (localStorage), falls back to the first chat
 try { activeChat = localStorage.getItem('pilot-chat'); } catch { /* storage blocked */ }
 const chatOf = (l) => (l && typeof l.chat === 'string' && l.chat) || state.defaultChat || 'c-1';
+const hdrs = () => ({ 'x-pilot': '1', 'content-type': 'application/json', 'x-pilot-chat': encodeURIComponent(activeChat || '') });   // every write names its chat
 const chatLines = () => state.transcript.filter((l) => chatOf(l) === activeChat);
 $('brand').insertAdjacentHTML('afterbegin', Pixel.sprite('teletype', 18, 'pilot') + ' ');
 
@@ -113,7 +114,7 @@ function renderLog() {
   state.transcript.forEach((l, i) => { if (l.role === 'controller' && l.module) lastCtl[ctlKey(l)] = i; });
   state.transcript.forEach((l, i) => {
     const last = !!l.module && lastCtl[ctlKey(l)] === i;
-    const pendingHere = l.role === 'controller' && last && state.pending === l.module;   // a question shows in every chat
+    const pendingHere = l.role === 'controller' && last && state.pending === l.module && isRemove(l) === (state.pendingKind === 'remove');   // a question shows in every chat
     if (chatOf(l) !== activeChat && !pendingHere) return;
     if (l.role === 'controller') addController(l, last);
     else addLine(l.role, l.text, l.model, l.id, l.kind);
@@ -313,7 +314,7 @@ function frameNodes(mod) {
   return nodes;
 }
 async function sendFrame(mod, id, action, fromPane) {
-  const res = await fetch('/frame', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ pane: mod, id, action, rev: (state.frames || {}).rev }) });
+  const res = await fetch('/frame', { method: 'POST', headers: hdrs(), body: JSON.stringify({ pane: mod, id, action, rev: (state.frames || {}).rev }) });
   if (!res.ok) await writeFailed(res);
   await loadState();
   if (!fromPane) return;
@@ -376,13 +377,21 @@ function renderKanban(body) {
 // write) follows and the page reloads the file truth.
 const COLS = ['todo', 'doing', 'done'];
 let dragging = null;
-async function moveTask(id, col) {
+let moveChain = Promise.resolve();   // moves go one after another, each with the rev the previous one produced
+function moveTask(id, col) {
   const it = (state.items || []).find((i) => i.id === id);
   if (!it || (it.column || 'todo') === col) return;
   const before = it.column;
-  it.column = col; renderPanes(true);
-  const res = await fetch('/move', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ itemId: id, column: col, rev: state.stateRev }) });
-  if (!res.ok) { it.column = before; await writeFailed(res); }
+  it.column = col; renderPanes(true);   // the card moves at once
+  moveChain = moveChain.then(() => sendMove(id, col, before)).catch((err) => addLine('system', `error: ${err.message}`));
+}
+async function sendMove(id, col, before) {
+  const undo = () => { const cur = (state.items || []).find((i) => i.id === id); if (cur) { cur.column = before; renderPanes(true); } };
+  try {
+    const res = await fetch('/move', { method: 'POST', headers: hdrs(), body: JSON.stringify({ itemId: id, column: col, rev: state.stateRev }) });
+    if (!res.ok) { undo(); await writeFailed(res); }
+    else { const b = await res.json().catch(() => ({})); if (Number.isInteger(b.rev)) state.stateRev = b.rev; }
+  } catch (err) { undo(); throw err; }
   await loadState();
   const card = bench.querySelector(`#pane-kanban .item[data-id="${CSS.escape(id)}"]`);
   if (card) { restoring = true; card.focus({ preventScroll: true }); restoring = false; card.scrollIntoView({ block: 'nearest' }); }
@@ -412,7 +421,7 @@ async function writeFailed(res) {
 }
 
 async function sendDecision(id, word, fromCard) {
-  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ itemId: id, decision: word, rev: state.stateRev }) });
+  const res = await fetch('/answer', { method: 'POST', headers: hdrs(), body: JSON.stringify({ itemId: id, decision: word, rev: state.stateRev }) });
   if (!res.ok) await writeFailed(res);
   else if (selected === id) selected = null;
   await loadState();
@@ -446,7 +455,7 @@ function renderIndex(body) {
 function jumpTo(id) {
   if (!$(`msg-${id}`)) return;
   // Usefulness (P5): the server logs index_jump; fire and forget, a failure never blocks the jump
-  fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ event: 'index_jump', target: id }) }).catch(() => {});
+  fetch('/metric', { method: 'POST', headers: hdrs(), body: JSON.stringify({ event: 'index_jump', target: id }) }).catch(() => {});
   scrollToMsg(id);
 }
 function scrollToMsg(id) {
@@ -455,6 +464,15 @@ function scrollToMsg(id) {
   el.scrollIntoView({ block: 'center', behavior: reducedMotion.matches ? 'auto' : 'smooth' });
   el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
   return true;
+}
+
+// pilot-ui: a message in another chat: open that chat first, then scroll to it
+async function showMsg(id) {
+  if (scrollToMsg(id)) return;
+  const res = await fetch('/chats', { method: 'POST', headers: hdrs(), body: JSON.stringify({ action: 'find', msg: id }) });
+  const out = await res.json().catch(() => ({}));
+  if (res.ok && out.chat && out.chat !== activeChat) { await switchChat(out.chat, false); if (scrollToMsg(id)) return; }
+  addLine('out', `${id} is not among the lines shown`).p.classList.add('err');
 }
 
 // pilot-v0.7: "why?" on a pane bar or a card runs the same /why command as typing it. A real button, so Tab reaches it
@@ -482,7 +500,7 @@ function renderWhy(statements, ok) {
       if (st.msg) {
         const b = document.createElement('button');
         b.type = 'button'; b.className = 'go'; b.textContent = `show ${st.msg}`;
-        b.addEventListener('click', () => { if (!scrollToMsg(st.msg)) addLine('out', `${st.msg} is not among the lines shown`).p.classList.add('err'); });
+        b.addEventListener('click', () => showMsg(st.msg).catch((err) => addLine('system', `error: ${err.message}`)));
         body.append(' ', b);
       }
     }
@@ -634,14 +652,14 @@ function switchChat(id, focus = true) {
   const changed = id !== activeChat;
   activeChat = id;
   try { localStorage.setItem('pilot-chat', id); } catch { /* not kept */ }
-  fetch('/chats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'open', id }) }).catch(() => {});
-  if (changed) { renderLog(); renderPanes(true); }
+  fetch('/chats', { method: 'POST', headers: hdrs(), body: JSON.stringify({ action: 'open', id }) }).catch(() => {});
   renderChats(); updatePlaceholder();
   if (focus) input.focus();
+  return changed ? loadState(['transcript.jsonl']).then(() => renderPanes(true)) : Promise.resolve();
 }
 async function newChat() {
   if (streaming) return;
-  const res = await fetch('/chats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'new' }) });
+  const res = await fetch('/chats', { method: 'POST', headers: hdrs(), body: JSON.stringify({ action: 'new' }) });
   const out = await res.json().catch(() => ({}));
   if (!res.ok) { addLine('out', out.error || `HTTP ${res.status}`).p.classList.add('err'); return; }
   await loadState(['chats.json']);
@@ -656,7 +674,7 @@ function renameChat(li, c) {
   const finish = async (save) => {
     if (done) return; done = true;
     if (save) {
-      const res = await fetch('/chats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'rename', id: c.id, title: inp.value }) });
+      const res = await fetch('/chats', { method: 'POST', headers: hdrs(), body: JSON.stringify({ action: 'rename', id: c.id, title: inp.value }) });
       if (!res.ok) await writeFailed(res);
       await loadState(['chats.json']);
     }
@@ -694,7 +712,8 @@ async function loadState(files) {
   const gen = ++reqGen;
   const list = files ? files.filter((f) => PARTS[f]) : Object.keys(PARTS);
   if (files && !list.length) return;
-  const next = await (await fetch(files ? `/state?only=${encodeURIComponent(list.join(','))}` : '/state')).json();
+  const chatQ = activeChat ? `chat=${encodeURIComponent(activeChat)}` : '';   // pilot-ui: the open chat's own tail
+  const next = await (await fetch(files ? `/state?only=${encodeURIComponent(list.join(','))}${chatQ ? `&${chatQ}` : ''}` : `/state${chatQ ? `?${chatQ}` : ''}`)).json();
   if (next.context) state.context = next.context;
   for (const f of list) {
     if (gen <= (appliedGen[f] || 0)) continue;
@@ -703,7 +722,7 @@ async function loadState(files) {
   }
   if (gen > (appliedGen.flags || 0)) { appliedGen.flags = gen; state.extracting = next.extracting; state.fileErrors = next.fileErrors || {}; }
   // pilot-ui: the open chat must exist (a fresh project, another browser, a hand-edited file): else the first one
-  if (state.chats && !state.chats.some((c) => c.id === activeChat)) { activeChat = state.defaultChat || 'c-1'; sigs.log = null; }
+  if (state.chats && !state.chats.some((c) => c.id === activeChat)) { activeChat = state.defaultChat || 'c-1'; sigs.log = null; setTimeout(() => loadState(['transcript.jsonl']).catch(() => {}), 0); }
   // re-render only the areas whose content changed (keeps scroll and focus when nothing did)
   const dirty = (area) => { const v = sigOf[area](state); if (sigs[area] === v) return false; sigs[area] = v; return true; };
   if (dirty('log')) renderLog();
@@ -754,7 +773,7 @@ const touched = {};   // pane -> turn of the last report
 function sendTouch(mod, how, force) {
   if (!force && touched[mod] === state.turn) return;
   touched[mod] = state.turn;
-  fetch('/touch', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ module: mod, how }) })
+  fetch('/touch', { method: 'POST', headers: hdrs(), body: JSON.stringify({ module: mod, how }) })
     .then((r) => r.json()).then((b) => {
       // keep the modules.json rev current, so the touch never makes a consent answer stale
       if (b && Number.isInteger(b.rev) && b.rev > (state.modulesRev || 0)) state.modulesRev = b.rev;
@@ -772,7 +791,7 @@ bench.addEventListener('focusin', (e) => {
 });
 
 async function sendAnswer(module, word) {
-  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ module, answer: word, rev: state.modulesRev }) });
+  const res = await fetch('/answer', { method: 'POST', headers: hdrs(), body: JSON.stringify({ module, answer: word, rev: state.modulesRev }) });
   if (!res.ok) await writeFailed(res);
   await loadState();
   input.focus();
@@ -790,7 +809,7 @@ async function runCommand(text) {
     addLine('out', ok ? `theme: ${arg}` : 'usage: /theme light|dark|auto').p.classList.toggle('err', !ok);
     return;
   }
-  const res = await fetch('/command', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ text }) });
+  const res = await fetch('/command', { method: 'POST', headers: hdrs(), body: JSON.stringify({ text }) });
   const out = await res.json();
   await loadState();                             // picks up a /model system line and the new status bar
   addLine('out', text).p.classList.add('cmd');
@@ -809,7 +828,7 @@ const settleOn = () => !!(state.flags && state.flags.settledInput);
 let offerEl = null;          // created only while the flag is on: off renders exactly the old prompt
 let settleTimer = null, lastInputAt = 0, offer = null, tabSend = null, offerSeq = 0;
 function settleMetric(event, fields) {
-  fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ event, ...fields }) }).catch(() => {});
+  fetch('/metric', { method: 'POST', headers: hdrs(), body: JSON.stringify({ event, ...fields }) }).catch(() => {});
 }
 // Drops the offer. how = typed | escape logs settle_ignore; without how it just goes (blur, flag off, sent).
 function dropOffer(how) {
@@ -937,7 +956,7 @@ form.addEventListener('submit', async (e) => {
   p.classList.add('streaming');
   meta.textContent = 'thinking…';
   try {
-    const res = await fetch('/chat', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ text, chat: activeChat }) });
+    const res = await fetch('/chat', { method: 'POST', headers: hdrs(), body: JSON.stringify({ text, chat: activeChat }) });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
     const reader = res.body.getReader();
     const dec = new TextDecoder();
