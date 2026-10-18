@@ -953,3 +953,12 @@ next to two demos from another checkout) each served `/state` within about 1 s, 
 5. The frame is also reset while the frame-proposals experiment is off (QUESTIONS.md).
 6. The demo fixture adds seven synthetic turns, so that the map and the index fade to tabs under the v0.8 rules and the
    kanban gets the whole side column. With all three panes shown at 1280 × 800, one card per column was visible.
+
+## pilot-v0.11: coordinator re-run (2026-10-18)
+
+Run by the coordinator, not the builder, after the builder's last fix (`29e41ec`).
+- Scope: only `pilot/app/**` plus one line in the "Pilot iterations" list of `index.html`.
+- `npm run verify`: exit 0; every earlier script passes, plus v0.11. Demos v0.3 to v0.11 (port shift 200): `/state` 200 within about 1 s each; nothing left running.
+- Browser, demo v0.11:
+  - A real mouse drag of task-4 ("print the claim form") from todo into doing wrote `column: doing`, `order`, `movedBy: user`; status stayed confirmed.
+  - On the proposed task-8, Alt+→ moved it to doing; it stayed `proposed` and the live region said "task-8 moved to doing, position 3 of 3; still proposed."
