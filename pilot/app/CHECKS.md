@@ -1066,3 +1066,8 @@ Projects that group chats. Everything runs against `dev/fake-model.js`.
 | 8 | `npm run demo -- v0.13` (shifted +300) serves within 30 s: two projects (4 and 2 chats), the first one's board (21 items), and move flat's own board (5 items, kanban). The try lines mention the board change, "+ new chat", "+ new project" and a second tab. Ctrl+C leaves no process. `make-fixture-v13.js` is deterministic, and health insurance claim is the v0.12 fixture byte for byte. | 8 |
 
 **Everything:** `cd pilot/app && npm run verify` (p0, p1, p2, v0.3–v0.13, browser p1 + p2).
+
+Last run (Node v25.9.0, Chrome, macOS, 2026-10-19): `npm run verify` all passed (p0–p2, v0.3–v0.13, browser p1 + p2),
+no earlier assertion adapted. `browser-check.js v13` passed three times in a row after its click on a project header waited
+for the pane View Transition to end. `npm run demo -- v0.3` to `-- v0.13` (with `DEMO_PORT_SHIFT=100`, next to two
+demos from another checkout) each served `/state` within 2 s, and SIGINT left no listener and no fake.
