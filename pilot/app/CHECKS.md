@@ -1023,3 +1023,46 @@ Run by the coordinator, not the builder.
   - `/chat new` changed the URL to `?chat=c-072b67`. "Task: call the pharmacy about the receipts." produced task-12 (proposed, `fromChat: c-072b67`), and the chat took a title from its first message.
   - `.pilot-demo/transcript.jsonl` (the main chat) stayed byte-identical to the fixture; the new chat lives in `chats/c-072b67.jsonl`.
   - Clicking the "invoices" tag on task-9 opened `?chat=c-invoices` and highlighted "Task: sort the pharmacy receipts by date."
+
+# pilot-v0.13
+
+Projects that group chats. Everything runs against `dev/fake-model.js`.
+
+**Reproduce:** `bash pilot/app/dev/verify-v0.13.sh`. It has 45 checks; one of them runs the 28 checks of
+`browser-check.js v13` (26 + 2 global). It ends with `ALL v0.13 CHECKS PASSED` and exits non-zero on failure.
+- Own ports: server 4920, fakes 5921/5922; browser part 4865/5866/5867 and Chrome 9443; demo part shifted +300
+  (5090/6100/6101). None of them is a port of a demo shifted by 100 or 300.
+- Own throwaway dirs: `.pilot-verify-v13/` (single dir), `.pilot-verify-v13h/` (a projects home), `.pilot-verify-v13ref/`
+  (the default dir, listed by reference), `.pilot-verify-v13b/` (browser), `.pilot-demo-verify13/`. It never touches
+  `.pilot/`, `pilot/app/projects/` or a running demo, and it checks that `projects/` is unchanged.
+- The fixture is generated: `node dev/make-fixture-v13.js` (deterministic; health insurance claim = the v0.12 fixture
+  byte for byte).
+- The browser part alone: `node dev/browser-check.js v13` (`SHOT_DIR=<dir>` saves start, switch, new project, drawer,
+  light).
+
+## Definitions
+
+| Term | Definition |
+|---|---|
+| project | a pilot dir, exactly as before: its own chats, `state.json`, `rules.json`, `modules.json`, `roles.json` (pins), `flags.json`, `frames.json`, `metrics.jsonl` |
+| single-dir mode | no `PILOT_HOME`: one project, `PILOT_DIR` or `.pilot/`; no project UI, nothing about projects written |
+| projects home | `PILOT_HOME` (or `pilotHome` in the config), inside `pilot/app/`; documented default `projects/` (`npm run projects`) |
+| `projects.json` | `{rev, projects: [{id, name, dir, createdAt, archived?}]}`; `dir` relative to the home; created on the first `/project new`, rename or archive; missing = one project, the default dir by reference |
+| by reference | a `dir` that is not a sub-dir of the home (e.g. `../.pilot`): used where it is, never copied, moved or created |
+| the project of a request | `?project=<id>` or `project` in the JSON body; missing = the first listed project not archived; unknown or a missing dir = 404 |
+| open project | used since the server started (`server_start` written then); watched while at least one tab has its `/events` open, unwatched 5 s after the last one left |
+
+## Checks
+
+| # | Check | How (section of `verify-v0.13.sh`) |
+|---|---|---|
+| 1 | **Single-dir mode, byte for byte.** A copy of the v0.12 project without `PILOT_HOME`: `/state` has `projects.home` false and one project; an SSE client, `/projects` and a refused `/project new` (400). After the run: every file except `metrics.jsonl` hashes the same, and `metrics.jsonl` only grew at its end. There is no `projects.json`, no home dir, and `pilot/app/projects/` is unchanged. `?project=<its id>` → 200, another → 404. A turn writes what v0.12 wrote. | 1 |
+| 2 | **Lazy `projects.json`, references.** An empty home with `PILOT_DIR` = a copy of the v0.12 project: one project, that dir by reference (`../.pilot-verify-v13ref`). A turn goes into its `transcript.jsonl`, and still there is no `projects.json`. `/project new Move flat` → `projects.json` rev 1 `[reference, move-flat]`. `move-flat/rules.json` = `rules.example.json` byte for byte. The referenced dir keeps its inode, its transcript only grew at the end, and the home holds only `projects.json` and `move-flat/`. `project_new` is logged. The same name again → `move-flat-2`; an existing dir `tax/` is never reused (`tax-2`). | 2 |
+| 3 | **Isolation.** A task proposed in move-flat lands in its `state.json` only, and `/state` of the other project never shows it. The model sees only move-flat's chat. `/rules` counts per project. `/model chat morrow` and `/flag settled-input on` in move-flat write its `roles.json` / `flags.json` only, and the other project stays unpinned and off. `/stats` is per project. An unknown project → 404 on state, events, chat, command, answer and move. | 3 |
+| 4 | **SSE and watchers.** Two probes, one per project. A turn and a hand edit in move-flat → `change` for transcript and state on the move-flat probe, and only `hello` on the other. A hand edit while a tab is open → `file_edit`. 5 s after the last tab left, a hand edit logs no `file_edit` but `/state` still shows it as a hand edit (`prov`). A new tab starts the watcher again and gets the change. `/project rename` → `change projects.json` on the open tab. | 4 |
+| 5 | **Rename, archive, unarchive.** `project_rename {was, by: user}`. `/project archive` of the current project → `archived: true`, `project` = the first listed, every file unchanged. `/projects` hides it ("1 archived"), `/projects all` shows it, and it still opens by its id. The last listed project cannot be archived. Unarchive. `/project <prefix>` switches. | 5 |
+| 6 | **Path safety and broken files.** Hand-added entries outside `pilot/app/`, with a bad id or with the home itself are not listed (404). A missing dir is listed as missing, answers 404 and is not created. A broken `projects.json` → the last good list, `error` in `/state`, `/project new` refused, the file not overwritten. `PILOT_HOME=../..` is refused at start. Nothing was deleted. | 6 |
+| 7 | **Browser** (`browser-check.js v13`, real mouse clicks). `/` → `?project=health-insurance-claim`. The sidebar groups chats under two projects (current marked, its three chats, the other project's two), the bar says "projects", "+ new project" is shown, and the title bar and the tab title say "health insurance claim / letter". At 1280 px headers fit and there is no horizontal scroll. **Switch:** a click on "flat search" under move flat → `?project=move-flat` and that board (four tasks, no map); `project_switch` is logged in move flat only; Back returns to the first board. **Two tabs:** tab 2 at `?project=health-insurance-claim&chat=c-invoices`. **New chat in another project:** "+ new chat" under move flat → `?project=move-flat&chat=c-…`, listed in move flat's `chats.json` only. A task sent there lands on move flat's board and `state.json` only; tab 2's board is unchanged. A reload stays. **New project:** "+ new project" fills `/project new `; "tax return" → `?project=tax-return`, its dir and `rules.json`, third in `projects.json`, an empty workbench, current in the sidebar. **Collapse** a header (kept across a reload; expands again). **Alt+S** → the current chat of the current project; ↑ → its "+ new chat"; Escape → input. **820 px:** a closed drawer; ☰ opens it (fixed, three projects, no horizontal scroll); a chat of another project picked there opens it and the drawer closes. **Archive** `/project archive tax return` → behind "archived projects: 1 (show)", the dir stays. Light mode keeps the current-project marker. Tab 2 is still where it was. No page errors, no outside requests. | 7 |
+| 8 | `npm run demo -- v0.13` (shifted +300) serves within 30 s: two projects (4 and 2 chats), the first one's board (21 items), and move flat's own board (5 items, kanban). The try lines mention the board change, "+ new chat", "+ new project" and a second tab. Ctrl+C leaves no process. `make-fixture-v13.js` is deterministic, and health insurance claim is the v0.12 fixture byte for byte. | 8 |
+
+**Everything:** `cd pilot/app && npm run verify` (p0, p1, p2, v0.3–v0.13, browser p1 + p2).

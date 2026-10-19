@@ -4,6 +4,110 @@ P0 to P2 (skeleton, model roles, growth controller with consent and the index pa
 baseline, merged before the numbered iterations started; see `CHECKS.md` (# P0, # P1, # P2). Iterations are
 tagged `pilot-v0.N` by the coordinator; each one is runnable with `npm run demo -- v0.N`.
 
+## pilot-v0.13
+
+Projects that group chats, as Miro decided: projects have chats, and the chats of a project share its board. v0.12 built
+chats inside one project (one pilot dir). Now there can be several projects, and each one is its own pilot dir with its
+own chats, board, rules, panes, pins, flags, frames and metrics. Still untested with a real model (fakes only).
+
+**Adds**
+- **A project is a pilot dir, unchanged.**
+  - `project.js` (`createProject(dir)`) holds everything that works on one dir. That code was the body of `server.js`
+    around one module-level `PILOT`. It moved as it was, except for `watch()`/`unwatch()`, `start()` (server_start),
+    `chatTurn()` and the return value.
+  - Every project therefore has its own caches, last good versions, write chain, extraction/frame/title queues, watcher
+    and SSE clients. Two projects never share any of them.
+  - `server.js` keeps the config, the HTTP router and the list of open projects.
+- **Two modes.**
+  - **Single-dir mode** (no `PILOT_HOME`; started as before with `PILOT_DIR` or the default `.pilot/`): the server has one
+    project, that dir. It is opened and watched from the start, exactly as before. Nothing about projects is written:
+    no `projects.json`, no home, the page and the URL look as in v0.12. `/projects` names the one project and says how to
+    get several; `/project new` is refused and changes nothing.
+  - **Home mode** (`PILOT_HOME=<dir>` relative to `pilot/app/`, or `pilotHome` in the config; documented default
+    `projects/`, gitignored; `npm run projects` starts it): the home holds `projects.json` and one dir per project.
+- **`projects.json`** `{rev, projects: [{id, name, dir, createdAt, archived?}]}` (`projects.js` reads it; hand-editable,
+  `rev`, atomic, watched; a broken one is read as its last good version and never written).
+  - It is created lazily. Until then the home has one project, the default dir (`PILOT_DIR`, else `.pilot/`), listed
+    **by reference**. The first `/project new` (or rename, or archive) writes the file with that dir listed first, as
+    `../.pilot` say. It is never copied or moved. This is how a real `.pilot/` becomes a project.
+  - `dir` is relative to the home. A sub-dir is a project made here; any other path (e.g. `../.pilot`) is a reference.
+  - Every dir must resolve inside `pilot/app/` (as `PILOT_DIR` must), so a hand edit cannot make the server read or
+    write elsewhere. An entry outside, the home itself, a bad or repeated id, or a dir two entries share is ignored.
+  - A listed dir that does not exist answers 404 and is never created.
+- **`/project new <name>`** creates `<home>/<id>/` (id = the name as a slug: `tax-return`; `-2`, `-3` if the id or the
+  dir is taken; an existing dir is never reused) and seeds `rules.json` from `rules.example.json`. Event `project_new`
+  in the new project's `metrics.jsonl`.
+- **More commands:** `/projects [all]`, `/project` (where you are), `/project <name or id>` (an exact id wins, then an
+  exact name, then a unique prefix), `/project rename <name>`, `/project archive [project]`, `/project unarchive
+  <project>`. Events: `project_rename {was, by: user}`, `project_archive`, and `project_switch {from, to, how}` (sent by
+  the page, logged in the project it went to).
+- **No delete, only archive.** `archived: true` hides a project from the list. Its dir stays, and it still opens by its
+  URL. The last listed project cannot be archived. Archiving the project you are in takes the tab to the first one listed.
+- **Every request names its project:** `?project=<id>` or `project` in the JSON body, on `/state`, `/events`, `/chat`,
+  `/command`, `/answer`, `/move`, `/touch`, `/frame`, `/metric`. Missing = the default (the first listed project that
+  is not archived; in single-dir mode the one). Unknown = 404 (`unknownProject: true`), as an unknown chat.
+- **The URL holds project and chat** (`/?project=<id>&chat=<id>`, main omitted). `/` in home mode opens the default and
+  writes it into the URL, so a reload and a copied link stay there. Two tabs can be in two projects; Back/Forward move
+  between projects too. An unknown project in the URL falls back to the default, with a notice.
+- **SSE per project.** `GET /events?project=<id>` registers the tab with that project only: it gets that project's file
+  changes and extraction status, never another project's. One home watcher pushes `projects.json` changes to every tab.
+- **Watchers only for open projects.** A project opens on first use (`server_start` is written then). Its watchers (the
+  dir and `chats/`) start with its first tab and close 5 s after its last tab left (`UNWATCH_MS`). On the next tab they
+  start again, and the tab reloads everything on hello. Resource limits (README, "Projects"): about two `fs.watch` handles
+  per project a tab has open, plus one for the home; a project's in-memory caches stay until the server stops; a full
+  `/state` reads the chat files of every listed project for the sidebar.
+- **Per project, as the brief asks:** the board, the controller counts, `/stats`, `/why`, frames, fading, the open
+  question; pins (`roles.json` lives in the project dir; the roles and candidates come from the one config) and flags
+  (`flags.json`). Switching project switches the board.
+- **The sidebar (home mode)** groups chats under projects, like ChatGPT's projects:
+  - "+ new project" sits at the top. It puts `/project new ` into the input, so a project never starts without a name.
+  - Each project has a header. It is a button that collapses or expands the project, with a caret, the name and the
+    number of chats; collapsed headers are kept in this browser.
+  - Below each header: "+ new chat" for that project, then its chats, most recent first, each with who named it.
+  - The current project's header has the lavender edge, and the current chat inside it stays marked as in v0.12. The
+    current project's chats are the live list (SSE). The other projects' chats come from `/state` and refresh with
+    `projects.json` changes or on switch.
+  - "+ new chat" under another project starts the chat there and opens it.
+  - Archived projects sit behind "archived projects: n (show)".
+  - The bar says "projects", and the title bar and the tab title say "project / chat".
+  - The sidebar is open by default in home mode, and below 900 px it is a drawer as before. Alt+S and ↑/↓ also reach
+    the project headers and each "+ new chat".
+- **Switching project** resets the page's state for the new project: board, panes, proposals and touches, the event
+  stream. A load answered for the old project is dropped.
+- **Demo** `npm run demo -- v0.13` (ports 4790, 5800, 5801): a projects home with "health insurance claim" (the v0.12
+  project byte for byte: three chats and an archived one, its kanban) and "move flat" (two chats, its own small board:
+  four tasks and a confirmed decision, the kanban consented in its own metrics, every item in its own ledger).
+  `demo.json` `"home": true` makes `demo.js` start the server with `PILOT_HOME`. Generated by `dev/make-fixture-v13.js`
+  (deterministic).
+- **Dev:**
+  - `verify-v0.13.sh`.
+  - `browser-check.js v13`; scenarios can now start a server with `PILOT_HOME` (`ENV.home`).
+  - `sse-probe.js` takes `SSE_PROJECT=<id>`.
+
+**Why**
+- Miro's decision (projects with chats; chats share the project's board) and the v0.12 question "where do chats live once
+  there are projects?": a project = a pilot dir keeps every file as it is. `chats.js`, `stats.js` and `why.js` already
+  took the dir, and nothing inside a pilot dir changes.
+- **Why a factory, not a "current project" variable:** the handlers `await` (streaming, extraction in the background), so
+  a swapped global would let two projects interleave their writes.
+- **Why the default dir by reference and a lazy `projects.json`:** a real `.pilot/` must never be moved or rewritten. The
+  same pattern as main in `chats.json`: the first project command is the only moment anything is written, and it only
+  adds a file.
+- **Why single-dir mode stays exactly as it was:** every earlier verify script and demo starts the server that way. Home
+  mode switches on only with `PILOT_HOME`, never because a `projects/` happens to exist.
+- **Why watchers close:** the brief asks for one watcher per open project. With many projects, watching all of them would
+  cost file handles for nothing; a tab that comes back reloads everything anyway.
+
+**Deliberately does not**
+- No delete, no moving or copying of a project dir, no import of a dir from outside `pilot/app/`.
+- No rename or archive from the sidebar (commands or a hand edit), no drag to reorder projects, no search.
+- No moving a chat or an item between projects; no board across projects.
+- No live push of another project's chat list (SSE isolation): it refreshes on `projects.json` changes and on switch.
+- No per-project config (the roles and candidates are shared; only the pins are per project).
+- No project UI in single-dir mode, so every earlier layout check is unchanged.
+- No `file_edit` events for a project no tab has open. Hand edits made then are still shown as "you (file edit)",
+  because authorship comes from the ledger.
+
 ## pilot-v0.12
 
 Several chats in one project, with a sidebar like ChatGPT's, asked for by Miro. His decision: projects have chats, and the

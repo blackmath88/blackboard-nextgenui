@@ -1,6 +1,8 @@
-# CLI Pilot v1 (steps P0 to P4 + P5 metrics, iteration pilot-v0.12)
+# CLI Pilot v1 (steps P0 to P4 + P5 metrics, iteration pilot-v0.13)
 
-**Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.12` (several chats in one project: a sidebar
+**Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.13` (projects that group chats: the sidebar
+lists projects with their chats, each project has its own board, the URL says `?project=<id>&chat=<id>`, "+ new project";
+v0.12, `npm run demo -- v0.12`: several chats in one project: a sidebar
 like ChatGPT's, "+ new chat", the URL says `?chat=<id>`, and all chats share one board, where each card names its chat;
 v0.11, `npm run demo -- v0.11`: the kanban is drag and drop, a card to another column or place, or Alt+arrows on a focused card; the move is yours, written to `state.json`, and
 `/why task-N` lists it; v0.10, `npm run demo -- v0.10`: after a turn the model may
@@ -62,6 +64,11 @@ In the page, type a message and press Enter. Lines starting with `/` are command
 | `/chat <title or id>` | switch this tab to that chat (the URL says `?chat=<id>`) |
 | `/chat rename <title>` | name the chat you are in (shown as named by you) |
 | `/chat archive [chat]` / `/chat unarchive <chat>` | hide a chat from the list / bring it back; nothing is deleted, main cannot be archived |
+| `/projects [all]` | the projects (pilot-v0.13, only with `PILOT_HOME`; `all` adds the archived ones); without it, the one project |
+| `/project new <name>` | start a project: a new dir in the projects home with `rules.json` seeded (`projects.json` is created on the first one) |
+| `/project <name or id>` | switch this tab to that project (the URL says `?project=<id>`) |
+| `/project rename <name>` | name the project you are in |
+| `/project archive [project]` / `/project unarchive <project>` | hide a project from the list / bring it back; nothing is deleted |
 | `/help` | list commands |
 
 **Growth.** After each turn a deterministic controller checks `.pilot/rules.json` (seeded from
@@ -230,6 +237,36 @@ complete reply (after extraction), the `frame` role (in the config like every ro
   CHANGELOG.md # pilot-v0.12.
 - **Archive, never delete.** `/chat archive` hides a chat; its file stays and its messages still count.
 
+**Projects (pilot-v0.13).** A project is a pilot dir, exactly as above: its own chats, board, rules, panes, pins
+(`roles.json`), flags, frames and metrics. Switching project switches the board.
+- **Start with several projects:** `npm run projects` (= `PILOT_HOME=projects node server.js`; `projects/` is gitignored),
+  or any `PILOT_HOME=<dir>` inside `pilot/app/`, or `"pilotHome"` in the config. Without it the server is in
+  **single-dir mode**: one project (`PILOT_DIR` or `.pilot/`), exactly as before, and nothing about projects is written.
+- **Files.** The home holds `projects.json` (`{rev, projects: [{id, name, dir, createdAt, archived?}]}`, hand-editable;
+  `dir` is relative to the home) and one dir per project made with `/project new`.
+  - `projects.json` is created by the first `/project new`, rename or archive. Until then the home shows one project:
+    your default dir (`PILOT_DIR`, else `.pilot/`), **by reference**. The file then lists it first as e.g. `../.pilot`.
+    A referenced dir is used where it is, never copied, moved or created. This is how an existing `.pilot/` becomes a
+    project.
+  - Every dir must stay inside `pilot/app/`; other entries are ignored.
+  - A broken `projects.json` is read as its last good version and never written.
+- **The sidebar** groups chats under projects:
+  - "+ new project" at the top puts `/project new ` in the input; type the name and press Enter.
+  - Each project has a header (a button: collapse or expand; kept in this browser), then "+ new chat", then its chats.
+  - The current project and chat are marked.
+  - Archived projects sit behind "archived projects: n (show)".
+- **The URL holds both** (`/?project=<id>&chat=<id>`), so a reload, Back/Forward and two tabs in two projects work.
+- **Live files:** a tab gets only the events of its own project, plus `projects.json` changes.
+- **No delete:** `/project archive` hides a project; its dir stays.
+- **Resource limits.**
+  - A project is opened on first use. While at least one tab has it open, it costs two `fs.watch` handles (its dir and
+    `chats/`); the home costs one more. A project's watchers close 5 s after its last tab left.
+  - An opened project's caches (its parsed `metrics.jsonl`, last good files) stay in memory until the server stops.
+  - A full `/state` reads the chat files of every listed project, for the sidebar's chat lists. Fine for dozens of
+    projects; archive the ones you do not use.
+  - With no tab open, hand edits are not logged as `file_edit` events. They still show as "you (file edit)", because
+    authorship comes from the ledger.
+
 The status bar shows the active model per role; `frontier→morrow` means the configured candidate
 failed and the next one answered. Every model attempt is logged to `.pilot/metrics.jsonl`.
 
@@ -271,16 +308,17 @@ node -e 'const f=".pilot/rules.json",fs=require("fs"),r=JSON.parse(fs.readFileSy
 ## Demos and checks
 
 `npm run demo -- <version>` (`scripts/demo.js`) wipes and seeds a throwaway `.pilot-demo/` from
-`demo/fixtures/<version>/`, starts the fakes and the server on demo ports (v0.3: 4750, 5751, 5752; v0.4: 4754, 5754, 5755; v0.5: 4758, 5758, 5759; v0.6: 4764, 5764, 5765; v0.7: 4768, 5768, 5769; v0.8: 4772, 5772, 5773; v0.9: 4776, 5778, 5779; v0.10: 4778, 5783, 5784; v0.11: 4782, 5788, 5789; v0.12: 4786, 5794, 5795), prints the URL
+`demo/fixtures/<version>/`, starts the fakes and the server on demo ports (v0.3: 4750, 5751, 5752; v0.4: 4754, 5754, 5755; v0.5: 4758, 5758, 5759; v0.6: 4764, 5764, 5765; v0.7: 4768, 5768, 5769; v0.8: 4772, 5772, 5773; v0.9: 4776, 5778, 5779; v0.10: 4778, 5783, 5784; v0.11: 4782, 5788, 5789; v0.12: 4786, 5794, 5795; v0.13: 4790, 5800, 5801, a projects home started with `PILOT_HOME`), prints the URL
 and what to try. Ctrl+C stops everything. An unknown version lists the available ones. It never touches `.pilot/`.
 
 `npm run verify` (`scripts/verify-all.sh`) runs every `dev/verify-*.sh` and the browser checks and prints a summary.
 It refuses to start while `pilot/app/.pilot/` exists, because the P0–P2 checks wipe it.
-`dev/verify-v0.3.sh` to `verify-v0.12.sh` use their own ports and dirs and are safe next to a running demo.
+`dev/verify-v0.3.sh` to `verify-v0.13.sh` use their own ports and dirs and are safe next to a running demo.
 The v0.6 demo fixture is generated by `node dev/make-fixture-v06.js` (synthetic, every line `"fixture": true`), the v0.8
 one by `node dev/make-fixture-v08.js` (from the v0.7 fixture), the v0.9 one by `node dev/make-fixture-v09.js` (from v0.8),
 the v0.10 one by `node dev/make-fixture-v10.js` (from v0.9), the v0.11 one by `node dev/make-fixture-v11.js` (from v0.10),
-the v0.12 one by `node dev/make-fixture-v12.js` (from v0.11; it has a `chats/` folder, which `demo.js` copies too).
+the v0.12 one by `node dev/make-fixture-v12.js` (from v0.11; it has a `chats/` folder, which `demo.js` copies too), the v0.13
+one by `node dev/make-fixture-v13.js` (a projects home: v0.12 byte for byte as one project, plus "move flat").
 `node dev/contrast-check.js` checks the palette (WCAG AA, both themes).
 
 The older checks (each starts and stops everything itself and **wipes `.pilot/` first**;
@@ -301,6 +339,7 @@ bash pilot/app/dev/verify-v0.9.sh           # own ports/dirs; settled-input flag
 bash pilot/app/dev/verify-v0.10.sh          # own ports/dirs; frame proposals: closed FrameIntent, apply/dismiss/reset, rejections, pins/stall, /why; browser-check.js v10
 bash pilot/app/dev/verify-v0.11.sh          # own ports/dirs; kanban moves: order rule, POST /move, stale/rejected, frame reset, /why; browser-check.js v11 (real drags, Alt+arrows)
 bash pilot/app/dev/verify-v0.12.sh          # own ports/dirs; several chats: lazy chats.json, main untouched, shared board, project-wide counts, /why; browser-check.js v12
+bash pilot/app/dev/verify-v0.13.sh          # own ports/dirs; projects: single-dir mode byte for byte, lazy projects.json, references, isolation, SSE per project; browser-check.js v13
 ```
 
 To start over by hand, stop the server and delete `pilot/app/.pilot/`.
@@ -310,7 +349,7 @@ To start over by hand, stop the server and delete `pilot/app/.pilot/`.
 | Method | Path | Does |
 |---|---|---|
 | GET | `/` | the page (only files under `public/` are served) |
-| GET | `/state` | pilot-v0.12: `?chat=<id>` (missing = main, unknown = 404) picks the chat whose lines are `transcript` / `total`; the part `chats.json` is `chats {exists, rev, list: [{id, file, title, titleBy, titleModel, createdAt, lastActivity, messages, lines, archived}]}`; `pendingLine {chat, line}` with the modules part; items carry `chat` once there is `chats.json`. Before: `{transcript: last 500 lines, total, turn, models, panes (faded ones included), faded, pending, pendingKind, answers, removals, modulesRev, paneInfo (with fade), items (with prov when hand-edited), stateRev, stateError, flags (pilot-v0.9: {settledInput, settleMs, source, rev}; pilot-v0.10 adds frameProposals, frameSource), frames (pilot-v0.10: {rev, pending, applied, resets}), extracting, framing, fileErrors}`; `?only=state.json,modules.json,flags.json,…` returns only the parts of those files (plus `extracting`, `fileErrors`) |
+| GET | `/state` | pilot-v0.13: every endpoint takes `?project=<id>` (or `project` in the JSON body; missing = the default, unknown = 404 `{unknownProject: true}`); `/state` adds `project` and the part `projects.json` = `projects {home, exists, rev, current, list: [{id, name, dir, reference, archived, missing, chats, lastActivity}]}`. pilot-v0.12: `?chat=<id>` (missing = main, unknown = 404) picks the chat whose lines are `transcript` / `total`; the part `chats.json` is `chats {exists, rev, list: [{id, file, title, titleBy, titleModel, createdAt, lastActivity, messages, lines, archived}]}`; `pendingLine {chat, line}` with the modules part; items carry `chat` once there is `chats.json`. Before: `{transcript: last 500 lines, total, turn, models, panes (faded ones included), faded, pending, pendingKind, answers, removals, modulesRev, paneInfo (with fade), items (with prov when hand-edited), stateRev, stateError, flags (pilot-v0.9: {settledInput, settleMs, source, rev}; pilot-v0.10 adds frameProposals, frameSource), frames (pilot-v0.10: {rev, pending, applied, resets}), extracting, framing, fileErrors}`; `?only=state.json,modules.json,flags.json,…` returns only the parts of those files (plus `extracting`, `fileErrors`) |
 | GET | `/events` | Server-Sent Events: `hello {revs, extracting}`, then `change {file, rev[, error]}` per changed file and `status {extracting}` |
 | POST | `/chat` | `{text, chat?}`: appends the user line to that chat (pilot-v0.12; missing = main, unknown = 404), streams the reply (the model gets only that chat's history) as `text/plain`, appends the assistant line. pilot-v0.12: `/command`, `/answer`, `/move`, `/touch`, `/frame` take `chat` too; their system lines go there |
 | POST | `/command` | `{text: "/model chat morrow"}` → `{ok, lines}` (`/state.models.<role>` has `active`, `pinned`, `last`, `candidates`, `local`) |

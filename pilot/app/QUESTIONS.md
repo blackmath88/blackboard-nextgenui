@@ -224,3 +224,22 @@ This build keeps chats inside the pilot dir (`chats.json`, `chats/`). `chats.js`
 as a parameter; the server still has one `PILOT` and module-level helpers built on it.
 - Blocks: v0.13 design. Options: a project = a pilot dir (`projects/<id>/` each with its own `chats.json`, board and
   modules); or one dir with several boards. The first keeps every file as it is now.
+
+## 2026-10-19 (v0.13) Should a project have its own model config?
+Pins are per project (`roles.json` in its dir), but the roles and candidates come from the one config the server was
+started with. A project that must stay local can pin its roles to local candidates, but it cannot remove a cloud
+candidate for itself.
+- Blocks: nothing. Options: keep; an optional `pilot.config.json` in the project dir that narrows the candidates (never
+  adds); or a per-project `localOnly: true` in `projects.json`.
+
+## 2026-10-19 (v0.13) Should the default project be the most recent one?
+`/` opens the first listed project that is not archived (file order of `projects.json`), not the one you used last. The
+sidebar lists projects in file order too, so headers do not jump around.
+- Blocks: nothing. Options: keep; open the most recently active project; or remember the last project per browser (the
+  URL would still win).
+
+## 2026-10-19 (v0.13) Other projects' chat lists are not live
+SSE is per project, so the sidebar's lists of the other projects refresh only on a `projects.json` change or a switch.
+A chat started in project B from another tab shows in project A's sidebar only after that.
+- Blocks: nothing. Options: keep (isolation as the brief asks); a small home-level event `activity {project}` without
+  any file content; or poll the projects part every minute.

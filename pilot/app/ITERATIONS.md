@@ -111,3 +111,25 @@ date, old plan, new plan and why.
     never changes `transcript.jsonl`, and the chat log stays a conversation.
 - Why: the brief's two hard lines are that a real `transcript.jsonl` is never touched and that every earlier check and
   demo still passes on a single-chat dir.
+
+## 2026-10-19 (v0.13) Projects: smaller choices made while building
+- Old plan (brief): a projects home with `projects.json`, a pilot dir per project, the single dir unchanged without
+  `PILOT_HOME`, an existing `.pilot/` listable by reference.
+- New plan, built: the same, with these choices.
+  - **The server code moved into a factory (`project.js`, `createProject(dir)`)** instead of switching a module-level
+    `PILOT` per request. The handlers await (a streamed reply, extraction in the background), so a swapped global would
+    let two projects interleave their writes and caches. The move was checked first on its own: verify-v0.5 and v0.12
+    (with their browser checks) passed before any project feature was written.
+  - **Home mode only with `PILOT_HOME`** (or `pilotHome` in the config), never because `projects/` exists. Otherwise an
+    earlier script or demo could start in the wrong mode on a machine where someone keeps projects.
+  - **Without `projects.json`, the home shows the default dir by reference** and lists it first when the file is
+    created, as main in `chats.json`. Scanning the home for sub-dirs was considered and left out: `projects.json` is the
+    one list, as `chats.json` is for chats.
+  - **"+ new project" fills `/project new ` into the input** instead of a dialog: no project without a name, no
+    `prompt()`, and it stays a terminal.
+  - **Watchers close 5 s after a project's last tab left** (not at once), so a reload does not tear the watcher down
+    and start it again.
+  - **Switching project rebuilds the panes** even when the new project has none. The first build kept the old kanban
+    on an empty project; the browser check caught it.
+- Why: the brief's hard lines are that a real `.pilot/` is never moved or rewritten and that every earlier check and demo
+  still passes in single-dir mode.
