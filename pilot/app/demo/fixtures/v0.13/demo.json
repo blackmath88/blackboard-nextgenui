@@ -1,0 +1,13 @@
+{
+  "home": true,
+  "fakes": [
+    { "name": "frontier", "port": 5800 },
+    { "name": "morrow", "port": 5801 }
+  ],
+  "try": [
+    "Open {url}. The sidebar groups chats under projects: \"health insurance claim\" (current, its three chats from v0.12) and \"move flat\" (two chats). The URL says ?project=health-insurance-claim. Click \"flat search\" under move flat: the board changes to that project's kanban (four tasks), the URL says ?project=move-flat; Back returns.",
+    "Under move flat press \"+ new chat\" and send \"Task: order a new kitchen lamp.\" The card lands on move flat's board only; switch back to health insurance claim and it is not there. Click a project header to collapse or expand it.",
+    "Press \"+ new project\" (it puts /project new in the input), type a name, Enter: a new project with an empty board and its own rules.json in {dir}/<id>/; projects.json lists it. /projects lists them all; /project rename, /project archive (nothing is deleted).",
+    "Open {url}/?project=move-flat in a second tab: each tab stays in its project, and a card added in one project never shows in the other tab. Below 900 px the sidebar is a drawer (☰)."
+  ]
+}

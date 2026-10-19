@@ -292,6 +292,20 @@ body.dragging-card, body.dragging-card * { cursor: grabbing !important; user-sel
   display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; text-align: left; }
 .chat-tag:hover { color: var(--text); border-bottom-color: var(--lavender); }
 .ln.controller .asked-in { display: block; color: var(--muted); font-size: 11.5px; }
+/* pilot-v0.13: projects (only with PILOT_HOME). A header per project (a button: caret, name, chat count) with its chats
+   below; the current project's header has the same lavender edge as the current chat. Existing tokens only. */
+.projects { display: flex; flex-direction: column; gap: 6px; }
+.proj { display: flex; flex-direction: column; gap: 4px; }
+.proj-head { display: flex; align-items: baseline; gap: 6px; width: 100%; background: transparent; border: 0; border-left: 3px solid transparent;
+  color: var(--text); font: 600 13px var(--mono); padding: 3px 6px; cursor: pointer; text-align: left; }
+.proj-head .caret { color: var(--muted); flex: none; }
+.proj-head .pn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-head .pc { color: var(--muted); font-weight: 400; font-size: 11px; white-space: nowrap; flex: none; }
+.proj-head:hover .pn { text-decoration: underline; text-decoration-color: var(--lavender); }
+.proj-head[aria-current="true"] { background: var(--base); border-left-color: var(--lavender); }
+.proj-head:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.proj-body { display: flex; flex-direction: column; gap: 4px; padding-left: 10px; }
+.proj-body .new-chat { font-size: 12px; }
 @media (max-width: 899.98px) {
   .shell.with-chats { max-width: 1280px; --chat-fr: 1.6fr; }
   .chats { position: fixed; z-index: 60; top: 0; bottom: 0; left: 0; width: min(18rem, 85vw); margin: 0; box-shadow: 0 0 24px var(--shadow); }

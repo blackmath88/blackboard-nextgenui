@@ -1,0 +1,6 @@
+{"id":"m-g007","ts":"2026-10-17T09:00:10.000Z","role":"user","text":"How many boxes do we need for two rooms? Task: collect boxes from the supermarket.","model":null,"fixture":true}
+{"id":"m-g008","ts":"2026-10-17T09:00:35.000Z","role":"assistant","text":"[fixture] About forty. Task: collect boxes from the supermarket. Books go in small boxes.","model":"frontier","fixture":true}
+{"id":"m-g009","ts":"2026-10-17T09:00:39.000Z","role":"controller","text":"3 tasks have come up. Track them on a board?","model":null,"module":"kanban","fixture":true}
+{"id":"m-g010","ts":"2026-10-17T09:01:00.000Z","role":"system","text":"kanban: yes, pane added","model":null,"fixture":true}
+{"id":"m-g011","ts":"2026-10-17T09:02:00.000Z","role":"user","text":"Task: label every box with its room.","model":null,"fixture":true}
+{"id":"m-g012","ts":"2026-10-17T09:02:20.000Z","role":"assistant","text":"[fixture] Yes. Task: label every box with its room. It saves an evening on the other side.","model":"frontier","fixture":true}

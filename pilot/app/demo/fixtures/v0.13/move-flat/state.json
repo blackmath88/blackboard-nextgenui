@@ -1,0 +1,73 @@
+{
+  "rev": 8,
+  "items": [
+    {
+      "id": "dec-1",
+      "kind": "decision",
+      "text": "we take the flat on Lindenstrasse",
+      "status": "confirmed",
+      "author": "model",
+      "model": "morrow",
+      "quote": "Decision: we take the flat on Lindenstrasse.",
+      "fromMessage": "m-g001",
+      "createdAt": "2026-10-16T18:01:23.000Z",
+      "decidedAt": "2026-10-16T18:02:00.000Z",
+      "decidedBy": "user"
+    },
+    {
+      "id": "task-1",
+      "kind": "task",
+      "text": "give notice on the old flat by Friday",
+      "status": "confirmed",
+      "author": "model",
+      "model": "morrow",
+      "quote": "Task: give notice on the old flat by Friday.",
+      "fromMessage": "m-g003",
+      "createdAt": "2026-10-16T18:03:28.000Z",
+      "column": "doing",
+      "decidedAt": "2026-10-16T18:04:00.000Z",
+      "decidedBy": "user",
+      "order": 1,
+      "movedBy": "user",
+      "movedAt": "2026-10-17T09:03:00.000Z"
+    },
+    {
+      "id": "task-2",
+      "kind": "task",
+      "text": "book a moving van for the 29th",
+      "status": "proposed",
+      "author": "model",
+      "model": "morrow",
+      "quote": "Task: book a moving van for the 29th.",
+      "fromMessage": "m-g005",
+      "createdAt": "2026-10-16T18:05:25.000Z",
+      "column": "todo"
+    },
+    {
+      "id": "task-3",
+      "kind": "task",
+      "text": "collect boxes from the supermarket",
+      "status": "proposed",
+      "author": "model",
+      "model": "morrow",
+      "quote": "Task: collect boxes from the supermarket.",
+      "fromMessage": "m-g007",
+      "createdAt": "2026-10-17T09:00:38.000Z",
+      "fromChat": "c-boxes",
+      "column": "todo"
+    },
+    {
+      "id": "task-4",
+      "kind": "task",
+      "text": "label every box with its room",
+      "status": "proposed",
+      "author": "model",
+      "model": "morrow",
+      "quote": "Task: label every box with its room.",
+      "fromMessage": "m-g011",
+      "createdAt": "2026-10-17T09:02:23.000Z",
+      "fromChat": "c-boxes",
+      "column": "todo"
+    }
+  ]
+}

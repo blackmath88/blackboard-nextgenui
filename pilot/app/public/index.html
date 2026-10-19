@@ -9,12 +9,16 @@
 <body>
 <main class="shell" id="shell">
  <nav class="chats" id="chats" aria-label="Chats" hidden>
-  <div class="bar"><span>chats</span><button type="button" class="why" id="chats-close" aria-label="close the chat list">close</button></div>
+  <div class="bar"><span id="chats-label">chats</span><button type="button" class="why" id="chats-close" aria-label="close the chat list">close</button></div>
   <div class="chats-body">
+   <button type="button" class="key new-chat new-project" id="new-project" title="/project new <name>" hidden><kbd>+</kbd> new project</button>
+   <div class="projects" id="project-list" hidden></div>
    <button type="button" class="key new-chat" id="new-chat" title="/chat new"><kbd>+</kbd> new chat</button>
    <ul class="chat-list" id="chat-list"></ul>
    <button type="button" class="toggle" id="archived-toggle" aria-expanded="false" hidden></button>
    <ul class="chat-list archived" id="chat-archived" hidden></ul>
+   <button type="button" class="toggle" id="archived-projects-toggle" aria-expanded="false" hidden></button>
+   <ul class="chat-list archived" id="project-archived" hidden></ul>
    <p class="chats-help" id="chats-help">Alt+S here, ↑/↓, Enter; Esc back</p>
   </div>
  </nav>

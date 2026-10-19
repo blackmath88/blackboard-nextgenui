@@ -6,7 +6,7 @@
 //       waits for hello, then <runs> times: flips the status of the first item in <state.json> by hand (plain
 //       writeFileSync, like an editor), measures the time until the `change` event for state.json arrives and until
 //       GET /state shows the new status. Prints {eventMs: [...], stateMs: [...], ok}.
-// Every mode has a hard timeout, so it never hangs a verify run.
+// Every mode has a hard timeout, so it never hangs a verify run. pilot-v0.13: SSE_PROJECT=<id> listens to that project.
 'use strict';
 const fs = require('fs');
 
@@ -19,7 +19,7 @@ hardStop.unref();
 function connect(onEvent) {
   const ac = new AbortController();
   (async () => {
-    const res = await fetch(`${base}/events`, { signal: ac.signal, headers: { accept: 'text/event-stream' } });
+    const res = await fetch(`${base}/events${process.env.SSE_PROJECT ? `?project=${encodeURIComponent(process.env.SSE_PROJECT)}` : ''}`, { signal: ac.signal, headers: { accept: 'text/event-stream' } });
     const dec = new TextDecoder();
     let buf = '';
     for await (const chunk of res.body) {

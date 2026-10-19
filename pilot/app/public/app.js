@@ -44,7 +44,8 @@ const KEYS = { y: 'yes', n: 'no', a: 'always', x: 'never' };
 const WHO = { user: 'you', assistant: 'model', system: 'system', controller: 'controller', out: '' };
 const AUTHOR = { user: 'you', assistant: 'model', system: 'system', controller: 'controller' };
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-let state = { transcript: [], panes: [], pending: null, pendingKind: null, answers: {}, removals: {}, faded: [], turn: 0, items: [], extracting: false, fileErrors: {} };
+const freshState = () => ({ transcript: [], panes: [], pending: null, pendingKind: null, answers: {}, removals: {}, faded: [], turn: 0, items: [], extracting: false, fileErrors: {} });
+let state = freshState();
 let shownPanes = '';
 let selected = null;        // the proposal ArrowDown/ArrowUp from the empty input moves focus to (the newest by default)
 let seen = null;            // proposal ids already shown; a new one becomes the arrow target
@@ -56,6 +57,10 @@ const deferred = new Set(); // files changed while streaming
 let flash = null, flashTimer = null;   // short notice after a stale write
 // pilot-v0.12: the chat this tab shows (from the URL; main when none)
 let chat = new URLSearchParams(location.search).get('chat') || 'main';
+// pilot-v0.13: the project this tab shows (from the URL; null = the server's default). With PILOT_HOME the URL says
+// /?project=<id>[&chat=<id>]; a single-dir server never gets a project in the URL, so the page there is as before.
+let project = new URLSearchParams(location.search).get('project') || null;
+const scoped = (body) => (project ? { ...body, project } : body);   // every write names the project of this tab
 $('brand').insertAdjacentHTML('afterbegin', Pixel.sprite('teletype', 18, 'pilot') + ' ');
 
 function addLine(role, text, model, id, kind) {
@@ -324,7 +329,7 @@ function frameNodes(mod) {
   return nodes;
 }
 async function sendFrame(mod, id, action, fromPane) {
-  const res = await fetch('/frame', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pane: mod, id, action, rev: (state.frames || {}).rev, chat }) });
+  const res = await fetch('/frame', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(scoped({ pane: mod, id, action, rev: (state.frames || {}).rev, chat })) });
   if (!res.ok) await writeFailed(res);
   await loadState();
   if (!fromPane) return;
@@ -406,7 +411,7 @@ async function writeFailed(res) {
 }
 
 async function sendDecision(id, word, fromCard) {
-  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ itemId: id, decision: word, rev: state.stateRev, chat }) });
+  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(scoped({ itemId: id, decision: word, rev: state.stateRev, chat })) });
   if (!res.ok) await writeFailed(res);
   else if (selected === id) selected = null;
   await loadState();
@@ -440,7 +445,7 @@ function renderIndex(body) {
 function jumpTo(id) {
   if (!$(`msg-${id}`)) return;
   // Usefulness (P5): the server logs index_jump; fire and forget, a failure never blocks the jump
-  fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: 'index_jump', target: id }) }).catch(() => {});
+  fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(scoped({ event: 'index_jump', target: id })) }).catch(() => {});
   scrollToMsg(id);
 }
 function scrollToMsg(id) {
@@ -611,6 +616,7 @@ PARTS['frames.json'] = ['frames'];                                            //
 PARTS['chats.json'] = ['chats', 'turn'];                                      // pilot-v0.12: the chat list
 PARTS['modules.json'].push('pendingLine');                                    // pilot-v0.12
 PARTS['transcript.jsonl'].push('chat');
+PARTS['projects.json'] = ['projects', 'project'];                             // pilot-v0.13: the projects (and their chats)
 let reqGen = 0;
 const appliedGen = {};
 const sigs = {};
@@ -621,22 +627,31 @@ const sigOf = {
   panes: (s) => [multiChat() && JSON.stringify(((s.chats || {}).list || []).map((c) => [c.id, c.title])), (s.panes || []).join(','), (s.faded || []).join(','), JSON.stringify(s.frames), !!(s.flags && s.flags.frameProposals), s.stateRev, JSON.stringify(s.items), JSON.stringify(s.paneInfo, (k, v) => (k === 'fade'
     ? (v && v.faded ? { fadedTurn: v.fadedTurn, lastTouch: v.lastTouch && v.lastTouch.turn, fadeAfter: v.fadeAfter } : null) : v))].join('|'),
   models: (s) => JSON.stringify(s.models) + !!(s.flags && s.flags.frameProposals),
-  chats: (s) => JSON.stringify(s.chats) + chat,   // pilot-v0.12
+  chats: (s) => JSON.stringify(s.chats) + chat + JSON.stringify(s.projects) + project,   // pilot-v0.12; pilot-v0.13 projects
 };
 async function loadState(files) {
   const gen = ++reqGen;
   const list = files ? files.filter((f) => PARTS[f]) : Object.keys(PARTS);
   if (files && !list.length) return;
-  const want = chat;
-  const q = `chat=${encodeURIComponent(want)}`;
+  const want = chat, wantP = project;
+  const q = `chat=${encodeURIComponent(want)}${wantP ? `&project=${encodeURIComponent(wantP)}` : ''}`;
   const res = await fetch(files ? `/state?only=${encodeURIComponent(list.join(','))}&${q}` : `/state?${q}`);
+  if (res.status === 404 && wantP !== project) return;   // switched project meanwhile
+  if (res.status === 404 && wantP && (await res.clone().json().catch(() => ({}))).unknownProject) {   // pilot-v0.13
+    project = null; chat = 'main'; history.replaceState(null, '', '/');
+    showFlash(`no project "${wantP}" here; showing the default project`);
+    reconnectEvents();
+    return loadState();
+  }
   if (res.status === 404 && want !== 'main') {   // pilot-v0.12: a chat that is not (or no longer) in chats.json
     chat = 'main'; history.replaceState(null, '', chatUrl('main'));
     showFlash(`no chat "${want}" in this project; showing main`);
     return loadState();
   }
   const next = await res.json();
-  if (want !== chat) return;   // switched meanwhile: the answer belongs to the other chat
+  if (want !== chat || wantP !== project) return;   // switched meanwhile: the answer belongs to the other chat or project
+  // pilot-v0.13: with PILOT_HOME the URL always names the project (a reload or a copied link stays in it)
+  if (next.projects && next.projects.home && !project && next.project) { project = next.project; history.replaceState(null, '', chatUrl(chat)); }
   for (const f of list) {
     if (gen <= (appliedGen[f] || 0)) continue;
     appliedGen[f] = gen;
@@ -683,7 +698,7 @@ function partsOf(files) {
 }
 function connectEvents() {
   if (typeof EventSource !== 'function') return;
-  es = new EventSource('/events');
+  es = new EventSource(project ? `/events?project=${encodeURIComponent(project)}` : '/events');
   let wasLive = false;
   es.addEventListener('hello', () => {
     const again = wasLive; live = true; wasLive = true;
@@ -707,7 +722,7 @@ const touched = {};   // pane -> turn of the last report
 function sendTouch(mod, how, force) {
   if (!force && touched[mod] === state.turn) return;
   touched[mod] = state.turn;
-  fetch('/touch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ module: mod, how, chat }) })
+  fetch('/touch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(scoped({ module: mod, how, chat })) })
     .then((r) => r.json()).then((b) => {
       // keep the modules.json rev current, so the touch never makes a consent answer stale
       if (b && Number.isInteger(b.rev) && b.rev > (state.modulesRev || 0)) state.modulesRev = b.rev;
@@ -759,7 +774,7 @@ function moveCard(card, col, index) {
   moving++;
   moveChain = moveChain.then(async () => {
     try {
-      const res = await fetch('/move', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ itemId: id, column: col, index, rev: state.stateRev, chat }) });
+      const res = await fetch('/move', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(scoped({ itemId: id, column: col, index, rev: state.stateRev, chat })) });
       if (!res.ok) {
         const body = await res.clone().json().catch(() => ({}));
         await writeFailed(res);
@@ -882,7 +897,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 async function sendAnswer(module, word) {
-  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ module, answer: word, rev: state.modulesRev, chat }) });
+  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(scoped({ module, answer: word, rev: state.modulesRev, chat })) });
   if (!res.ok) await writeFailed(res);
   await loadState();
   input.focus();
@@ -898,10 +913,12 @@ async function runCommand(text) {
     addLine('out', ok ? `theme: ${arg}` : 'usage: /theme light|dark|auto').p.classList.toggle('err', !ok);
     return;
   }
-  const res = await fetch('/command', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, chat }) });
+  const res = await fetch('/command', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(scoped({ text, chat })) });
   const out = await res.json();
   // pilot-v0.12: /chat new, /chat <name>, /chat archive name a chat to go to; the output is shown there
-  if (out.chat && out.chat !== chat) await switchChat(out.chat, /^\/chat new\b/.test(text) ? 'new' : /^\/chat archive\b/.test(text) ? 'archive' : 'command');
+  // pilot-v0.13: /project new, /project <name>, /project archive name a project to go to
+  if (out.project && out.project !== project) await switchProject(out.project, /^\/project new\b/.test(text) ? 'new' : /^\/project archive\b/.test(text) ? 'archive' : 'command');
+  else if (out.chat && out.chat !== chat) await switchChat(out.chat, /^\/chat new\b/.test(text) ? 'new' : /^\/chat archive\b/.test(text) ? 'archive' : 'command');
   else await loadState();                        // picks up a /model system line and the new status bar
   addLine('out', text).p.classList.add('cmd');
   if (cmd === '/why' && Array.isArray(out.why)) return renderWhy(out.why, out.ok);
@@ -919,7 +936,7 @@ const settleOn = () => !!(state.flags && state.flags.settledInput);
 let offerEl = null;          // created only while the flag is on: off renders exactly the old prompt
 let settleTimer = null, lastInputAt = 0, offer = null, tabSend = null, offerSeq = 0;
 function settleMetric(event, fields) {
-  fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event, ...fields }) }).catch(() => {});
+  fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(scoped({ event, ...fields })) }).catch(() => {});
 }
 // Drops the offer. how = typed | escape logs settle_ignore; without how it just goes (blur, flag off, sent).
 function dropOffer(how) {
@@ -1039,7 +1056,7 @@ form.addEventListener('submit', async (e) => {
   p.classList.add('streaming');
   meta.textContent = 'thinking…';
   try {
-    const res = await fetch('/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, chat }) });
+    const res = await fetch('/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(scoped({ text, chat })) });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -1063,7 +1080,12 @@ form.addEventListener('submit', async (e) => {
 });
 
 // ---- pilot-v0.12: chats. The URL holds the chat (main = /), so a reload stays in it and two tabs can be in two chats.
-const chatUrl = (id) => (id === 'main' ? '/' : `/?chat=${encodeURIComponent(id)}`);
+// pilot-v0.13: with a project (PILOT_HOME) the URL is /?project=<id>[&chat=<id>]; without one, exactly as before.
+const chatUrl = (id, p = project) => {
+  const q = [...(p ? [`project=${encodeURIComponent(p)}`] : []), ...(id === 'main' ? [] : [`chat=${encodeURIComponent(id)}`])];
+  return q.length ? `/?${q.join('&')}` : '/';
+};
+const home = () => !!(state.projects && state.projects.home);   // pilot-v0.13: the server keeps several projects
 const multiChat = () => !!(state.chats && state.chats.exists);
 const chatInfo = (id) => ((state.chats && state.chats.list) || []).find((c) => c.id === id) || null;
 const chatTitle = (id) => { const c = chatInfo(id); return c ? c.title : id || 'main'; };
@@ -1072,15 +1094,16 @@ const wide = matchMedia('(min-width: 900px)');
 let drawerOpen = false;     // below 900 px: the drawer is open
 const sidebarPref = () => { try { return localStorage.getItem('pilot-sidebar'); } catch { return null; } };   // open | closed | null
 // Open: wide -> your choice (☰), else open when the project has more than one chat; narrow -> the drawer.
-const sidebarOpen = () => (wide.matches ? (sidebarPref() ? sidebarPref() === 'open' : multiChat()) : drawerOpen);
+const sidebarOpen = () => (wide.matches ? (sidebarPref() ? sidebarPref() === 'open' : multiChat() || home()) : drawerOpen);
 function layoutChats() {
   const open = sidebarOpen();
   nav.hidden = !open;
   shell.classList.toggle('with-chats', open && wide.matches);
   nav.classList.toggle('drawer', !wide.matches);
   chatsBtn.setAttribute('aria-expanded', String(open));
-  $('chat-name').textContent = multiChat() ? `· ${chatTitle(chat)}` : '';
-  document.title = multiChat() ? `${chatTitle(chat)} · CLI Pilot` : 'CLI Pilot';
+  // pilot-v0.13: with projects the title bar and the tab title name the project too
+  $('chat-name').textContent = home() ? `· ${projName(project)} / ${chatTitle(chat)}` : multiChat() ? `· ${chatTitle(chat)}` : '';
+  document.title = home() ? `${chatTitle(chat)} · ${projName(project)} · CLI Pilot` : multiChat() ? `${chatTitle(chat)} · CLI Pilot` : 'CLI Pilot';
 }
 function toggleChats(open, focus) {
   if (wide.matches) { try { localStorage.setItem('pilot-sidebar', open ? 'open' : 'closed'); } catch { /* not kept */ } }
@@ -1094,12 +1117,15 @@ function focusChats() {
   if (cur) cur.focus();
 }
 const byline = (c) => (c.titleBy === 'model' ? chip('model', `model · ${c.titleModel || '?'}`) : c.titleBy === 'you' || c.titleBy === 'you (file edit)' ? chip('you', c.titleBy) : c.titleBy || '');
-function chatLink(c) {
+// pilot-v0.13: p = another project (its chats in the sidebar): the link opens that project at this chat
+function chatLink(c, p) {
   const li = document.createElement('li');
   const a = document.createElement('a');
-  a.className = 'chat-link'; a.href = chatUrl(c.id); a.dataset.chat = c.id;
-  if (c.id === chat) a.setAttribute('aria-current', 'page');
-  a.title = `${c.title} (${c.id}, ${c.file}): ${c.messages} messages${c.titleBy ? `; named by ${c.titleBy === 'model' ? `model · ${c.titleModel || '?'}` : c.titleBy}` : ''}${c.lastActivity ? `; last activity ${c.lastActivity}` : ''}`;
+  const other = p && p.id !== project;
+  a.className = 'chat-link'; a.href = chatUrl(c.id, other ? p.id : project); a.dataset.chat = c.id;
+  if (other) a.dataset.project = p.id;
+  if (c.id === chat && !other) a.setAttribute('aria-current', 'page');
+  a.title = `${c.title} (${c.id}${c.file ? `, ${c.file}` : ''}${other ? `, project ${p.name}` : ''}): ${c.messages} messages${c.titleBy ? `; named by ${c.titleBy === 'model' ? `model · ${c.titleModel || '?'}` : c.titleBy}` : ''}${c.lastActivity ? `; last activity ${c.lastActivity}` : ''}`;
   const t = document.createElement('span'); t.className = 'ct'; t.textContent = c.title;
   const by = document.createElement('small'); by.className = 'cby';
   by.append(byline(c), `${c.titleBy ? ' · ' : ''}${c.messages} msg`, ...(c.lastActivity ? [' · ', when(c.lastActivity)] : []));
@@ -1107,7 +1133,7 @@ function chatLink(c) {
   a.addEventListener('click', (e) => {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;   // a new tab: the link does it
     e.preventDefault();
-    switchChat(c.id, 'sidebar');
+    if (other) switchProject(p.id, 'sidebar', c.id); else switchChat(c.id, 'sidebar');
   });
   li.append(a);
   return li;
@@ -1116,14 +1142,131 @@ let showArchived = false;
 function renderChats() {
   const list = (state.chats && state.chats.list) || [];
   const live = list.filter((c) => !c.archived || c.id === chat), arch = list.filter((c) => c.archived);
-  $('chat-list').replaceChildren(...live.map(chatLink));
+  $('chat-list').replaceChildren(...live.map((c) => chatLink(c)));
   const tg = $('archived-toggle');
   tg.hidden = !arch.length;
   tg.textContent = `archived: ${arch.length} (${showArchived ? 'hide' : 'show'})`;
   tg.setAttribute('aria-expanded', String(showArchived));
   $('chat-archived').hidden = !showArchived || !arch.length;
-  $('chat-archived').replaceChildren(...arch.map(chatLink));
+  $('chat-archived').replaceChildren(...arch.map((c) => chatLink(c)));
+  renderProjects();
   layoutChats();
+}
+
+// ---- pilot-v0.13: projects in the sidebar (only with PILOT_HOME), like ChatGPT's projects: a header per project
+// (a button that collapses or expands it; the current one marked), its chats below, "+ new chat" per project and
+// "+ new project" at the top. The current project's chats are the live list above (moved into its section); the other
+// projects' chats come from /state projects (read from their files; their files are not pushed to this tab). Archived
+// projects sit behind "archived projects: n (show)". Collapsed headers are kept in this browser.
+const projInfo = (id) => ((state.projects && state.projects.list) || []).find((x) => x.id === id) || null;
+const projName = (id) => { const x = projInfo(id); return x ? x.name : id || ''; };
+const collapsed = () => { try { return new Set(JSON.parse(localStorage.getItem('pilot-projects-collapsed') || '[]')); } catch { return new Set(); } };
+function setCollapsed(id, on) {
+  const c = collapsed();
+  if (on) c.add(id); else c.delete(id);
+  try { localStorage.setItem('pilot-projects-collapsed', JSON.stringify([...c])); } catch { /* not kept */ }
+}
+let showArchivedProjects = false;
+// The focused sidebar control as a key, so a re-render can put focus back on the same control.
+const navKey = (el) => (el.id ? `#${el.id}` : el.classList.contains('proj-head') ? `.proj-head[data-project="${el.dataset.project}"]`
+  : el.classList.contains('new-chat-in') ? `.new-chat-in[data-project="${el.dataset.project}"]`
+  : el.classList.contains('chat-link') ? `.chat-link[data-chat="${el.dataset.chat}"]${el.dataset.project ? `[data-project="${el.dataset.project}"]` : ':not([data-project])'}` : null);
+function projectSection(p) {
+  const cur = p.id === project, open = !collapsed().has(p.id);
+  const sec = document.createElement('section');
+  sec.className = `proj${cur ? ' current' : ''}`; sec.dataset.project = p.id;
+  const head = document.createElement('button');
+  head.type = 'button'; head.className = 'proj-head'; head.dataset.project = p.id;
+  head.setAttribute('aria-expanded', String(open));
+  if (cur) head.setAttribute('aria-current', 'true');
+  head.title = `${p.name} (${p.id}, ${p.dir}${p.reference ? ', listed by reference' : ''})${open ? ': collapse' : ': expand'}`;
+  const chatsOf = cur ? ((state.chats && state.chats.list) || []) : (p.chats || []);
+  const n = chatsOf.filter((c) => !c.archived).length;
+  const caret = document.createElement('span'); caret.className = 'caret'; caret.setAttribute('aria-hidden', 'true'); caret.textContent = open ? '▾' : '▸';
+  const name = document.createElement('span'); name.className = 'pn'; name.textContent = p.name;
+  const meta = document.createElement('small'); meta.className = 'pc'; meta.textContent = p.missing ? 'dir missing' : `${n} chat${n === 1 ? '' : 's'}`;
+  head.append(caret, name, meta);
+  head.addEventListener('click', () => { setCollapsed(p.id, open); renderChats(); });
+  const body = document.createElement('div');
+  body.className = 'proj-body'; body.hidden = !open;
+  if (cur) body.append($('new-chat'), $('chat-list'), $('archived-toggle'), $('chat-archived'));
+  else if (!p.missing) {
+    const nb = document.createElement('button');
+    nb.type = 'button'; nb.className = 'key new-chat new-chat-in'; nb.dataset.project = p.id; nb.title = `/chat new in ${p.name}`;
+    nb.innerHTML = '<kbd>+</kbd> new chat';
+    nb.addEventListener('click', () => newChatIn(p).catch((err) => addLine('system', `error: ${err.message}`)));
+    const ul = document.createElement('ul'); ul.className = 'chat-list';
+    ul.append(...chatsOf.filter((c) => !c.archived).map((c) => chatLink(c, p)));
+    body.append(nb, ul);
+  }
+  sec.append(head, body);
+  return sec;
+}
+function renderProjects() {
+  const on = home();
+  $('new-project').hidden = !on; $('project-list').hidden = !on;
+  $('chats-label').textContent = on ? 'projects' : 'chats';
+  nav.setAttribute('aria-label', on ? 'Projects and chats' : 'Chats');
+  if (!on) return;
+  const focused = nav.contains(document.activeElement) ? navKey(document.activeElement) : null;
+  const list = state.projects.list || [];
+  const shown = list.filter((x) => !x.archived || x.id === project), arch = list.filter((x) => x.archived && x.id !== project);
+  $('project-list').replaceChildren(...shown.map(projectSection));
+  const tg = $('archived-projects-toggle');
+  tg.hidden = !arch.length;
+  tg.textContent = `archived projects: ${arch.length} (${showArchivedProjects ? 'hide' : 'show'})`;
+  tg.setAttribute('aria-expanded', String(showArchivedProjects));
+  const al = $('project-archived');
+  al.hidden = !showArchivedProjects || !arch.length;
+  al.replaceChildren(...arch.map((x) => {
+    const li = document.createElement('li'), a = document.createElement('a');
+    a.className = 'chat-link'; a.href = chatUrl('main', x.id); a.dataset.chat = 'main'; a.dataset.project = x.id;
+    const t = document.createElement('span'); t.className = 'ct'; t.textContent = x.name;
+    const by = document.createElement('small'); by.className = 'cby'; by.textContent = `project · ${(x.chats || []).length} chats`;
+    a.append(t, by);
+    a.addEventListener('click', (e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); switchProject(x.id, 'sidebar'); });
+    li.append(a);
+    return li;
+  }));
+  const back = focused && nav.querySelector(focused);
+  if (back && back !== document.activeElement) back.focus();
+}
+$('archived-projects-toggle').addEventListener('click', () => { showArchivedProjects = !showArchivedProjects; renderChats(); });
+// "+ new project": the name is typed in the input (/project new <name>), so nothing is created without a name
+$('new-project').addEventListener('click', () => {
+  input.value = '/project new '; input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+  input.dispatchEvent(new Event('input'));
+  if (!wide.matches && drawerOpen) toggleChats(false);
+});
+// "+ new chat" in another project: /chat new there, then this tab opens that project at the new chat
+async function newChatIn(p) {
+  const res = await fetch('/command', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: '/chat new', chat: 'main', project: p.id }) });
+  const out = await res.json();
+  if (out.chat) await switchProject(p.id, 'sidebar', out.chat);
+  addLine('out', '/chat new').p.classList.add('cmd');
+  for (const l of out.lines || []) addLine('out', l).p.classList.toggle('err', !out.ok);
+}
+function reconnectEvents() { if (es) { es.close(); es = null; } live = false; connectEvents(); }
+
+// Switches this tab to project `id` (and chat `toChat`, main by default): the URL, the board, the panes, the chats,
+// the live files (the event stream of that project only). how (project_switch, logged in the project it goes to):
+// sidebar | command | new | archive | back | chat.
+async function switchProject(id, how, toChat, msg) {
+  const from = project;
+  if (!wide.matches && drawerOpen) { drawerOpen = false; layoutChats(); }
+  if (!id || id === from) return toChat && toChat !== chat ? switchChat(toChat, how === 'back' ? 'back' : 'sidebar', msg) : undefined;
+  project = id; chat = toChat || 'main';
+  if (how !== 'back') history.pushState({ project: id, chat }, '', chatUrl(chat));
+  state = { ...freshState(), projects: state.projects };
+  for (const k of Object.keys(sigs)) sigs[k] = null;
+  seen = null; selected = null; showArchived = false; deferred.clear(); shownPanes = null;   // null: the next render rebuilds the panes, also when the new project has none
+  for (const k of Object.keys(touched)) delete touched[k];
+  reconnectEvents();
+  if (from) fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(scoped({ event: 'project_switch', from, how })) }).catch(() => {});
+  await loadState();
+  if (msg && !scrollToMsg(msg)) addLine('out', `${msg} is not among the lines shown`).p.classList.add('err');
+  if (!msg) log.scrollTop = log.scrollHeight;
+  if (how !== 'back' && !(nav.contains(document.activeElement) && wide.matches)) input.focus();
 }
 $('archived-toggle').addEventListener('click', () => { showArchived = !showArchived; renderChats(); });
 $('new-chat').addEventListener('click', () => { runCommand('/chat new').then(() => input.focus()).catch((err) => addLine('system', `error: ${err.message}`)); });
@@ -1141,14 +1284,18 @@ async function switchChat(id, how, msg) {
     if (how !== 'back') history.pushState({ chat: id }, '', chatUrl(id));
     state.transcript = []; state.total = 0; state.pendingLine = null;
     for (const k of Object.keys(sigs)) sigs[k] = null;
-    fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: 'chat_switch', from, to: id, how }) }).catch(() => {});
+    fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(scoped({ event: 'chat_switch', from, to: id, how })) }).catch(() => {});
     await loadState();
   }
   if (msg && !scrollToMsg(msg)) addLine('out', `${msg} is not among the lines shown`).p.classList.add('err');
   if (!msg) log.scrollTop = log.scrollHeight;
   if (how !== 'back' && !(nav.contains(document.activeElement) && wide.matches)) input.focus();
 }
-window.addEventListener('popstate', () => { const id = new URLSearchParams(location.search).get('chat') || 'main'; if (id !== chat) switchChat(id, 'back'); });
+window.addEventListener('popstate', () => {
+  const q = new URLSearchParams(location.search), id = q.get('chat') || 'main', p = q.get('project');
+  if (p && p !== project) return switchProject(p, 'back', id);   // pilot-v0.13
+  if (id !== chat) switchChat(id, 'back');
+});
 
 // Alt+S (Option+S): focus the chat list, opening it if needed. Never while the chat input has text (then it is a key
 // like any other). In the list: ↑/↓ move, Enter opens (a link), Escape returns to the input (and closes the drawer).
@@ -1161,7 +1308,8 @@ document.addEventListener('keydown', (e) => {
 nav.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { e.preventDefault(); if (!wide.matches) toggleChats(false); input.focus(); return; }
   if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-  const all = [$('new-chat'), ...nav.querySelectorAll('.chat-link')].filter((x) => x.offsetParent !== null);
+  // pilot-v0.13: with projects also "+ new project", the project headers and each project's "+ new chat", in page order
+  const all = (home() ? [...nav.querySelectorAll('.new-chat, .proj-head, .chat-link')] : [$('new-chat'), ...nav.querySelectorAll('.chat-link')]).filter((x) => x.offsetParent !== null);
   const i = all.indexOf(document.activeElement);
   const to = all[Math.max(0, Math.min(all.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
   if (to) { e.preventDefault(); to.focus(); }

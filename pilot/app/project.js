@@ -1374,6 +1374,11 @@ function createProject(PILOT, { config, configPath }) {
     '/chat <title or id>        switch to that chat (this tab only; the URL says ?chat=<id>)',
     '/chat rename <title>       name the chat you are in (recorded: named by you)',
     '/chat archive [chat]       hide a chat from the list (nothing is deleted); /chat unarchive <chat> brings it back',
+    '/projects [all]            projects (pilot-v0.13, with PILOT_HOME): each has its own chats, board, rules, pins and flags',
+    '/project new <name>        start a project: a new dir in the projects home, rules.json seeded (projects.json created then)',
+    '/project <name or id>      switch this tab to that project (the URL says ?project=<id>)',
+    '/project rename <name>     name the project you are in',
+    '/project archive [project] hide a project from the list (nothing is deleted); /project unarchive <project> brings it back',
     '/help                      this list',
   ];
 

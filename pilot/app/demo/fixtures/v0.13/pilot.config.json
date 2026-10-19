@@ -1,0 +1,74 @@
+{
+  "port": 4790,
+  "stallMs": 20000,
+  "roles": {
+    "chat": {
+      "policy": "fallback",
+      "allowCloudFallback": false,
+      "candidates": [
+        {
+          "name": "frontier",
+          "local": false,
+          "baseUrl": "http://127.0.0.1:5800/v1",
+          "model": "fake-frontier",
+          "timeoutMs": 10000
+        },
+        {
+          "name": "morrow",
+          "local": true,
+          "baseUrl": "http://127.0.0.1:5801/v1",
+          "model": "fake-morrow",
+          "timeoutMs": 10000
+        }
+      ]
+    },
+    "extract": {
+      "policy": "manual",
+      "everyNTurns": 1,
+      "maxItems": 3,
+      "candidates": [
+        {
+          "name": "morrow",
+          "local": true,
+          "baseUrl": "http://127.0.0.1:5801/v1",
+          "model": "fake-morrow",
+          "structured": true,
+          "timeoutMs": 10000
+        }
+      ]
+    },
+    "frame": {
+      "policy": "manual",
+      "candidates": [
+        {
+          "name": "morrow",
+          "local": true,
+          "baseUrl": "http://127.0.0.1:5801/v1",
+          "model": "fake-morrow",
+          "structured": true,
+          "timeoutMs": 10000
+        }
+      ]
+    },
+    "title": {
+      "policy": "manual",
+      "candidates": [
+        {
+          "name": "morrow",
+          "local": true,
+          "baseUrl": "http://127.0.0.1:5801/v1",
+          "model": "fake-morrow",
+          "timeoutMs": 10000
+        }
+      ]
+    }
+  },
+  "_notes": [
+    "DEMO ONLY (npm run demo -- v0.13). The v0.12 demo config with own ports (server 4790, fakes 5800/5801); demo.js starts the server with PILOT_HOME (several projects). Every experiment is off. Untested with a real model."
+  ],
+  "experiments": {
+    "settledInput": false,
+    "settleMs": 1800,
+    "frameProposals": false
+  }
+}

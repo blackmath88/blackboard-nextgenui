@@ -20,7 +20,10 @@
 // Needs Node 22+ (global WebSocket) and Google Chrome. No dependencies.
 // v12 (pilot-v0.12 several chats): ports 4855/5856/5857, Chrome 9433, dir .pilot-verify-v12b/ seeded from demo/fixtures/v0.12/
 // (chats/ included) with its config; sidebar, new chat, card tags, /why links, two tabs, Alt+S, the drawer (SHOT_DIR=<dir>).
-// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|v07|v08|v09|v10|v11|v12|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
+// v13 (pilot-v0.13 projects): ports 4865/5866/5867, Chrome 9443, PILOT_HOME .pilot-verify-v13b/ seeded from demo/fixtures/v0.13/
+// with its config; sidebar groups, project switch (board changes), Back, new chat in another project, new project, collapse,
+// Alt+S, two tabs in two projects, the drawer, archive (SHOT_DIR=<dir>).
+// Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|v07|v08|v09|v10|v11|v12|v13|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
 'use strict';
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -42,7 +45,8 @@ function start(key, args, env = {}) {
   procs[key] = spawn(process.execPath, args, { cwd: APP, env: { ...process.env, ...env }, stdio: 'ignore' });
 }
 async function stop(key) { const p = procs[key]; if (!p) return; p.kill(); await new Promise((r) => p.exitCode !== null ? r() : p.once('exit', r)); delete procs[key]; }
-async function startServer() { start('server', ['server.js'], { PILOT_CONFIG: ENV.config, PILOT_DIR: ENV.dir }); await waitHttp(URL); }
+// pilot-v0.13: ENV.home starts the server with PILOT_HOME (a projects home) instead of PILOT_DIR
+async function startServer() { start('server', ['server.js'], { PILOT_CONFIG: ENV.config, ...(ENV.home ? { PILOT_HOME: ENV.dir, PILOT_DIR: `${ENV.dir}-default` } : { PILOT_DIR: ENV.dir, PILOT_HOME: '' }) }); await waitHttp(URL); }
 async function waitHttp(url) { for (let i = 0; i < 50; i++) { try { await fetch(url); return; } catch { await sleep(100); } } throw new Error(`${url} did not come up`); }
 
 // ---- minimal CDP client ----
@@ -1467,7 +1471,127 @@ async function v12(page) {
   check('nothing was deleted: every chat file of the fixture is still there, main byte for byte', ['chats/c-scratch.jsonl', 'chats/c-invoices.jsonl', 'chats/c-hospital.jsonl', `chats/${nc}.jsonl`].every((f) => fs.existsSync(file(f))) && Buffer.compare(mainBefore, fs.readFileSync(file('transcript.jsonl'))) === 0);
 }
 
-const SCENARIOS = { p1, p2, v03, v04, v05, v06, v07, v08, v09, v10, v11, v12 };
+async function v13(page) {
+  const file = (p, f) => path.join(APP, ENV.dir, p, f);
+  await stop('server');
+  fs.cpSync(path.join(APP, 'demo', 'fixtures', 'v0.13'), path.join(APP, ENV.dir), { recursive: true });
+  for (const f of ['demo.json', 'pilot.config.json']) fs.rmSync(path.join(APP, ENV.dir, f), { force: true });
+  await startServer();
+  const waitFor = async (expr, ms = 4000, p = page) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await p.eval(expr)) return Date.now() - t0; await sleep(20); } return null; };
+  const events = (p) => fs.readFileSync(file(p, 'metrics.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const items = (p) => JSON.parse(fs.readFileSync(file(p, 'state.json'), 'utf8')).items;
+  const shot = async (name, p = page) => { if (!process.env.SHOT_DIR) return; const r = await p.send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.SHOT_DIR, name), Buffer.from(r.result.data, 'base64')); };
+  const click = async (sel, p = page) => {
+    const b = await p.eval(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return null; el.scrollIntoView({ block: 'nearest' }); const r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+    if (!b) return false;
+    for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await p.send('Input.dispatchMouseEvent', { type, x: b.x, y: b.y, button: type === 'mouseMoved' ? 'none' : 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: type === 'mouseMoved' ? 0 : 1 });
+    return true;
+  };
+  const where = (p = page) => p.eval(`location.pathname + location.search`);
+  const board = (p = page) => p.eval(`['todo', 'doing', 'done'].map((c) => [...document.querySelectorAll('#pane-kanban .col.' + c + ' .item')].map((x) => x.dataset.id).join(',')).join(' | ')`);
+  const cards = (p = page) => p.eval(`[...document.querySelectorAll('#pane-kanban .item .text')].map((x) => x.textContent).join(' / ')`);
+  const sections = (p = page) => p.eval(`[...document.querySelectorAll('#project-list .proj')].map((s) => s.dataset.project + (s.querySelector('.proj-head').getAttribute('aria-current') === 'true' ? '*' : '') + ':' + [...s.querySelectorAll('.chat-list:not(.archived) .chat-link')].map((a) => a.dataset.chat).join(',')).join(' | ')`);
+  const curProj = (p = page) => p.eval(`(document.querySelector('.proj-head[aria-current="true"]') || {}).dataset?.project || null`);
+
+  await page.goto(URL);
+  await waitFor(`document.getElementById('meta').textContent.includes('live') && !!document.querySelector('#project-list .proj')`);
+  check('PILOT_HOME: / opens the first project and the URL names it (?project=health-insurance-claim)', await where() === '/?project=health-insurance-claim');
+  const sec = await sections();
+  check('the sidebar groups chats under projects: health insurance claim (current, its three chats) and move flat (its two chats)', sec === 'health-insurance-claim*:c-hospital,c-invoices,main | move-flat:c-boxes,main', sec);
+  check('the sidebar is open, its bar says "projects", "+ new project" at the top; the current chat is marked inside the current project', await page.eval(`!document.getElementById('chats').hidden && document.getElementById('chats-label').textContent === 'projects' && !document.getElementById('new-project').hidden && document.querySelector('.proj.current #chat-list .chat-link[aria-current="page"]').dataset.chat === 'main'`));
+  check('the title bar and the tab title name the project and the chat', await page.eval(`document.getElementById('chat-name').textContent === '· health insurance claim / letter' && document.title === 'letter · health insurance claim · CLI Pilot'`));
+  const startA = await board();
+  check('the board of health insurance claim (the v0.12 kanban)', startA === 'task-4,task-5,task-7,task-8,task-9,task-11 | task-3,task-10 | task-1,task-2', startA);
+  const lay = await page.eval(`(() => { const n = document.getElementById('chats').getBoundingClientRect(), b = document.getElementById('bench').getBoundingClientRect(); return { navRight: Math.round(n.right), benchLeft: Math.round(b.left), h: document.documentElement.scrollWidth > innerWidth, longest: Math.max(...[...document.querySelectorAll('.proj-head')].map((h) => h.scrollWidth - h.clientWidth)) }; })()`);
+  check('1280 px: the sidebar is its own column, headers fit (no overflow), no horizontal scroll', lay.navRight <= lay.benchLeft && !lay.h && lay.longest <= 0, JSON.stringify(lay));
+  await shot('v13-start.png');
+
+  // ---- switch project: the board changes ----
+  await click('.chat-link[data-project="move-flat"][data-chat="main"]');
+  await waitFor(`location.search === '?project=move-flat' && !document.querySelector('#pane-kanban .item[data-id="task-11"]') && !!document.querySelector('#pane-kanban .item[data-id="task-4"]') && !document.getElementById('pane-map') && document.getElementById('log').textContent.includes('Lindenstrasse')`);
+  const startB = await board();
+  check('a click on "flat search" under move flat: the URL says ?project=move-flat, the board is that project\'s (four tasks), its log', await where() === '/?project=move-flat' && startB === 'task-2,task-3,task-4 | task-1 | ' && await cards() === 'book a moving van for the 29th / collect boxes from the supermarket / label every box with its room / give notice on the old flat by Friday', `${startB}`);
+  check('move flat is now the current project (its header marked, its chats in the live list); no map pane there', await curProj() === 'move-flat' && await page.eval(`document.querySelector('.proj.current').dataset.project === 'move-flat' && !document.getElementById('pane-map')`));
+  await sleep(300);
+  check('metrics.jsonl of move flat: project_switch {from health-insurance-claim, to move-flat, how sidebar}; nothing of it in the other project', events('move-flat').some((e) => e.event === 'project_switch' && e.from === 'health-insurance-claim' && e.to === 'move-flat' && e.how === 'sidebar') && !events('health-insurance-claim').some((e) => e.event === 'project_switch'));
+  await shot('v13-switch.png');
+  await page.eval(`history.back()`);
+  await waitFor(`location.search === '?project=health-insurance-claim' && !!document.querySelector('#pane-kanban .item[data-id="task-11"]')`);
+  check('Back returns to health insurance claim and its board', await where() === '/?project=health-insurance-claim' && await board() === startA && await curProj() === 'health-insurance-claim');
+
+  // ---- a second tab stays in health insurance claim ----
+  const tab2 = await page.newTab();
+  await tab2.goto(`${URL}?project=health-insurance-claim&chat=c-invoices`);
+  await waitFor(`document.getElementById('meta').textContent.includes('live')`, 4000, tab2);
+  check('tab 2 at ?project=health-insurance-claim&chat=c-invoices shows that project and chat', await where(tab2) === '/?project=health-insurance-claim&chat=c-invoices' && await tab2.eval(`document.getElementById('log').textContent.includes('pharmacy receipts')`));
+
+  // ---- + new chat inside another project ----
+  await click('.new-chat-in[data-project="move-flat"]');
+  await waitFor(`/^\\?project=move-flat&chat=c-[0-9a-f]{6}$/.test(location.search)`);
+  const nc = (await where()).split('chat=')[1];
+  check('"+ new chat" under move flat: tab 1 opens move flat at a new chat (?project=move-flat&chat=c-…); its chats.json lists it, the other project\'s does not', /^c-[0-9a-f]{6}$/.test(nc || '') && JSON.parse(fs.readFileSync(file('move-flat', 'chats.json'))).chats.some((c) => c.id === nc) && !JSON.parse(fs.readFileSync(file('health-insurance-claim', 'chats.json'))).chats.some((c) => c.id === nc));
+  await page.submit('Task: order a new kitchen lamp.', 300);
+  const t = await waitFor(`!!document.querySelector('#pane-kanban .item[data-id="task-5"]')`, 6000);
+  check('the task lands on move flat\'s board (task-5, dashed, tagged with the new chat) and in move-flat/state.json only', t !== null && items('move-flat').some((i) => i.id === 'task-5' && i.text === 'order a new kitchen lamp' && i.fromChat === nc) && !items('health-insurance-claim').some((i) => /kitchen lamp/.test(i.text)), `${t} ms`);
+  await sleep(500);
+  check('tab 2 (health insurance claim) never shows it: its board is unchanged', await board(tab2) === startA && !(await cards(tab2)).includes('kitchen lamp'));
+  await page.goto(`${URL}?project=move-flat&chat=${nc}`);
+  await waitFor(`document.getElementById('meta').textContent.includes('live')`);
+  check('a reload keeps tab 1 in move flat at the new chat', await where() === `/?project=move-flat&chat=${nc}` && await curProj() === 'move-flat' && await page.eval(`document.querySelector('#chat-list .chat-link[aria-current="page"]').dataset.chat === ${JSON.stringify(nc)}`));
+
+  // ---- + new project ----
+  await click('#new-project');
+  check('"+ new project" puts /project new in the input (the name is yours to type)', await page.eval(`document.getElementById('input').value === '/project new ' && document.activeElement.id === 'input'`));
+  await page.type('tax return'); await page.key('Enter');
+  await waitFor(`location.search === '?project=tax-return' && document.querySelector('.proj-head[aria-current="true"]')?.dataset.project === 'tax-return' && !document.getElementById('pane-kanban')`, 4000);
+  const pj = JSON.parse(fs.readFileSync(path.join(APP, ENV.dir, 'projects.json'), 'utf8'));
+  check('/project new tax return: ?project=tax-return, its own dir with rules.json, listed third in projects.json; an empty workbench (no side panes)', await where() === '/?project=tax-return' && pj.projects.map((x) => x.id).join(',') === 'health-insurance-claim,move-flat,tax-return' && fs.existsSync(file('tax-return', 'rules.json')) && await page.eval(`!document.querySelector('.pane.side') && !document.getElementById('pane-kanban')`));
+  check('the new project shows in the sidebar as current, with "+ new chat" and its one chat', (await sections()).endsWith('tax-return*:main'), await sections());
+  await shot('v13-new-project.png');
+
+  // ---- collapse a project header (kept in this browser) ----
+  await waitFor(`document.getAnimations().length === 0`);   // the pane change animates (View Transition); a click during it reaches the transition, not the page
+  await click('.proj-head[data-project="health-insurance-claim"]');
+  check('a click on a header collapses that project (aria-expanded false, its chats hidden)', await page.eval(`(() => { const h = document.querySelector('.proj-head[data-project="health-insurance-claim"]'); return h.getAttribute('aria-expanded') === 'false' && h.nextElementSibling.hidden; })()`));
+  await page.goto(`${URL}?project=tax-return`);
+  await waitFor(`document.getElementById('meta').textContent.includes('live') && !!document.querySelector('.proj-head')`);
+  check('collapsed stays collapsed after a reload; a second click expands it', await page.eval(`document.querySelector('.proj-head[data-project="health-insurance-claim"]').getAttribute('aria-expanded') === 'false'`) && (await click('.proj-head[data-project="health-insurance-claim"]'), await page.eval(`document.querySelector('.proj-head[data-project="health-insurance-claim"]').getAttribute('aria-expanded') === 'true'`)));
+
+  // ---- keyboard: Alt+S, arrows over headers and chats ----
+  const altS = () => page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 's', code: 'KeyS', windowsVirtualKeyCode: 83, modifiers: 1 }).then(() => page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 's', code: 'KeyS', windowsVirtualKeyCode: 83, modifiers: 1 }));
+  await page.eval(`document.getElementById('input').focus()`);
+  await altS(); await sleep(100);
+  const f1 = await page.eval(`document.activeElement.dataset.chat + '@' + (document.activeElement.closest('.proj') || {}).dataset?.project`);
+  await page.key('ArrowUp'); await sleep(50);
+  const f2 = await page.eval(`document.activeElement.className`);
+  await page.key('Escape'); await sleep(50);
+  check('Alt+S focuses the current chat of the current project; ↑ reaches its "+ new chat"; Escape returns to the input', f1 === 'main@tax-return' && /new-chat/.test(f2) && await page.eval(`document.activeElement.id === 'input'`), `${f1} / ${f2}`);
+
+  // ---- the drawer below 900 px ----
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 820, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(300);
+  check('820 px: the sidebar is a closed drawer; ☰ opens it over the page with the project groups; no horizontal scroll', await page.eval(`document.getElementById('chats').hidden`) && (await click('#chats-btn'), await sleep(200), await page.eval(`!document.getElementById('chats').hidden && getComputedStyle(document.getElementById('chats')).position === 'fixed' && document.querySelectorAll('#project-list .proj').length === 3 && document.documentElement.scrollWidth <= innerWidth`)));
+  await shot('v13-drawer.png');
+  await click('.chat-link[data-project="move-flat"][data-chat="c-boxes"]');
+  await waitFor(`location.search === '?project=move-flat&chat=c-boxes'`);
+  await sleep(200);
+  check('a chat of another project picked in the drawer opens that project and chat, and the drawer closes', await where() === '/?project=move-flat&chat=c-boxes' && await page.eval(`document.getElementById('chats').hidden`) && await curProj() === 'move-flat');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(200);
+
+  // ---- archive (nothing deleted) ----
+  await page.submit('/project archive tax return', 700);
+  check('/project archive tax return: hidden from the list behind "archived projects: 1 (show)", its dir stays', !(await sections()).includes('tax-return') && await page.eval(`document.getElementById('archived-projects-toggle').textContent === 'archived projects: 1 (show)'`) && fs.existsSync(file('tax-return', 'rules.json')) && JSON.parse(fs.readFileSync(path.join(APP, ENV.dir, 'projects.json'), 'utf8')).projects.find((x) => x.id === 'tax-return').archived === true);
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+  await sleep(150);
+  check('light mode: the current project header keeps its marker (lavender edge)', await page.eval(`(() => { const h = document.querySelector('.proj-head[aria-current="true"]'); const cs = getComputedStyle(h); return cs.borderLeftStyle === 'solid' && cs.borderLeftWidth === '3px'; })()`));
+  await shot('v13-light.png');
+  await page.send('Emulation.setEmulatedMedia', { features: [] });
+  check('tab 2 is still in health insurance claim at c-invoices', await where(tab2) === '/?project=health-insurance-claim&chat=c-invoices');
+  tab2.close();
+}
+
+const SCENARIOS = { p1, p2, v03, v04, v05, v06, v07, v08, v09, v10, v11, v12, v13 };
 const ENVS = {
   v03: () => {
     const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
@@ -1570,6 +1694,15 @@ const ENVS = {
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4855/', fakes: [5856, 5857], dir: '.pilot-verify-v12b', config: file, cdp: 9433 };
   },
+  // pilot-v0.13: the v0.13 demo config (a projects home with two projects) on this scenario's ports, PILOT_HOME
+  v13: () => {
+    const c = JSON.parse(fs.readFileSync(path.join(APP, 'demo', 'fixtures', 'v0.13', 'pilot.config.json'), 'utf8'));
+    c.port = 4865;
+    for (const r of Object.values(c.roles)) for (const k of r.candidates) k.baseUrl = k.baseUrl.replace(':5800/', ':5866/').replace(':5801/', ':5867/');
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v13b-')), 'config.json');
+    fs.writeFileSync(file, JSON.stringify(c));
+    return { url: 'http://127.0.0.1:4865/', fakes: [5866, 5867], dir: '.pilot-verify-v13b', config: file, cdp: 9443, home: true };
+  },
 };
 
 (async () => {
@@ -1600,6 +1733,7 @@ const ENVS = {
     if (page) page.close();
     for (const k of Object.keys(procs)) await stop(k);
     if (ENV.dir !== '.pilot') fs.rmSync(path.join(APP, ENV.dir), { recursive: true, force: true });
+    if (ENV.home) fs.rmSync(path.join(APP, `${ENV.dir}-default`), { recursive: true, force: true });
   }
   console.log(fails ? `\n${fails} BROWSER CHECK(S) FAILED` : '\nALL BROWSER CHECKS PASSED');
   process.exitCode = fails ? 1 : 0;

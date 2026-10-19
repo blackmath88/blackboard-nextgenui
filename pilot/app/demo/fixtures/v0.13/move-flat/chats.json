@@ -1,0 +1,22 @@
+{
+  "rev": 3,
+  "chats": [
+    {
+      "id": "main",
+      "file": "transcript.jsonl",
+      "createdAt": "2026-10-16T18:01:00.000Z",
+      "title": "flat search",
+      "titleBy": "user",
+      "titledAt": "2026-10-16T18:06:00.000Z"
+    },
+    {
+      "id": "c-boxes",
+      "file": "chats/c-boxes.jsonl",
+      "createdAt": "2026-10-17T09:00:00.000Z",
+      "title": "boxes",
+      "titleBy": "model",
+      "titleModel": "morrow",
+      "titledAt": "2026-10-17T09:00:40.000Z"
+    }
+  ]
+}

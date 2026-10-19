@@ -8,7 +8,8 @@
 // Fixture layout: demo.json {fakes: [{name, port, args?, toggleKey?}], try: [lines; {url} {dir} {app} {rel} are filled in]},
 // pilot.config.json,
 // and data files copied verbatim into the demo dir (transcript.jsonl, rules.json, modules.json, roles.json, ...;
-// pilot-v0.12: folders too, e.g. chats/).
+// pilot-v0.12: folders too, e.g. chats/). pilot-v0.13: demo.json "home": true seeds a projects home (projects.json and a
+// dir per project) and starts the server with PILOT_HOME instead of PILOT_DIR.
 'use strict';
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -86,8 +87,9 @@ process.on('SIGTERM', () => stopAll(0));
 process.on('SIGHUP', () => stopAll(0));
 
 for (const f of demo.fakes || []) launch(f.name, fakeArgs(f));
-console.log(`[demo] ${version}: seeded ${dirName}/ from demo/fixtures/${version}/ (PILOT_DIR=${dirName})`);
-launch('server', ['server.js'], { PILOT_DIR: dirName, PILOT_CONFIG: path.relative(APP, configFile) });
+console.log(`[demo] ${version}: seeded ${dirName}/ from demo/fixtures/${version}/ (${demo.home ? 'PILOT_HOME' : 'PILOT_DIR'}=${dirName})`);
+// pilot-v0.13: a fixture with "home": true is a projects home (projects.json and one dir per project): PILOT_HOME
+launch('server', ['server.js'], { ...(demo.home ? { PILOT_HOME: dirName } : { PILOT_DIR: dirName, PILOT_HOME: '' }), PILOT_CONFIG: path.relative(APP, configFile) });
 
 (async () => {
   for (let i = 0; i < 100; i++) {

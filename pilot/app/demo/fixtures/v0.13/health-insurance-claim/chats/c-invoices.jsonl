@@ -1,0 +1,4 @@
+{"id":"m-f203","ts":"2026-10-17T10:03:20.000Z","role":"user","text":"Task: sort the pharmacy receipts by date.","model":null,"fixture":true}
+{"id":"m-f204","ts":"2026-10-17T10:03:45.000Z","role":"assistant","text":"[fixture] Good, oldest first. The insurer checks the dates against the claim period.","model":"frontier","fixture":true}
+{"id":"m-f205","ts":"2026-10-17T10:06:02.000Z","role":"user","text":"There are eleven receipts in the folder.","model":null,"fixture":true}
+{"id":"m-f206","ts":"2026-10-17T10:06:27.000Z","role":"assistant","text":"[fixture] Then one stapled bundle is enough, with a list of the amounts on top.","model":"frontier","fixture":true}

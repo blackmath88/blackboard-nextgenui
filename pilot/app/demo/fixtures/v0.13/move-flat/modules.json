@@ -1,0 +1,28 @@
+{
+  "rev": 2,
+  "panes": [
+    {
+      "module": "kanban",
+      "addedAt": "2026-10-17T09:01:00.000Z",
+      "atCount": 3,
+      "rule": {
+        "metric": "tasks",
+        "threshold": 3
+      },
+      "lastTouch": {
+        "at": "2026-10-17T09:01:00.000Z",
+        "turn": 4,
+        "how": "added"
+      }
+    }
+  ],
+  "answers": {
+    "kanban": {
+      "answer": "yes",
+      "at": "2026-10-17T09:01:00.000Z",
+      "count": 3,
+      "consentId": "c-g01"
+    }
+  },
+  "pending": null
+}

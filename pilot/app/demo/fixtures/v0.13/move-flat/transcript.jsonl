@@ -1,0 +1,6 @@
+{"id":"m-g001","ts":"2026-10-16T18:01:00.000Z","role":"user","text":"We move flat at the end of November. Decision: we take the flat on Lindenstrasse.","model":null,"fixture":true}
+{"id":"m-g002","ts":"2026-10-16T18:01:20.000Z","role":"assistant","text":"[fixture] Congratulations. Decision: we take the flat on Lindenstrasse. Let us list what has to happen before the move.","model":"frontier","fixture":true}
+{"id":"m-g003","ts":"2026-10-16T18:03:00.000Z","role":"user","text":"Task: give notice on the old flat by Friday.","model":null,"fixture":true}
+{"id":"m-g004","ts":"2026-10-16T18:03:25.000Z","role":"assistant","text":"[fixture] Noted. Task: give notice on the old flat by Friday. The notice period is three months, so it is due now.","model":"frontier","fixture":true}
+{"id":"m-g005","ts":"2026-10-16T18:05:00.000Z","role":"user","text":"Task: book a moving van for the 29th.","model":null,"fixture":true}
+{"id":"m-g006","ts":"2026-10-16T18:05:22.000Z","role":"assistant","text":"[fixture] Good. Task: book a moving van for the 29th. Vans for the end of the month go early.","model":"frontier","fixture":true}

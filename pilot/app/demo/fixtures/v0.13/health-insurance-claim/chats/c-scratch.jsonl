@@ -1,0 +1,2 @@
+{"id":"m-f201","ts":"2026-10-17T10:00:10.000Z","role":"user","text":"Just trying out a second chat.","model":null,"fixture":true}
+{"id":"m-f202","ts":"2026-10-17T10:00:35.000Z","role":"assistant","text":"[fixture] It works: this chat has its own history, the board is shared.","model":"frontier","fixture":true}
