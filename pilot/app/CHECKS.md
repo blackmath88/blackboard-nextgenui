@@ -1071,3 +1071,13 @@ Last run (Node v25.9.0, Chrome, macOS, 2026-10-19): `npm run verify` all passed 
 no earlier assertion adapted. `browser-check.js v13` passed three times in a row after its click on a project header waited
 for the pane View Transition to end. `npm run demo -- v0.3` to `-- v0.13` (with `DEMO_PORT_SHIFT=100`, next to two
 demos from another checkout) each served `/state` within 2 s, and SIGINT left no listener and no fake.
+
+## pilot-v0.13: coordinator re-run (2026-10-19)
+
+Run by the coordinator, not the builder. The builder's first session was cut off by the machine sleeping and was resumed from its uncommitted refactor.
+- Scope: only `pilot/app/**` plus one line in the "Pilot iterations" list of `index.html`.
+- `npm run verify`: all scripts passed, plus v0.13. Demos v0.3 to v0.13 (port shift 200): `/state` 200 within about 1 s each; nothing left running. The single-dir demos v0.3–v0.12 run unchanged.
+- Browser, demo v0.13:
+  - The sidebar groups 3 chats under "health insurance claim" and 2 under "move flat".
+  - Opening "flat search" switched the URL to `?project=move-flat` and the board to that project's four tasks.
+  - "Task: order a new kitchen lamp." there produced task-5 (proposed) in move-flat. `/state?project=health-insurance-claim` has no such item.
