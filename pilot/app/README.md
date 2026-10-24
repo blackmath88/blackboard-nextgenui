@@ -1,5 +1,35 @@
 # CLI Pilot v1 (steps P0 to P4 + P5 metrics, iteration pilot-v0.10)
 
+
+## Quick start (v0.12)
+
+```sh
+cd /path/to/blackboard-nextgenui/pilot/app
+npm link
+pilot init ~/pilot-work
+cd ~/pilot-work
+pilot key set MISTRAL_API_KEY
+pilot doctor
+pilot start . --port 4747
+```
+
+Open the printed localhost URL. The key prompt is hidden; alternatively pipe a
+key to `pilot key set MISTRAL_API_KEY` on stdin. Settings in the page can save or
+remove the same local key. `pilot key status` prints sources only; `pilot key rm
+MISTRAL_API_KEY` removes the saved value. Environment values take priority.
+Without `npm link`, replace `pilot` with
+`node /path/to/blackboard-nextgenui/pilot/app/bin/pilot.js` from any directory.
+`pilot init [dir]` never overwrites existing files. Ctrl+C stops `pilot start`.
+
+Use **+ new** to start a conversation, click to switch, and double-click its
+title to rename (Enter saves, Escape cancels). Histories are separate; the board
+is shared. The overview shows proposals and authorship; focus a proposed card
+and press **c** to confirm or **r** to reject. Board sharing starts **off** for
+all model roles; the context block shows recipients and lets you opt in. Files
+are read-only text previews (200 KB limit, 200 names, depth 3); dot entries,
+node_modules and symlinks are excluded. Narrow screens stack the side panels.
+
+
 **Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.10` (experiment: after a turn the model may
 suggest how the map shows its cards, a dashed note "suggested by morrow, not by you"; `f` applies it, `/frame reset`
 undoes it, `/why map` explains it; v0.9: pause on a finished line and the input offers "send?", Tab sends, Enter always does; v0.8: panes fade to tabs and are removed only with your answer; v0.7: `/why`; v0.6: authorship and `/stats`; v0.5: live files, two tabs; v0.4: proposals; v0.3: pins

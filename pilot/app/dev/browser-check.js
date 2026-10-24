@@ -18,7 +18,7 @@
 // Needs Node 22+ (global WebSocket) and Google Chrome. No dependencies.
 // Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|v07|v08|v09|v10|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
 'use strict';
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -74,7 +74,7 @@ function shutdown() {
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) process.on(signal, () => {
   shutdown().then(() => process.exit(code), (err) => { console.error('ERROR cleanup', err.message); process.exit(1); });
 });
-async function startServer() { start('server', ['server.js'], { PILOT_CONFIG: ENV.config, PILOT_DIR: ENV.dir, PILOT_SECRETS_FILE: path.join(ROOT, 'private', 'secrets.json') }); await waitHttp(URL); }
+async function startServer() { start('server', ENV.project ? ['bin/pilot.js', 'start', ENV.project, '--port', new URLConstructor(ENV.url).port] : ['server.js'], { PILOT_CONFIG: ENV.config, PILOT_DIR: ENV.dir, PILOT_SECRETS_FILE: path.join(ROOT, 'private', 'secrets.json'), I1_BROWSER_KEY: '' }); await waitHttp(URL); }
 async function waitHttp(url) { for (let i = 0; i < 50; i++) { try { await fetch(url); return; } catch { await sleep(100); } } throw new Error(`${url} did not come up`); }
 
 // ---- minimal CDP client ----
@@ -1138,8 +1138,49 @@ async function m1(page) {
   check('M1 off restores conversation-only status', (await page.status()).includes('conversation-only'));
 }
 
-const SCENARIOS = { m1, p1, p2, v03, v04, v05, v06, v07, v08, v09, v10 };
+async function i1(page) {
+  const shots = '/home/nuc/orca-reports/blackboard-i1/screenshots'; fs.mkdirSync(shots, { recursive: true });
+  const shot = async name => { const r = await page.send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(shots, name + '.png'), Buffer.from(r.result.data, 'base64')); };
+  const waitFor = async (expr, ms = 6000) => { const start = Date.now(); while (Date.now() - start < ms) { if (await page.eval(expr)) return true; await sleep(30); } return false; };
+  await page.goto(URL); await shot('01-open');
+  check('I1 CLI-served workspace has Files and overview', await page.eval(`!document.getElementById('files-section').hidden && !!document.getElementById('overview')`));
+  await page.eval(`document.getElementById('settings-open').click()`); await sleep(200);
+  await page.eval(`document.querySelector('#key-fields input').value = 'sk-i1-browser-012345678901234567890123456789'; document.querySelector('#key-fields button').click()`);
+  check('I1 Settings saves a key and shows saved', await waitFor(`document.querySelector('.key-source').textContent === 'saved' && document.querySelector('#key-fields input').value === ''`)); await shot('02-settings-saved');
+  await page.eval(`document.getElementById('settings-close').click()`);
+  await page.eval(`document.getElementById('new-chat').click()`); await sleep(350);
+  const first = await page.eval(`document.querySelector('.chat[aria-current]').dataset.chat`); await shot('03-first-new-chat');
+  await page.type('Decision: keep the first conversation.'); await page.key('Enter');
+  const incremental = await waitFor(`!!document.querySelector('.ln.assistant.streaming .text') && document.querySelector('.ln.assistant.streaming .text').textContent.length > 0 && document.getElementById('input').disabled`);
+  check('I1 reply appears incrementally while request is streaming', incremental); await shot('04-streaming');
+  await waitFor(`!document.getElementById('input').disabled && !!document.querySelector('#overview .item.proposed')`); await shot('05-first-reply-proposal');
+  await page.eval(`document.getElementById('new-chat').click()`); await sleep(350);
+  const second = await page.eval(`document.querySelector('.chat[aria-current]').dataset.chat`);
+  await page.submit('Hello from the second conversation.', 1800); await shot('06-second-conversation');
+  await page.eval(`document.querySelector('.chat[data-chat="${first}"]').click()`); await sleep(350);
+  check('I1 switching back preserves first history and excludes second', await page.eval(`document.getElementById('log').textContent.includes('keep the first conversation') && !document.getElementById('log').textContent.includes('Hello from the second conversation')`)); await shot('07-first-history');
+  await stop('server'); await startServer(); await page.goto(URL);
+  check('I1 restart keeps both chats and first history', await page.eval(`!!document.querySelector('.chat[data-chat="${first}"]') && !!document.querySelector('.chat[data-chat="${second}"]') && document.getElementById('log').textContent.includes('keep the first conversation')`)); await shot('08-restart');
+  await page.eval(`document.querySelector('#overview .item.proposed').focus()`); await page.key('c');
+  check('I1 overview proposal confirms with c', await waitFor(`!!document.querySelector('#overview .item.confirmed') && !document.querySelector('#overview .item.proposed')`)); await shot('09-confirmed');
+  await page.eval(`document.querySelector('#file-list button').click()`); await sleep(200);
+  check('I1 text file opens read-only in center', await page.eval(`!document.getElementById('file-view').hidden && document.getElementById('file-text').textContent.includes('Read-only project note')`)); await shot('10-read-only-file');
+  await page.eval(`document.getElementById('file-close').click()`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false }); await sleep(100); await shot('11-narrow');
+  check('I1 narrow workspace has no horizontal overflow', await page.eval(`document.documentElement.scrollWidth <= innerWidth`));
+}
+
+const SCENARIOS = { i1, m1, p1, p2, v03, v04, v05, v06, v07, v08, v09, v10 };
 const ENVS = {
+  i1: () => {
+    const project = path.join(ROOT, 'i1-project');
+    const init = spawnSync(process.execPath, [path.join(APP, 'bin/pilot.js'), 'init', project], { cwd: ROOT, env: { ...process.env, PILOT_SECRETS_FILE: path.join(ROOT, 'private', 'secrets.json') } });
+    if (init.status !== 0) throw new Error('I1 init failed'); safety.mark(path.join(project, '.pilot'));
+    const candidate = { name: 'mistral-test', model: 'fake', keyEnv: 'I1_BROWSER_KEY', baseUrl: 'http://127.0.0.1:5856/v1', local: false };
+    const config = path.join(project, 'pilot.config.json'); fs.writeFileSync(config, JSON.stringify({ port: 4855, roles: { chat: { candidates: [candidate] }, extract: { candidates: [candidate] } } }));
+    fs.writeFileSync(path.join(project, 'notes.txt'), 'Read-only project note');
+    return { url: 'http://127.0.0.1:4855/', fakes: [5856, 5857], dir: 'i1-project/.pilot', config, cdp: 9433, project };
+  },
   m1: () => {
     const c = { port: 4845, roles: { chat: { candidates: [{ name: 'frontier', model: 'fake-mistral', baseUrl: 'http://127.0.0.1:5846/v1', keyEnv: 'M1_BROWSER_KEY' }] } } };
     const file = path.join(ROOT, 'm1-config.json'); fs.writeFileSync(file, JSON.stringify(c));
@@ -1242,7 +1283,7 @@ const ENVS = {
       console.log(`== ${name}`);
       ENV = ENVS[name] ? ENVS[name]() : { url: 'http://127.0.0.1:4750/', fakes: [5701, 5702], dir: '.pilot-verify-browser', config: 'pilot.config.dev.json', cdp: 9333 };
       ENV.dir = path.join(ROOT, ENV.dir);
-      safety.remove(ENV.dir, ROOT); safety.mark(ENV.dir);
+      if (!ENV.project) { safety.remove(ENV.dir, ROOT); safety.mark(ENV.dir); } // CLI init owns .pilot; cleanup removes only its enclosing marked root.
       if (!ENVS[name]) {
         const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
         c.port = 4750; ENV.config = path.join(ROOT, 'config.json');

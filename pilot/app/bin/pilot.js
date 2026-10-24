@@ -82,6 +82,13 @@ async function main() {
   console.log(`Node ${process.versions.node}: ${Number(process.versions.node.split('.')[0]) >= 20 ? 'ok' : 'requires Node 20+'}`);
   if (Number(process.versions.node.split('.')[0]) < 20) process.exitCode = 1;
   if (!c.roles || !Array.isArray(c.roles.chat?.candidates) || !c.roles.chat.candidates.length) throw new Error('Invalid config: chat candidates required.');
+  for (const role of Object.values(c.roles)) {
+    if (!Array.isArray(role.candidates)) throw new Error('Invalid config: candidate arrays required.');
+    for (const candidate of role.candidates) {
+      let url; try { url = new URL(candidate.baseUrl); } catch { throw new Error('Invalid config: candidate URL required.'); }
+      if (!['http:', 'https:'].includes(url.protocol) || typeof candidate.name !== 'string' || typeof candidate.model !== 'string') throw new Error('Invalid config: candidate name/model/HTTP endpoint required.');
+    }
+  }
   console.log('Configuration: valid');
   for (const name of names(c)) { const source = secrets.resolve(name).source; console.log(`${name}: ${source}`); if (source === 'missing') process.exitCode = 1; }
   const candidates = Object.values(c.roles).flatMap(r => r.candidates || []), seen = new Set();

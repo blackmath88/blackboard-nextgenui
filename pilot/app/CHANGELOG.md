@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## v0.12 integration
+
+- Integrated multi-chat from 22f9773 and acf9829 with M1 privacy/key/localhost rules.
+- Refresh the active transcript after pane touches so withdrawal lines appear.
+- Added read-only project Files, shared overview, context toggle and key status.
+- Added dependency-free `pilot init/start/key/doctor`, help/version and npm-link install.
+- Redact withheld credential prefixes at normal completion and in nonstream replies.
+- Added isolated CLI/HTTP and Chromium end-to-end checks with step screenshots.
+
 P0 to P2 (skeleton, model roles, growth controller with consent and the index pane) are the pre-iteration
 baseline, merged before the numbered iterations started; see `CHECKS.md` (# P0, # P1, # P2). Iterations are
 tagged `pilot-v0.N` by the coordinator; each one is runnable with `npm run demo -- v0.N`.
