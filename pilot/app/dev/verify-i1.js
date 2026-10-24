@@ -46,6 +46,28 @@ async function main() {
   fs.writeFileSync(path.join(project,'big.txt'),'x'.repeat(205000)); assert.equal((await req('/files/read?path=big.txt')).status,400);pass('Files is bounded/read-only and rejects traversal, dot data, dependencies, symlink escape and large content');
   await stop(server);let persisted='';for(const name of fs.readdirSync(path.join(project,'.pilot')))persisted+=fs.readFileSync(path.join(project,'.pilot',name),'utf8');assert(![output,logs,persisted].some(s=>s.includes(key)));pass('key sentinel absent from every response, CLI/server log and project state');
   assert.equal(run(['key','rm','I1_KEY'],project).status,0);assert.match(run(['key','status'],project).stdout,/missing/);
+  // Selected XDG store lives in the project, reached through an external symlinked ancestor.
+  const configDir=path.join(project,'config'), configLink=path.join(root,'config-link');
+  fs.mkdirSync(configDir); fs.symlinkSync(configDir,configLink);
+  delete env.PILOT_SECRETS_FILE; env.XDG_CONFIG_HOME=configLink;
+  assert.equal(run(['key','set','I1_KEY'],project,key+'\n').status,0);
+  assert.match(run(['key','status'],project).stdout,/I1_KEY: saved/);
+  const selected=path.join(configDir,'pilot','secrets.json'), alias=path.join(project,'secret-alias.txt');
+  assert.equal(fs.statSync(selected).mode & 0o777,0o600); assert.equal(fs.statSync(path.dirname(selected)).mode & 0o777,0o700);
+  fs.linkSync(selected,alias);
+  server=start([cli,'start',project,'--port','4850']);await ready(url);
+  const listed=(await req('/files')).json.files;
+  assert(listed.includes('notes.txt')); assert(!listed.includes('config/pilot/secrets.json')); assert(!listed.includes('secret-alias.txt'));
+  for(const name of ['config/pilot/secrets.json','secret-alias.txt']) assert.equal((await req('/files/read?path='+encodeURIComponent(name))).status,400);
+  assert.equal((await req('/settings/keys')).json.keys[0].source,'saved');
+  pass('Files excludes symlink-ancestor XDG store and hard-link alias by physical identity');
+  fs.renameSync(selected,selected+'.saved'); fs.symlinkSync('missing.json',selected);
+  assert.equal((await req('/files')).status,400); assert.equal((await req('/files/read?path=notes.txt')).status,400);
+  fs.unlinkSync(selected); fs.renameSync(selected+'.saved',selected);
+  await stop(server);
+  assert(![output,logs].some(s=>s.includes(key)));
+  assert(logs.includes(`config: ${configFile}, data: ${path.join(project,'.pilot')}/`));
+  pass('unresolvable existing store fails closed; no sentinel in responses/logs; CLI startup paths are absolute');
   console.log('ALL I1 HTTP/CLI CHECKS PASSED');
  } finally { await Promise.all([...children].map(stop)); }
 }
