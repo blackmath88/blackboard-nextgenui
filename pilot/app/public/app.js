@@ -555,7 +555,7 @@ function benchTemplate(list) {
   return `${rows.join(' ')} / ${anyShown ? 'minmax(0, 1.6fr) minmax(0, 1fr)' : 'minmax(0, 1fr) fit-content(18rem)'}`;
 }
 
-function renderPanes(contentOnly) {
+function renderPanes(contentOnly, initialSnapshot = false) {
   const list = state.panes.filter((m) => PANES[m]).slice(0, 3);
   const isFaded = (m) => (state.faded || []).includes(m);
   const key = list.map((m) => (isFaded(m) ? `${m}:tab` : m)).join(',');
@@ -595,7 +595,7 @@ function renderPanes(contentOnly) {
     });
     return done();
   }
-  const first = shownPanes === ''; // first pane must exist immediately, even after an early partial state response
+  const first = initialSnapshot || (shownPanes === '' && !document.body.dataset.loaded);
   shownPanes = key;
   if (!first && document.startViewTransition && !reducedMotion.matches) document.startViewTransition(() => { apply(); done(); });
   else { apply(); done(); }
@@ -714,6 +714,7 @@ async function loadState(files) {
   if (files && !list.length) return;
   const chatQ = activeChat ? `chat=${encodeURIComponent(activeChat)}` : '';   // pilot-ui: the open chat's own tail
   const next = await (await fetch(files ? `/state?only=${encodeURIComponent(list.join(','))}${chatQ ? `&${chatQ}` : ''}` : `/state${chatQ ? `?${chatQ}` : ''}`)).json();
+  const initialModules = !appliedGen['modules.json'] && list.includes('modules.json') && Array.isArray(next.panes);
   if (next.context) state.context = next.context;
   if ('project' in next) state.project = next.project;
   for (const f of list) {
@@ -727,7 +728,7 @@ async function loadState(files) {
   // re-render only the areas whose content changed (keeps scroll and focus when nothing did)
   const dirty = (area) => { const v = sigOf[area](state); if (sigs[area] === v) return false; sigs[area] = v; return true; };
   if (dirty('log')) renderLog();
-  if (dirty('panes')) renderPanes();
+  if (dirty('panes')) renderPanes(false, initialModules);
   if (dirty('models')) renderModels(state.models);
   if (dirty('chats')) renderChats();
   updateCount();
