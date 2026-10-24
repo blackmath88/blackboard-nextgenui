@@ -20,7 +20,7 @@ function check(name, ok) { if (!ok) throw Error(name); console.log(`PASS ${name}
   try {
     const unmarked = path.join(root, 'unmarked'); fs.mkdirSync(unmarked);
     fs.symlinkSync(real, path.join(root, 'escape'));
-    fs.symlinkSync('/nonexistent-w0-outside', path.join(root, 'broken-escape')); 
+    fs.symlinkSync('/nonexistent-w0-outside', path.join(root, 'broken-escape'));
     for (const dir of ['', undefined, '/', require('os').homedir(), real, demo, unmarked, path.join(root, 'escape'), path.join(root, 'escape', 'child'), path.join(root, 'broken-escape'), path.join(root, 'broken-escape', 'child')]) {
       let refused = false; try { safety.remove(dir, root); } catch (e) { refused = /REFUSE/.test(e.message); }
       check(`refuses ${JSON.stringify(dir)}`, refused);
