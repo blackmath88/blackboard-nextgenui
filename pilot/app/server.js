@@ -1121,7 +1121,8 @@ async function handleChat(req, res) {
   const history = readTranscript().filter((l) => l.role === 'user' || l.role === 'assistant').slice(-HISTORY)
     .map((l) => ({ role: l.role, content: l.text }));
   const board = boardContext();
-  if (board) history.unshift(board);
+  // Ported from 4c2dd98: keep board constraints adjacent to the newest request.
+  if (board) history.splice(history.length - 1, 0, board);
 
   // no-cache, not no-store: Chrome reports a streamed no-store body read by a reader as net::ERR_ABORTED.
   res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' });
