@@ -6,10 +6,12 @@
 # Usage (from anywhere): bash pilot/app/dev/verify-v0.3.sh
 set -u
 cd "$(dirname "$0")/.."
-T=$(mktemp -d); PIDS=(); SERVER=""
-DIR=.pilot-verify-v03
-cleanup() { kill "${PIDS[@]}" 2>/dev/null; wait 2>/dev/null; rm -rf "$T" "$DIR" .pilot-demo-verify; }
+source dev/lib/safe-dir.sh
+T=$(fixture_temp); FIXTURE_ROOT="$T"; PIDS=(); SERVER=""
+DIR="$T/.pilot-verify-v03"
+cleanup() { kill "${PIDS[@]}" 2>/dev/null; wait 2>/dev/null; fixture_remove "$T"; }
 trap cleanup EXIT
+fixture_ports 4760 4950 5761 5762
 FAILS=0
 check() { if [ "$2" = "true" ]; then echo "PASS $1"; else echo "FAIL $1"; FAILS=$((FAILS+1)); fi; }
 q() { node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const x=JSON.parse(s);console.log(String($1))})"; }
@@ -22,15 +24,15 @@ mkconf() { node -e '
   '"$2"'; require("fs").writeFileSync(process.argv[1], JSON.stringify(c,null,2));' "$T/$1"; }
 fake() { node dev/fake-model.js "$@" > "$T/fake-$1.log" 2>&1 & eval "FAKE_$1=$!"; PIDS+=($!); sleep 0.3; }
 unfake() { eval "local p=\$FAKE_$1"; kill $p 2>/dev/null; wait $p 2>/dev/null; }
-server() { PILOT_DIR=$DIR PILOT_CONFIG="$T/$1" node server.js > "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); sleep 0.5; }
+server() { PILOT_DIR="$DIR" PILOT_CONFIG="$T/$1" node server.js > "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); sleep 0.5; }
 stop_server() { [ -n "$SERVER" ] && { kill $SERVER 2>/dev/null; wait $SERVER 2>/dev/null; }; }
-fresh() { stop_server; rm -rf $DIR; server "$1"; }
+fresh() { stop_server; fixture_reset "$DIR"; server "$1"; }
 chat() { curl -sN -X POST localhost:4760/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
 cmd() { curl -s -X POST localhost:4760/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
 state() { curl -s localhost:4760/state; }
-last() { tail -${1:-1} $DIR/transcript.jsonl | head -1; }
-mcount() { [ -f $DIR/metrics.jsonl ] && wc -l < $DIR/metrics.jsonl | tr -d ' ' || echo 0; }
-since() { tail -n +$(( $1 + 1 )) $DIR/metrics.jsonl 2>/dev/null; }
+last() { tail -${1:-1} "$DIR/transcript.jsonl" | head -1; }
+mcount() { [ -f "$DIR/metrics.jsonl" ] && wc -l < "$DIR/metrics.jsonl" | tr -d ' ' || echo 0; }
+since() { tail -n +$(( $1 + 1 )) "$DIR/metrics.jsonl" 2>/dev/null; }
 
 mkconf dev.json ''
 mkconf morrow-first.json 'chat.candidates.reverse()'
@@ -43,7 +45,7 @@ fake 5761 frontier; fake 5762 morrow
 fresh dev.json
 check "/model chat morrow answers ok and says pinned" "$(cmd '/model chat morrow' | q 'x.ok && /pinned/.test(x.lines[0])')"
 check "state: chat active=morrow, pinned=true" "$(state | q 'x.models.chat.active==="morrow" && x.models.chat.pinned===true')"
-check "roles.json holds the pin" "$(cat $DIR/roles.json | q 'x.active.chat==="morrow"')"
+check "roles.json holds the pin" "$(cat "$DIR/roles.json" | q 'x.active.chat==="morrow"')"
 stop_server; server dev.json
 check "pin survives a restart" "$(state | q 'x.models.chat.pinned===true && x.models.chat.active==="morrow"')"
 unfake 5762
@@ -63,14 +65,14 @@ echo "== 3. local -> cloud fallback blocked without allowCloudFallback"
 fake 5761 frontier; unfake 5762
 fresh morrow-first.json
 M=$(mcount); chat "morrow first and down" > /dev/null
-check "blocked: system line 'fallback to frontier blocked: morrow is local'" "$(grep -c '"text":"fallback to frontier blocked: morrow is local"' $DIR/transcript.jsonl | q 'x===1')"
-check "blocked line carries kind=blocked" "$(grep 'fallback to frontier blocked' $DIR/transcript.jsonl | q 'x.kind==="blocked"')"
+check "blocked: system line 'fallback to frontier blocked: morrow is local'" "$(grep -c '"text":"fallback to frontier blocked: morrow is local"' "$DIR/transcript.jsonl" | q 'x===1')"
+check "blocked line carries kind=blocked" "$(grep 'fallback to frontier blocked' "$DIR/transcript.jsonl" | q 'x.kind==="blocked"')"
 check "blocked: frontier never called" "$(since $M | qa '!x.some(e=>e.event==="model_call"&&e.candidate==="frontier")')"
-check "blocked: no assistant line, then 'chat failed: morrow'" "$(grep -c '"role":"assistant"' $DIR/transcript.jsonl | q 'x===0' | grep -q true && last | q 'x.role==="system" && /chat failed: morrow/.test(x.text)')"
+check "blocked: no assistant line, then 'chat failed: morrow'" "$(grep -c '"role":"assistant"' "$DIR/transcript.jsonl" | q 'x===0' | grep -q true && last | q 'x.role==="system" && /chat failed: morrow/.test(x.text)')"
 check "metrics: fallback_blocked {from morrow, to frontier}" "$(since $M | qa 'x.some(e=>e.event==="fallback_blocked"&&e.from==="morrow"&&e.to==="frontier"&&/morrow is local/.test(e.reason))')"
 fresh morrow-first-nolocal.json
 chat "frontier has no local flag" > /dev/null
-check "missing 'local' counts as non-local: still blocked" "$(grep -c 'fallback to frontier blocked: morrow is local' $DIR/transcript.jsonl | q 'x===1')"
+check "missing 'local' counts as non-local: still blocked" "$(grep -c 'fallback to frontier blocked: morrow is local' "$DIR/transcript.jsonl" | q 'x===1')"
 
 echo "== 4. local -> cloud allowed with allowCloudFallback: true"
 fresh morrow-first-allow.json
@@ -106,8 +108,8 @@ node dev/contrast-check.js > "$T/contrast.log"; RC=$?
 grep -c '^PASS' "$T/contrast.log" | sed 's/^/   pairs and rules passed: /'; grep '^FAIL' "$T/contrast.log"
 check "contrast-check.js passes" "$( [ $RC -eq 0 ] && echo true)"
 
-echo "== 8. demo starts and serves /state within 30 s (ports shifted +200, dir .pilot-demo-verify)"
-DEMO_PORT_SHIFT=200 PILOT_DEMO_DIR=.pilot-demo-verify node scripts/demo.js v0.3 < /dev/null > "$T/demo.log" 2>&1 & DEMO=$!
+echo "== 8. demo starts and serves /state within 30 s (ports shifted +200, dir $T/.pilot-demo-verify)"
+PILOT_FIXTURE_ROOT="$T" DEMO_PORT_SHIFT=200 PILOT_DEMO_DIR="$T/.pilot-demo-verify" node scripts/demo.js v0.3 < /dev/null > "$T/demo.log" 2>&1 & DEMO=$!
 D0=$(date +%s); UP=""
 for i in $(seq 1 60); do if curl -s -m 1 localhost:4950/state > "$T/demo-state.json" 2>/dev/null && [ -s "$T/demo-state.json" ]; then UP=1; break; fi; sleep 0.5; done
 echo "   up after $(( $(date +%s) - D0 )) s"
@@ -117,7 +119,7 @@ check "demo printed URL and try-this lines" "$(grep -q 'http://127.0.0.1:4950' "
 kill -INT $DEMO; wait $DEMO 2>/dev/null
 sleep 0.5
 check "Ctrl+C on the demo leaves no processes on its ports" "$( ! pgrep -f 'fake-model.js 59(51|52)' > /dev/null && ! lsof -iTCP:4950 -sTCP:LISTEN > /dev/null 2>&1 && echo true)"
-check "demo did not touch .pilot-demo/ or .pilot/" "$(grep -q 'PILOT_DIR=.pilot-demo-verify' "$T/demo.log" && echo true)"
+check "demo did not touch $T/.pilot-demo/ or .pilot/" "$(grep -Fq "PILOT_DIR=$T/.pilot-demo-verify" "$T/demo.log" && echo true)"
 node scripts/demo.js v9.99 > "$T/unknown.log" 2>&1; RC=$?
 check "unknown demo version lists the available ones and exits non-zero" "$( [ $RC -ne 0 ] && grep -q 'v0.3' "$T/unknown.log" && echo true)"
 

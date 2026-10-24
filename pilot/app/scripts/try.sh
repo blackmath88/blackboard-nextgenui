@@ -15,8 +15,11 @@ if [ -z "$TAG" ] || ! git -C "$REPO" rev-parse -q --verify "$REF^{commit}" > /de
   exit 2
 fi
 VERSION=${TAG#pilot-}
-WT=$(mktemp -d)/pilot-$VERSION
-cleanup() { git -C "$REPO" worktree remove --force "$WT" 2>/dev/null; rm -rf "$(dirname "$WT")"; }
+source "$(dirname "$0")/../dev/lib/safe-dir.sh"
+SAFE_HELPER="$(cd "$(dirname "$0")/.." && pwd)/dev/lib/safe-dir.js"
+TRY_ROOT=$(fixture_temp); FIXTURE_ROOT=$TRY_ROOT
+WT="$TRY_ROOT/pilot-$VERSION"
+cleanup() { git -C "$REPO" worktree remove --force "$WT" 2>/dev/null; fixture_remove "$TRY_ROOT"; }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 git -C "$REPO" worktree add --detach "$WT" "$REF" > /dev/null || exit 1
