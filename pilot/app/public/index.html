@@ -12,8 +12,11 @@
  <nav class="chats" id="chats" aria-label="Chats">
    <div class="bar"><span>chats</span><button type="button" class="key" id="new-chat" title="Start a new chat. All chats share one board (map, kanban).">+ new</button></div>
    <ol class="chat-list" id="chat-list"></ol>
+   <section id="files-section" hidden><h2>Files</h2><ul id="file-list"></ul></section>
    <div class="chats-foot"><button type="button" class="theme-toggle" id="theme-toggle"></button></div>
  </nav>
+ <div class="center">
+ <section id="file-view" hidden aria-label="Read-only file"><div class="bar"><span id="file-title"></span><button id="file-close" type="button">Back to chat</button></div><pre id="file-text"></pre></section>
  <div class="bench n1" id="bench">
   <section class="pane term" id="pane-chat" aria-label="Terminal">
     <div class="bar"><span id="brand">pilot</span><button type="button" id="settings-open">Settings</button><small id="meta">connecting…</small></div>
@@ -26,6 +29,12 @@
   </section>
  </div>
  </div>
+ <aside id="overview" aria-label="Project overview">
+  <h2>Project overview</h2><div id="overview-items"></div>
+  <section class="context-block"><h3>Context sent to models</h3><label><input type="checkbox" id="share-board"> Share project board</label><div id="context-roles"></div></section>
+  <section><h3>API keys</h3><p id="workspace-keys"></p><button id="overview-settings" type="button">Settings</button></section>
+ </aside>
+ </div>
   <footer class="status" id="status"><span id="models" aria-label="Active model per role">models…</span><span id="count"></span></footer>
 </main>
 <dialog id="settings" aria-labelledby="settings-title">
@@ -37,5 +46,6 @@
 <script src="pixel.js"></script>
 <script src="settle.js"></script>
 <script src="app.js"></script>
+<script src="workspace.js"></script>
 </body>
 </html>

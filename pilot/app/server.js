@@ -32,10 +32,12 @@ const secrets = require('./secrets.js');
 
 const APP = __dirname;
 const PUBLIC = path.join(APP, 'public');
-const configPath = path.resolve(APP, process.env.PILOT_CONFIG || 'pilot.config.json');
+const PROJECT = process.env.PILOT_PROJECT ? fs.realpathSync(path.resolve(process.env.PILOT_PROJECT)) : null;
+const projectFiles = PROJECT ? require('./project-files.js')(PROJECT) : null;
+const configPath = PROJECT ? path.join(PROJECT, 'pilot.config.json') : path.resolve(APP, process.env.PILOT_CONFIG || 'pilot.config.json');
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 // PILOT_DIR (env, relative to pilot/app/) overrides config.pilotDir, e.g. PILOT_DIR=.pilot-demo for demos.
-const PILOT = path.resolve(APP, process.env.PILOT_DIR || config.pilotDir || '.pilot');
+const PILOT = PROJECT ? path.join(PROJECT, '.pilot') : path.resolve(APP, process.env.PILOT_DIR || config.pilotDir || '.pilot');
 const STALL_MS = Number(config.stallMs) || 20000;   // max gap between tokens once a reply has started
 const TRANSCRIPT = path.join(PILOT, 'transcript.jsonl');
 const METRICS = path.join(PILOT, 'metrics.jsonl');
@@ -50,12 +52,12 @@ const CHATS = path.join(PILOT, 'chats.json');      // pilot-ui: the chats of thi
 const DEFAULT_CHAT = 'c-1';                         // lines written before chats existed belong to the first chat
 const EXTRACTION_SCHEMA = JSON.parse(fs.readFileSync(path.join(APP, 'schemas', 'extraction.schema.json'), 'utf8'));
 const BUILT = ['index', 'map', 'kanban'];   // panes this build can show; the controller only evaluates their rules
-const PORT = Number(config.port) || 4747;
+const PORT = Number(PROJECT && process.env.PILOT_PORT || config.port) || 4747;
 const HOST = '127.0.0.1';
 const TAIL = 500;      // lines returned by GET /state
 const HISTORY = 40;    // user/assistant lines sent to the model
 
-if (path.relative(APP, PILOT).startsWith('..')) throw new Error(`pilotDir must stay inside ${APP}`);
+if (!PROJECT && path.relative(APP, PILOT).startsWith('..')) throw new Error(`pilotDir must stay inside ${APP}`);
 fs.mkdirSync(PILOT, { recursive: true });
 if (!fs.existsSync(RULES)) atomicWrite(RULES, fs.readFileSync(path.join(APP, 'rules.example.json')));
 
@@ -1166,7 +1168,7 @@ function handleEvents(req, res) {
 // the named files (the page reloads only what changed). extracting and fileErrors are always included.
 function statePayload(only, chat) {
   const want = (f) => !only || only.includes(f);
-  const out = { extracting: extracting > 0, framing: framing > 0 };
+  const out = { extracting: extracting > 0, framing: framing > 0, project: PROJECT ? { name: path.basename(PROJECT) } : null };
   if (want('transcript.jsonl')) {
     const lines = readTranscript();
     // pilot-ui: ?chat=<id> sends that chat's tail (plus the open controller question, which shows in every chat)
@@ -1487,6 +1489,11 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 403, { error: 'forbidden localhost request' });
     }
     const { pathname, searchParams } = new URL(req.url, `http://${HOST}`);
+    if (req.method === 'GET' && ['/files', '/files/read'].includes(pathname)) {
+      if (!projectFiles) return sendJson(res, 404, { error: 'no project root' });
+      try { return sendJson(res, 200, pathname === '/files' ? projectFiles.list() : projectFiles.read(searchParams.get('path'))); }
+      catch { return sendJson(res, 400, { error: 'file not available (text files up to 200 KB only)' }); }
+    }
     if (req.method === 'GET' && pathname === '/settings/keys') {
       try { return sendJson(res, 200, { keys: keyStatus() }); }
       catch (e) { return sendJson(res, 409, { error: e.message }); }

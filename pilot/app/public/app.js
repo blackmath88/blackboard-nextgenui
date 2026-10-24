@@ -715,6 +715,7 @@ async function loadState(files) {
   const chatQ = activeChat ? `chat=${encodeURIComponent(activeChat)}` : '';   // pilot-ui: the open chat's own tail
   const next = await (await fetch(files ? `/state?only=${encodeURIComponent(list.join(','))}${chatQ ? `&${chatQ}` : ''}` : `/state${chatQ ? `?${chatQ}` : ''}`)).json();
   if (next.context) state.context = next.context;
+  if ('project' in next) state.project = next.project;
   for (const f of list) {
     if (gen <= (appliedGen[f] || 0)) continue;
     appliedGen[f] = gen;
@@ -732,6 +733,7 @@ async function loadState(files) {
   updateCount();
   updatePlaceholder();
   renderNotice();
+  if (typeof renderWorkspace === 'function') renderWorkspace();
   syncSettle();
   meta.textContent = state.extracting ? 'extracting proposals…'
     : state.total > state.transcript.length ? `showing last ${state.transcript.length} of ${state.total}` : live ? 'ready · live' : 'ready';
