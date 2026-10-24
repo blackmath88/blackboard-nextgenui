@@ -32,11 +32,18 @@ const demo = JSON.parse(fs.readFileSync(path.join(src, 'demo.json'), 'utf8'));
 const DIR = path.resolve(APP, dirName);
 const fixtureRoot = process.env.PILOT_FIXTURE_ROOT;
 
+// Refuse legacy/unowned directories before any writes or child launches.
+try {
+  if (fixtureRoot) safety.validate(DIR, fixtureRoot); else safety.validateDemo(DIR);
+} catch {
+  console.error(`REFUSE demo directory ${JSON.stringify(DIR)}: it is unmarked or outside a valid fixture root; remove it by hand if disposable, or choose a new PILOT_DEMO_DIR=.pilot-demo-<name>`);
+  process.exit(2);
+}
 // Refuse occupied ports before seeding or starting children.
 require('child_process').execFileSync(process.execPath, [path.join(APP, 'dev/lib/safe-dir.js'), 'ports', String(JSON.parse(fs.readFileSync(path.join(src, 'pilot.config.json'), 'utf8')).port + shift), ...(demo.fakes || []).map((f) => String(f.port + shift))], { stdio: 'inherit' });
 
 // ---- seed the throwaway dir ----
-safety.remove(DIR, fixtureRoot);
+if (fixtureRoot) safety.remove(DIR, fixtureRoot); else safety.removeDemo(DIR);
 safety.mark(DIR);
 for (const f of fs.readdirSync(src)) {
   if (f === 'demo.json' || f === 'pilot.config.json') continue;
@@ -101,7 +108,16 @@ launch('server', ['server.js'], { PILOT_DIR: dirName, PILOT_CONFIG: path.relativ
   console.log(`\n  CLI Pilot demo ${version}: open ${URL}\n\n  try this:`);
   // {url} and {dir} in a try line become this demo's URL and its absolute data dir (one-liners stay copy-pasteable);
   // {app} = absolute pilot/app, {rel} = the data dir relative to it (pilot-v0.6, for `npm run stats -- <dir>`)
-  for (const l of demo.try || []) console.log(`   - ${l.replaceAll('{url}', URL).replaceAll('{dir}', DIR).replaceAll('{app}', APP).replaceAll('{rel}', dirName)}`);
+  const quote = (v) => "'" + v.replaceAll("'", "'\\''") + "'";
+  for (let l of demo.try || []) {
+    // Keep paths out of JavaScript source; quote shell arguments independently.
+    l = l.replace(/node -e '([^']*)'/g, (_, code) => {
+      if (!code.includes('"{dir}/state.json"')) return `node -e ${quote(code)}`;
+      return `node -e ${quote(code.replaceAll('"{dir}/state.json"', 'process.argv[1]'))} ${quote(path.join(DIR, 'state.json'))}`;
+    });
+    l = l.replace('cd {app} && npm run stats -- {rel}', `cd ${quote(APP)} && npm run stats -- ${quote(dirName)}`);
+    console.log(`   - ${l.replaceAll('{url}', URL).replaceAll('{dir}', DIR).replaceAll('{app}', APP).replaceAll('{rel}', dirName)}`);
+  }
   console.log('\n  Ctrl+C stops the demo (server and fakes).\n');
 })();
 

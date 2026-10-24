@@ -9,9 +9,9 @@
 # .pilot-verify-v10b/, .pilot-demo-verify10/), so it never touches .pilot/ or a running demo.
 # Usage (from anywhere): bash pilot/app/dev/verify-v0.10.sh
 set -u
-cd "$(dirname "$0")/.."
-source dev/lib/safe-dir.sh
-T=$(fixture_temp); FIXTURE_ROOT="$T"; PIDS=(); SERVER=""; F3=""; F4=""
+cd "$(dirname "$0")/.." || exit 1
+source dev/lib/safe-dir.sh || exit 1
+T=$(fixture_temp) || exit 1; fixture_root "$T"; FIXTURE_ROOT="$T"; PIDS=(); SERVER=""; F3=""; F4=""
 DIR="$T/.pilot-verify-v10"
 cleanup() { kill "${PIDS[@]}" 2>/dev/null; wait 2>/dev/null; fixture_remove "$T"; }
 trap cleanup EXIT
@@ -107,7 +107,7 @@ node -e '
   console.log(`   ${c3.ok ? "ok " : "BAD"} kanban shown, task ids -> ok`);
   console.log(bad ? "BAD " + bad : "TABLE OK " + (cases.length + 2));' > "$T/table.txt"
 cat "$T/table.txt"
-check "every FrameIntent case gives the documented verdict ($(tail -1 $T/table.txt))" "$(grep -q '^TABLE OK' "$T/table.txt" && echo true)"
+check "every FrameIntent case gives the documented verdict ($(tail -1 "$T/table.txt"))" "$(grep -q '^TABLE OK' "$T/table.txt" && echo true)"
 check "the schema is closed: additionalProperties false, keys pane/focus/order/group only, pane map|kanban, group status|author" "$(node -e 'const s=require("./schemas/frame-intent.schema.json");console.log(s.additionalProperties===false&&Object.keys(s.properties).join()==="pane,focus,order,group"&&s.properties.pane.enum.join()==="map,kanban"&&s.properties.group.enum.join()==="status,author")')"
 
 echo "== 2. off by default: no frame call, no frames.json, no event"

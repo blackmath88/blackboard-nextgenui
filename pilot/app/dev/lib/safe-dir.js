@@ -6,32 +6,49 @@ const path = require('path');
 const net = require('net');
 const MARK = '.pilot-fixture';
 function mark(dir) { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, MARK), 'pilot fixture\n'); return dir; }
-function tempRoot() { return mark(fs.mkdtempSync(path.join(__dirname, '../..', '.pilot-verify-run-'))); }
-function validate(dir, root) {
-  const refuse = () => { throw new Error(`REFUSE fixture delete: ${JSON.stringify(dir)} (requires a marked fixture within its temp root or a marked .pilot-demo*/.pilot-verify* directory)`); };
-  if (!dir || typeof dir !== 'string') refuse();
-  const target = path.resolve(dir);
-  if ([path.parse(target).root, os.homedir()].includes(target) || path.basename(target) === '.pilot') refuse();
-  // Resolve existing ancestors too: neither the target nor a parent may escape via a symlink.
-  let ancestor = target;
-  while (!fs.existsSync(ancestor)) ancestor = path.dirname(ancestor);
-  let component = target;
+function tempRoot() { return validateRoot(mark(fs.mkdtempSync(path.join(__dirname, '../..', '.pilot-verify-run-')))); }
+function refuse(dir) { throw new Error(`REFUSE fixture delete: ${JSON.stringify(dir)} (requires a valid marked run root and marked fixture; named demos require their own marker)`); }
+function canonical(dir) {
+  if (!dir || typeof dir !== 'string' || path.resolve(dir) !== dir) refuse(dir);
+  if ([path.parse(dir).root, os.homedir()].includes(dir) || path.basename(dir) === '.pilot') refuse(dir);
+  let component = dir;
   while (component !== path.dirname(component)) {
-    if (fs.lstatSync(component, { throwIfNoEntry: false })?.isSymbolicLink()) refuse();
+    if (fs.lstatSync(component, { throwIfNoEntry: false })?.isSymbolicLink()) refuse(dir);
     component = path.dirname(component);
   }
-  const real = fs.realpathSync(ancestor);
-  if (real !== ancestor) refuse();
-  const inside = root && fs.existsSync(root) && fs.realpathSync(root) === path.resolve(root)
-    && fs.existsSync(path.join(root, MARK)) && (target === path.resolve(root) || target.startsWith(path.resolve(root) + path.sep));
-  if (!inside && !/^\.pilot-(demo|verify)[\w-]*$/.test(path.basename(target))) refuse();
-  if (!fs.existsSync(target)) return;
-  const marker = path.join(target, MARK);
-  if (!fs.existsSync(marker) || !fs.lstatSync(marker).isFile() || fs.lstatSync(marker).isSymbolicLink()) refuse();
-  return target;
+  return dir;
+}
+function marked(dir) {
+  const st = fs.lstatSync(path.join(dir, MARK), { throwIfNoEntry: false });
+  return st?.isFile() && !st.isSymbolicLink();
+}
+function validateRoot(root) {
+  canonical(root);
+  if (!/^\.pilot-verify-run-[\w-]+$/.test(path.basename(root)) || !fs.lstatSync(root, { throwIfNoEntry: false })?.isDirectory() || !marked(root) || fs.realpathSync(root) !== root) refuse(root);
+  return root;
+}
+function validate(dir, root) {
+  validateRoot(root);
+  canonical(dir);
+  if (dir !== root && !dir.startsWith(root + path.sep)) refuse(dir);
+  if (!fs.existsSync(dir)) return;
+  if (!marked(dir)) refuse(dir);
+  return dir;
 }
 function remove(dir, root) {
   const target = validate(dir, root);
+  if (target) fs.rmSync(target, { recursive: true, force: true });
+}
+// Explicit standalone-demo policy, never used as fallback for run-owned paths.
+function validateDemo(dir) {
+  canonical(dir);
+  if (!/^\.pilot-demo[\w-]*$/.test(path.basename(dir))) refuse(dir);
+  if (!fs.existsSync(dir)) return;
+  if (!marked(dir)) refuse(dir);
+  return dir;
+}
+function removeDemo(dir) {
+  const target = validateDemo(dir);
   if (target) fs.rmSync(target, { recursive: true, force: true });
 }
 async function portsFree(ports) {
@@ -44,11 +61,12 @@ async function portsFree(ports) {
     });
   }
 }
-module.exports = { mark, tempRoot, validate, remove, portsFree };
+module.exports = { mark, tempRoot, validateRoot, validate, remove, validateDemo, removeDemo, portsFree };
 if (require.main === module) {
   const [cmd, root, ...args] = process.argv.slice(2);
   (async () => {
     if (cmd === 'temp') console.log(tempRoot());
+    else if (cmd === 'root') validateRoot(root);
     else if (cmd === 'remove') { if (!args.length) remove(undefined, root); for (const dir of args) remove(dir, root); }
     else if (cmd === 'validate') { if (!args.length) validate(undefined, root); for (const dir of args) validate(dir, root); }
     else if (cmd === 'reset') { remove(args[0], root); mark(args[0]); }

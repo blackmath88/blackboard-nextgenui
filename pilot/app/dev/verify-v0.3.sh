@@ -5,9 +5,9 @@
 # never touches .pilot/ or a running `npm run demo`.
 # Usage (from anywhere): bash pilot/app/dev/verify-v0.3.sh
 set -u
-cd "$(dirname "$0")/.."
-source dev/lib/safe-dir.sh
-T=$(fixture_temp); FIXTURE_ROOT="$T"; PIDS=(); SERVER=""
+cd "$(dirname "$0")/.." || exit 1
+source dev/lib/safe-dir.sh || exit 1
+T=$(fixture_temp) || exit 1; fixture_root "$T"; FIXTURE_ROOT="$T"; PIDS=(); SERVER=""
 DIR="$T/.pilot-verify-v03"
 cleanup() { kill "${PIDS[@]}" 2>/dev/null; wait 2>/dev/null; fixture_remove "$T"; }
 trap cleanup EXIT

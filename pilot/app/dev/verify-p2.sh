@@ -3,9 +3,9 @@
 # Usage (from anywhere): bash pilot/app/dev/verify-p2.sh
 # Uses a fresh marked fixture; never touches the real .pilot/.
 set -u
-cd "$(dirname "$0")/.."
-source dev/lib/safe-dir.sh
-T=$(fixture_temp) || exit 1; FIXTURE_ROOT="$T";
+cd "$(dirname "$0")/.." || exit 1
+source dev/lib/safe-dir.sh || exit 1
+T=$(fixture_temp) || exit 1; fixture_root "$T"; FIXTURE_ROOT="$T";
 export PILOT_DIR="$T/data" PILOT_CONFIG="$T/dev.json"
 node -e 'const c=require("./pilot.config.dev.json");c.port=4750;console.log(JSON.stringify(c))' > "$T/dev.json"
 PIDS=()
@@ -38,7 +38,7 @@ turn "one"
 check "2 messages, threshold 12: no question" "$(asks | q 'x===0')"
 threshold 4
 turn "two"
-check "threshold edited to 4 in "$PILOT_DIR/rules.json": asked on the next turn (4 messages), no restart" "$(asks | q 'x===1')"
+check "threshold edited to 4 in $PILOT_DIR/rules.json: asked on the next turn (4 messages), no restart" "$(asks | q 'x===1')"
 check "modules.json pending=index, no pane yet" "$(state | q 'x.pending==="index" && x.panes.length===0')"
 check "controller line text uses {n}" "$(grep '"role":"controller"' "$PILOT_DIR/transcript.jsonl" | q 'x.text.startsWith("4 messages.")')"
 

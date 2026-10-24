@@ -5,9 +5,9 @@
 # Verdicts are read from the output (^FAIL lines, the "ALL ... PASSED" marker), not from exit codes:
 # verify-p1/p2 always exit 0 and verify-p0 prints no verdicts (its success marker is its final transcript dump).
 set -u
-cd "$(dirname "$0")/.."
-source dev/lib/safe-dir.sh
-T=$(fixture_temp); FIXTURE_ROOT=$T; trap 'fixture_remove "$T"' EXIT
+cd "$(dirname "$0")/.." || exit 1
+source dev/lib/safe-dir.sh || exit 1
+T=$(fixture_temp) || exit 1; fixture_root "$T"; FIXTURE_ROOT=$T; trap 'fixture_remove "$T"' EXIT
 BAD=0; SUMMARY=()
 run() {
   local name=$1; shift

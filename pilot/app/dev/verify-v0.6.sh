@@ -5,10 +5,10 @@
 # .pilot-verify-v06c/, .pilot-verify-v06b/, .pilot-demo-verify06/), so it never touches .pilot/ or a running demo.
 # Usage (from anywhere): bash pilot/app/dev/verify-v0.6.sh
 set -u
-cd "$(dirname "$0")/.."
-source dev/lib/safe-dir.sh
+cd "$(dirname "$0")/.." || exit 1
+source dev/lib/safe-dir.sh || exit 1
 APPDIR=$(pwd)
-T=$(fixture_temp); FIXTURE_ROOT="$T"; PIDS=(); SERVER=""
+T=$(fixture_temp) || exit 1; fixture_root "$T"; FIXTURE_ROOT="$T"; PIDS=(); SERVER=""
 DIR="$T/.pilot-verify-v06"
 cleanup() { kill "${PIDS[@]}" 2>/dev/null; wait 2>/dev/null; fixture_remove "$T"; }
 trap cleanup EXIT
@@ -149,8 +149,9 @@ check "demo serves /state within 30 s: three panes with rule and answer; items f
 DS=$(curl -s -X POST localhost:4964/command -H 'content-type: application/json' -d '{"text":"/stats"}' | q 'x.lines.join("\n")')
 check "demo /stats: 3 PASS, 2 NOT YET, labelled as fixture data" "$(echo "$DS" | grep -q '^3 PASS, 2 NOT YET' && echo "$DS" | grep -q '^FIXTURE DATA: 130 of 131 metrics events' && echo true)"
 for i in $(seq 1 20); do grep -q 'Ctrl+C stops' "$T/demo.log" && break; sleep 0.2; done
-FLIP=$(grep -o "node -e '[^']*'" "$T/demo.log" | sed -n 1p); STATS=$(grep -o "cd [^ ]* && npm run stats -- [^ ]*" "$T/demo.log")
-check "try lines: /stats, index clicks, the npm run stats line and the flip one-liner for the demo's own dir" "$(grep -q '/stats' "$T/demo.log" && grep -qi 'click three entries in the index' "$T/demo.log" && echo "$STATS" | grep -Fq "npm run stats -- $T/.pilot-demo-verify06" && echo "$FLIP" | grep -q "$T/.pilot-demo-verify06/state.json" && echo true)"
+FLIP=$(sed -n "s/^.*: \(node -e .*\)$/\1/p" "$T/demo.log" | sed -n 1p)
+STATS=$(sed -n 's/^.*Same from the shell: //p' "$T/demo.log")
+check "try lines: /stats, index clicks, the npm run stats line and the flip one-liner for the demo's own dir" "$(grep -q '/stats' "$T/demo.log" && grep -qi 'click three entries in the index' "$T/demo.log" && echo "$STATS" | grep -Fq ".pilot-demo-verify06" && echo "$FLIP" | grep -Fq ".pilot-demo-verify06/state.json" && echo true)"
 eval "$FLIP"; sleep 0.5
 check "the printed flip one-liner: dec-7 confirmed, /state prov fields [status] (\"confirmed by you (file edit)\")" "$(curl -s localhost:4964/state | q '(d=>d.status==="confirmed"&&d.prov.fields.join()==="status")(x.items.find(i=>i.id==="dec-7"))')"
 check "the printed npm run stats line works as printed (FIXTURE DATA, five measures)" "$(eval "$STATS" 2>/dev/null | grep -q '^FIXTURE DATA' && echo true)"

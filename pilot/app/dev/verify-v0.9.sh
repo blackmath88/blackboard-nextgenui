@@ -7,9 +7,9 @@
 # demo part shifted +200: 4976/5978/5979) and own dirs (.pilot-verify-v09/, .pilot-verify-v09b/, .pilot-demo-verify09/),
 # so it never touches .pilot/ or a running demo. Usage (from anywhere): bash pilot/app/dev/verify-v0.9.sh
 set -u
-cd "$(dirname "$0")/.."
-source dev/lib/safe-dir.sh
-T=$(fixture_temp); FIXTURE_ROOT="$T"; PIDS=(); SERVER=""
+cd "$(dirname "$0")/.." || exit 1
+source dev/lib/safe-dir.sh || exit 1
+T=$(fixture_temp) || exit 1; fixture_root "$T"; FIXTURE_ROOT="$T"; PIDS=(); SERVER=""
 DIR="$T/.pilot-verify-v09"
 cleanup() { kill "${PIDS[@]}" 2>/dev/null; wait 2>/dev/null; fixture_remove "$T"; }
 trap cleanup EXIT

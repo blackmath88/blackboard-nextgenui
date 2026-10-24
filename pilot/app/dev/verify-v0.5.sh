@@ -5,9 +5,9 @@
 # never touches .pilot/ or a running `npm run demo`.
 # Usage (from anywhere): bash pilot/app/dev/verify-v0.5.sh
 set -u
-cd "$(dirname "$0")/.."
-source dev/lib/safe-dir.sh
-T=$(fixture_temp); FIXTURE_ROOT="$T"; PIDS=(); SERVER=""
+cd "$(dirname "$0")/.." || exit 1
+source dev/lib/safe-dir.sh || exit 1
+T=$(fixture_temp) || exit 1; fixture_root "$T"; FIXTURE_ROOT="$T"; PIDS=(); SERVER=""
 DIR="$T/.pilot-verify-v05"
 cleanup() { kill "${PIDS[@]}" 2>/dev/null; wait 2>/dev/null; fixture_remove "$T"; }
 trap cleanup EXIT
@@ -55,7 +55,7 @@ check "the server's temp files (.<name>.<pid>.<ts>.tmp) are never pushed" "$(qa 
 echo "== 2. hand edit of state.json -> SSE event and /state (10 runs; the number is recorded in CHECKS.md)"
 node dev/sse-probe.js latency 4780 "$DIR/state.json" 10 > "$T/lat.json"; cat "$T/lat.json" | sed 's/^/   /'
 check "every hand edit: event and /state showing it within 1 s; /state has the new status" "$(q 'x.ok && x.stateMs.length===10 && Math.max(...x.stateMs)<1000' < "$T/lat.json")"
-echo "   event latency: median $(q 'x.eventMs.slice().sort((a,b)=>a-b)[5]' < $T/lat.json) ms, max $(q 'Math.max(...x.eventMs)' < $T/lat.json) ms (150 ms of it is the debounce)"
+echo "   event latency: median $(q 'x.eventMs.slice().sort((a,b)=>a-b)[5]' < "$T/lat.json") ms, max $(q 'Math.max(...x.eventMs)' < "$T/lat.json") ms (150 ms of it is the debounce)"
 
 echo "== 3. debounce 150 ms; every client gets every event"
 node dev/sse-probe.js listen 4780 1500 "$T/ev2.jsonl" & L2=$!; PIDS+=($!)
@@ -137,8 +137,9 @@ for i in $(seq 1 60); do if curl -s -m 1 localhost:4958/state > "$T/ds.json" 2>/
 echo "   up after $(( $(date +%s) - D0 )) s"
 check "demo serves /state within 30 s: map pane, dec-2 proposed" "$( [ -n "$UP" ] && q 'x.panes.includes("map") && x.items.some(i=>i.id==="dec-2"&&i.status==="proposed")' < "$T/ds.json")"
 for i in $(seq 1 20); do grep -q 'Ctrl+C stops' "$T/demo.log" && break; sleep 0.2; done
-FLIP=$(grep -o "node -e '[^']*'" "$T/demo.log" | sed -n 1p); BREAK=$(grep -o "node -e '[^']*'" "$T/demo.log" | sed -n 2p)
-check "try lines: two tabs, the flip and break one-liners point at the demo's own dir" "$(grep -qi 'two tabs' "$T/demo.log" && echo "$FLIP" | grep -q "$T/.pilot-demo-verify05/state.json" && echo "$BREAK" | grep -Fq "$T/.pilot-demo-verify05/state.json" && echo true)"
+FLIP=$(sed -n "s/^.*: \(node -e .*\)$/\1/p" "$T/demo.log" | sed -n 1p)
+BREAK=$(sed -n "s/^.*: \(node -e .*\)   ->.*$/\1/p" "$T/demo.log")
+check "try lines: two tabs, the flip and break one-liners point at the demo's own dir" "$(grep -qi 'two tabs' "$T/demo.log" && echo "$FLIP" | grep -Fq ".pilot-demo-verify05/state.json" && echo "$BREAK" | grep -Fq ".pilot-demo-verify05/state.json" && echo true)"
 node dev/sse-probe.js listen 4958 1500 "$T/dev.jsonl" & DL=$!; PIDS+=($!)
 for i in $(seq 1 50); do grep -q hello "$T/dev.jsonl" 2>/dev/null && break; sleep 0.05; done
 eval "$FLIP"; wait $DL

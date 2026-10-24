@@ -5,9 +5,9 @@
 # .pilot-verify-v04b/, .pilot-demo-verify04/), so it never touches .pilot/ or a running `npm run demo`.
 # Usage (from anywhere): bash pilot/app/dev/verify-v0.4.sh
 set -u
-cd "$(dirname "$0")/.."
-source dev/lib/safe-dir.sh
-T=$(fixture_temp); FIXTURE_ROOT="$T"; PIDS=(); SERVER=""
+cd "$(dirname "$0")/.." || exit 1
+source dev/lib/safe-dir.sh || exit 1
+T=$(fixture_temp) || exit 1; fixture_root "$T"; FIXTURE_ROOT="$T"; PIDS=(); SERVER=""
 DIR="$T/.pilot-verify-v04"
 cleanup() { kill "${PIDS[@]}" 2>/dev/null; wait 2>/dev/null; fixture_remove "$T"; }
 trap cleanup EXIT
@@ -174,7 +174,7 @@ refake 5773 morrow-x
 
 echo "== 11. consent for map/kanban: counts proposed + confirmed, not rejected; no pane without an answer"
 fresh good.json
-node -e 'const f="'"$DIR"'/rules.json",fs=require("fs"),r=JSON.parse(fs.readFileSync(f));r.rules.find(x=>x.module==="map").threshold=2;r.rules.find(x=>x.module==="kanban").threshold=2;fs.writeFileSync(f,JSON.stringify(r,null,2))'
+node -e 'const f=process.argv[1],fs=require("fs"),r=JSON.parse(fs.readFileSync(f));r.rules.find(x=>x.module==="map").threshold=2;r.rules.find(x=>x.module==="kanban").threshold=2;fs.writeFileSync(f,JSON.stringify(r,null,2))' "$DIR/rules.json"
 chat "Decision: one decision only." > /dev/null; settle
 check "1 decision, threshold 2: no question" "$(state | q 'x.pending===null')"
 chat "Decision: a second decision." > /dev/null; settle

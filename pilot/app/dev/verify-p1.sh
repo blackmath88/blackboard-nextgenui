@@ -3,9 +3,9 @@
 # Usage (from anywhere): bash pilot/app/dev/verify-p1.sh
 # Uses a fresh marked fixture; never touches the real .pilot/.
 set -u
-cd "$(dirname "$0")/.."
-source dev/lib/safe-dir.sh
-T=$(fixture_temp) || exit 1; FIXTURE_ROOT="$T";
+cd "$(dirname "$0")/.." || exit 1
+source dev/lib/safe-dir.sh || exit 1
+T=$(fixture_temp) || exit 1; fixture_root "$T"; FIXTURE_ROOT="$T";
 export PILOT_DIR="$T/data" PILOT_CONFIG="$T/dev.json"
 node -e 'const c=require("./pilot.config.dev.json");c.port=4750;console.log(JSON.stringify(c))' > "$T/dev.json"
 PIDS=()
