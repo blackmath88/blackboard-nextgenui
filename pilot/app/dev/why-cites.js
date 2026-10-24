@@ -54,7 +54,7 @@ function checkCite(c) {
   }
   let ok = 0, bad = 0;
   for (const t of targets) {
-    const r = await (await fetch(`${url}/command`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: `/why ${t}`.trim() }) })).json();
+    const r = await (await fetch(`${url}/command`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ text: `/why ${t}`.trim() }) })).json();
     if (!Array.isArray(r.why)) { console.log(`FAIL /why ${t}: no statements`); bad++; continue; }
     if (r.lines.join('\n') !== r.why.map((s) => (s.head ? s.text : `  ${s.text}  [${s.cite.join('; ')}]`)).join('\n')) { console.log(`FAIL /why ${t}: lines and statements differ`); bad++; }
     for (const s of r.why) {

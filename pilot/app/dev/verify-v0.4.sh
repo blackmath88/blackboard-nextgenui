@@ -30,11 +30,11 @@ refake() { local port=$1; unfake "$port"; fake "$@"; }
 server() { PILOT_DIR="$DIR" PILOT_CONFIG="$T/$1" node server.js > "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); sleep 0.5; }
 stop_server() { [ -n "$SERVER" ] && { kill $SERVER 2>/dev/null; wait $SERVER 2>/dev/null; }; }
 fresh() { stop_server; fixture_reset "$DIR"; mkdir -p "$DIR"; [ -n "${2:-}" ] && printf '%s' "$2" > "$DIR/state.json"; server "$1"; }
-chat() { curl -sN -X POST localhost:4770/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
-cmd() { curl -s -X POST localhost:4770/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
-decide() { curl -s -w '\n%{http_code}' -X POST localhost:4770/answer -H 'content-type: application/json' -d "{\"itemId\":\"$1\",\"decision\":\"$2\"}"; }
-answer() { curl -s -X POST localhost:4770/answer -H 'content-type: application/json' -d "{\"module\":\"$1\",\"answer\":\"$2\"}"; }
-state() { curl -s localhost:4770/state; }
+chat() { curl -H 'x-pilot: 1' -sN -X POST localhost:4770/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+cmd() { curl -H 'x-pilot: 1' -s -X POST localhost:4770/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+decide() { curl -H 'x-pilot: 1' -s -w '\n%{http_code}' -X POST localhost:4770/answer -H 'content-type: application/json' -d "{\"itemId\":\"$1\",\"decision\":\"$2\"}"; }
+answer() { curl -H 'x-pilot: 1' -s -X POST localhost:4770/answer -H 'content-type: application/json' -d "{\"module\":\"$1\",\"answer\":\"$2\"}"; }
+state() { curl -H 'x-pilot: 1' -s localhost:4770/state; }
 # wait until no extraction is queued or running (max 10 s)
 settle() { for i in $(seq 1 100); do [ "$(state | q 'x.extracting')" = "false" ] && return; sleep 0.1; done; echo "   (extraction still running after 10 s)"; }
 items() { [ -f "$DIR/state.json" ] && cat "$DIR/state.json" || echo '{"rev":0,"items":[]}'; }
@@ -116,6 +116,8 @@ check "no extract event in this run ever proposed more than 3" "$(cat "$DIR/metr
 echo "== 6. near-duplicates are dropped (of state.json and within the batch); rejected items do not block"
 refake 5773 morrow-x --extract=dupes
 fresh good.json "$ITEM_USER"
+# This legacy fake derives its duplicate from the prompt; explicitly authorize that board access.
+cmd "/context share board on" > /dev/null
 M=$(mcount); chat "Decision: we send it by registered mail." > /dev/null; settle
 check "dupes: only the first of 'X' / 'X!' (capitals) / 'the <dec-1 title>' is written (dec-2)" "$(items | q 'x.items.length===3 && x.items[2].id==="dec-2" && x.items[2].text==="we send it by registered mail"')"
 check "dupes: two extract_drop duplicate events (one of dec-1, one within the batch)" "$(since $M | qa 'x.filter(e=>e.event==="extract_drop"&&e.reason==="duplicate").length===2 && x.some(e=>e.reason==="duplicate"&&e.of==="dec-1")')"
@@ -209,13 +211,13 @@ check "contrast-check.js still passes with the item styles" "$( [ $RC -eq 0 ] &&
 echo "== 13. demo v0.4 starts within 30 s and shows a proposal after one message (ports +200, dir $T/.pilot-demo-verify04)"
 PILOT_FIXTURE_ROOT="$T" DEMO_PORT_SHIFT=200 PILOT_DEMO_DIR="$T/.pilot-demo-verify04" node scripts/demo.js v0.4 < /dev/null > "$T/demo.log" 2>&1 & DEMO=$!
 D0=$(date +%s); UP=""
-for i in $(seq 1 60); do if curl -s -m 1 localhost:4954/state > "$T/demo-state.json" 2>/dev/null && [ -s "$T/demo-state.json" ]; then UP=1; break; fi; sleep 0.5; done
+for i in $(seq 1 60); do if curl -H 'x-pilot: 1' -s -m 1 localhost:4954/state > "$T/demo-state.json" 2>/dev/null && [ -s "$T/demo-state.json" ]; then UP=1; break; fi; sleep 0.5; done
 echo "   up after $(( $(date +%s) - D0 )) s"
 check "demo serves /state within 30 s" "$( [ -n "$UP" ] && echo true)"
 check "demo state: map pane shown, dec-2 proposed, nothing pending" "$(q 'x.panes.includes("map") && x.items.some(i=>i.id==="dec-2"&&i.status==="proposed") && x.pending===null' < "$T/demo-state.json")"
 P0=$(now)
-curl -sN -X POST localhost:4954/chat -H 'content-type: application/json' -d '{"text":"Decision: we send the letter by registered mail. Task: draft the letter tonight."}' > /dev/null
-for i in $(seq 1 50); do curl -s localhost:4954/state > "$T/demo-state.json"; [ "$(q 'x.extracting' < "$T/demo-state.json")" = "false" ] && break; sleep 0.1; done
+curl -H 'x-pilot: 1' -sN -X POST localhost:4954/chat -H 'content-type: application/json' -d '{"text":"Decision: we send the letter by registered mail. Task: draft the letter tonight."}' > /dev/null
+for i in $(seq 1 50); do curl -H 'x-pilot: 1' -s localhost:4954/state > "$T/demo-state.json"; [ "$(q 'x.extracting' < "$T/demo-state.json")" = "false" ] && break; sleep 0.1; done
 echo "   proposal after $(( $(now) - P0 )) ms"
 check "demo: one message -> dashed dec-4 + task-3 proposed, kanban question pending" "$(q 'x.items.some(i=>i.id==="dec-4"&&i.status==="proposed") && x.items.some(i=>i.id==="task-3"&&i.status==="proposed") && x.pending==="kanban"' < "$T/demo-state.json")"
 check "demo printed URL and try-this lines" "$(grep -q 'http://127.0.0.1:4954' "$T/demo.log" && grep -qi 'try this' "$T/demo.log" && echo true)"

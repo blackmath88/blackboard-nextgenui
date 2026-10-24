@@ -28,6 +28,7 @@ const stats = require('./stats.js');
 const why = require('./why.js');
 const fade = require('./fade.js');
 const frame = require('./frame.js');
+const secrets = require('./secrets.js');
 
 const APP = __dirname;
 const PUBLIC = path.join(APP, 'public');
@@ -43,6 +44,7 @@ const RULES = path.join(PILOT, 'rules.json');
 const MODULES = path.join(PILOT, 'modules.json');
 const STATE = path.join(PILOT, 'state.json');      // decisions, tasks, sources (proposed by the model or added by hand)
 const FLAGS = path.join(PILOT, 'flags.json');      // pilot-v0.9: /flag overrides of config.experiments (hand-editable)
+const CONTEXT = path.join(PILOT, 'context.json');
 const FRAMES = path.join(PILOT, 'frames.json');    // pilot-v0.10: frame proposals and applied frames (hand-editable)
 const EXTRACTION_SCHEMA = JSON.parse(fs.readFileSync(path.join(APP, 'schemas', 'extraction.schema.json'), 'utf8'));
 const BUILT = ['index', 'map', 'kanban'];   // panes this build can show; the controller only evaluates their rules
@@ -153,6 +155,44 @@ function flagsSummary() {
   const [frameProposals, frameSource] = flagValue(f, 'frameProposals');
   return { settledInput, settleMs: SETTLE_MS, source, frameProposals, frameSource, rev: f.rev };
 }
+
+// Context deliberately has no last-good fallback: an unreadable setting must stop sharing.
+function readContext() {
+  const off = { rev: 0, share: { board: false } };
+  try {
+    const d = readJson(CONTEXT, off);
+    if (!d || !Number.isInteger(d.rev) || d.rev < 0 || !d.share || typeof d.share.board !== 'boolean') throw new Error();
+    return { rev: d.rev, share: { board: d.share.board }, changedBy: d.changedBy, changedAt: d.changedAt };
+  } catch { return { ...off, error: 'context.json is invalid or unreadable; board sharing is off' }; }
+}
+function contextSummary() {
+  const d = readContext();
+  const c = roleConfig('chat').candidates.find(c => c.name === activeName('chat'));
+  const recipient = role => {
+    const rc = roleConfig(role), candidate = rc.candidates.find(c => c.name === activeName(role));
+    return { candidate: candidate?.name || null, location: candidate ? candidate.local === true ? 'local' : 'cloud' : null,
+      policy: pinnedName(role) ? 'pinned' : rc.policy, candidates: attemptOrder(role).map(c => ({ name: c.name, location: c.local === true ? 'local' : 'cloud' })), allowCloudFallback: rc.allowCloudFallback === true };
+  };
+  const extract = roleConfig('extract');
+  const maxItems = Math.max(1, Math.min(EXTRACTION_SCHEMA.properties.items.maxItems, Number(extract.maxItems) || EXTRACTION_SCHEMA.properties.items.maxItems));
+  const ctx = frameContext(), panes = frame.FRAME_PANES.filter(p => ctx.visible.includes(p) && !ctx.faded.includes(p));
+  const frameEnabled = d.share.board && flagsSummary().frameProposals && panes.length && !ctx.error;
+  const user = { text: '<next user message>' }, assistant = { text: '<next assistant reply>' };
+  const nextMessage = d.share.board ? boardContext() : null;
+  return { ...d, status: d.share.board ? `board is sent to ${c ? c.name : 'no candidate'}${c && c.local !== true ? ' (cloud)' : ' (local)'}` : 'conversation-only', nextMessage,
+    roles: {
+      chat: { ...recipient('chat'), sends: 'last 40 user/assistant messages', extraSystemMessage: nextMessage },
+      extract: { ...recipient('extract'), sends: 'current user + assistant turn, extraction instructions/schema; existing item titles only when board sharing is on; dedupe also runs server-side', everyNTurns: Math.max(1, Number(extract.everyNTurns) || 1),
+        messagesTemplate: extract.candidates.length ? extractionMessages(user, assistant, d.share.board ? readState().items : [], maxItems) : null },
+      frame: { ...recipient('frame'), sends: frameEnabled ? 'current turn + shown pane item titles and applied frames; instructions/schema' : 'nothing',
+        skipReason: !d.share.board ? 'board sharing is off' : !flagsSummary().frameProposals ? 'frame experiment is off' : !panes.length || ctx.error ? 'no usable panes' : null,
+        messagesTemplate: frameEnabled && roleConfig('frame').candidates.length ? frameMessages(user, assistant, panes, ctx.items, readFrames().applied) : null },
+    } };
+
+}
+const keyNames = [...new Set(Object.values(config.roles || {}).flatMap(r => (r.candidates || []).map(c => c.keyEnv).filter(Boolean)))];
+function keyStatus() { return keyNames.map(name => ({ name, source: secrets.resolve(name).source })); }
+const KEY_HINT = 'API keys cannot be sent in chat. Use Settings (or /key) to save a key locally.';
 
 // ---- growth: deterministic controller over rules.json, consent answers in modules.json ----
 const ANSWERS = { y: 'yes', n: 'no', a: 'always', x: 'never', yes: 'yes', no: 'no', always: 'always', never: 'never' };
@@ -446,11 +486,22 @@ function modelsSummary() {
 // stallMs covers each gap between deltas after the first one (an endpoint that hangs mid-reply is cut off).
 async function callCandidate(candidate, messages, onDelta, signal, extraBody) {
   const headers = { 'content-type': 'application/json' };
+  let key;
   if (candidate.keyEnv) {
-    const key = process.env[candidate.keyEnv];
-    if (!key) throw new Error(`environment variable ${candidate.keyEnv} is not set`);
+    key = secrets.resolve(candidate.keyEnv).value;
+    if (!key) throw new Error(`key ${candidate.keyEnv} is missing; use Settings or the environment`);
     headers.authorization = `Bearer ${key}`;
   }
+  let pending = '';
+  const scrub = text => key ? String(text).replaceAll(key, '[redacted]') : text;
+  const emit = (delta, flush = false) => {
+    pending = scrub(pending + delta);
+    let keep = 0;
+    if (key && !flush) for (let n = 1; n < key.length && n <= pending.length; n++) if (pending.endsWith(key.slice(0, n))) keep = n;
+    const safe = pending.slice(0, pending.length - keep); pending = pending.slice(pending.length - keep);
+    if (safe) onDelta(safe);
+    return safe;
+  };
   const ms = candidate.timeoutMs || 60000;
   const firstByte = new AbortController();
   const timer = setTimeout(() => firstByte.abort(new Error(`no reply within ${ms} ms`)), ms);
@@ -468,13 +519,14 @@ async function callCandidate(candidate, messages, onDelta, signal, extraBody) {
       body: JSON.stringify({ model: candidate.model, messages, stream: true, ...(extraBody ? extraBody(candidate) : {}) }),
       signal: AbortSignal.any([firstByte.signal, stall.signal, signal]),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+    if (!res.ok) { await res.body?.cancel(); throw new Error(`HTTP ${res.status} from model endpoint`); }
 
     let full = '';
     if (!(res.headers.get('content-type') || '').includes('text/event-stream')) {   // endpoint ignored stream:true
       const body = await res.json();
       started();
       full = (body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content) || '';
+      full = scrub(full);
       if (full) onDelta(full);
       return full;
     }
@@ -488,14 +540,16 @@ async function callCandidate(candidate, messages, onDelta, signal, extraBody) {
         buf = buf.slice(nl + 1);
         if (!line.startsWith('data:')) continue;
         const data = line.slice(5).trim();
-        if (data === '[DONE]') return full;
+        if (data === '[DONE]') { full += emit('', true); return full; }
         let delta = '';
         try { const j = JSON.parse(data); delta = (j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content) || ''; } catch { continue; }
-        if (delta) { started(); full += delta; onDelta(delta); }
+        if (delta) { started(); full += emit(delta); }
       }
     }
+    full += emit('', true);
     return full;
   } catch (err) {
+    if (err && typeof err.message === 'string') err.message = scrub(err.message);
     if (stall.signal.aborted && !signal.aborted) throw stall.signal.reason;
     if (firstByte.signal.aborted && !signal.aborted) throw firstByte.signal.reason;
     throw err;
@@ -506,7 +560,7 @@ async function callCandidate(candidate, messages, onDelta, signal, extraBody) {
 // (a stall after the first token therefore never falls back). A pinned role never falls back. After a local
 // candidate (`local: true`) failed, non-local candidates are skipped unless the role sets `allowCloudFallback: true`;
 // a missing `local` counts as non-local. Resolves {text, candidate}; on failure throws with err.partial / err.candidate.
-async function callRole(role, messages, onDelta, signal, extraBody) {
+async function callRole(role, messages, onDelta, signal, extraBody, context) {
   const order = attemptOrder(role);
   const rc = roleConfig(role);
   if (!order.length) throw new Error(`no candidate configured for role "${role}"`);
@@ -522,12 +576,12 @@ async function callRole(role, messages, onDelta, signal, extraBody) {
     const t0 = Date.now();
     try {
       const text = await callCandidate(c, messages, (d) => { streamed += d; onDelta(d); }, signal, extraBody);
-      await metric('model_call', { role, candidate: c.name, model: c.model, ok: true, latencyMs: Date.now() - t0, chars: text.length });
+      await metric('model_call', { role, candidate: c.name, model: c.model, ...(role === 'chat' ? { context } : {}), ok: true, latencyMs: Date.now() - t0, chars: text.length });
       lastUsed[role] = c.name;
       return { text, candidate: c };
     } catch (err) {
       const msg = String((err && err.message) || err);
-      await metric('model_call', { role, candidate: c.name, model: c.model, ok: false, latencyMs: Date.now() - t0, error: msg });
+      await metric('model_call', { role, candidate: c.name, model: c.model, ...(role === 'chat' ? { context } : {}), ok: false, latencyMs: Date.now() - t0, error: msg });
       if (err && err.stall) await metric('stall', { role, candidate: c.name, stallMs: err.stallMs, chars: streamed.length, latencyMs: Date.now() - t0 });
       lastErr = new Error(`${c.name}: ${msg}`);
       lastErr.candidate = c; lastErr.partial = streamed; lastErr.reason = msg; lastErr.stall = !!(err && err.stall);
@@ -642,7 +696,7 @@ async function runExtraction(userLine, replyLine) {
   const structured = (c) => c.structured === true ? { response_format: { type: 'json_schema', json_schema: { name: 'pilot_extraction', schema } } } : {};
   const t0 = Date.now();
   let out;
-  try { out = await callRole('extract', extractionMessages(userLine, replyLine, before.items, maxItems), () => {}, new AbortController().signal, structured); }
+  try { out = await callRole('extract', extractionMessages(userLine, replyLine, readContext().share.board ? before.items : [], maxItems), () => {}, new AbortController().signal, structured); }
   catch (err) { await metric('extract_error', { reason: err.stall ? 'stall' : 'model', error: String(err.message || err), fromMessage: replyLine.id }); return; }
   const base = { candidate: out.candidate.name, model: out.candidate.model, fromMessage: replyLine.id };
   const parsed = parseExtraction(out.text);
@@ -744,6 +798,7 @@ function queueFrame(userLine, replyLine) {
 
 async function runFrame(userLine, replyLine) {
   if (!flagsSummary().frameProposals) return;   // switched off meanwhile
+  if (!readContext().share.board) { await metric('frame_skip', { reason: 'board sharing is off', fromMessage: replyLine.id }); return; }
   const ctx = frameContext();
   const panes = frame.FRAME_PANES.filter((p) => ctx.visible.includes(p) && !ctx.faded.includes(p));
   if (ctx.error || !panes.length) return;        // nothing a frame could arrange: no model call
@@ -1013,13 +1068,14 @@ function statePayload(only) {
     Object.assign(out, { panes: visiblePanes(m), pending: m.pending, pendingKind: m.pendingKind || null, answers: m.answers, removals: m.removals,
       modulesRev: m.rev, paneInfo, faded: visiblePanes(m).filter((mod) => fade.isFaded(m.panes.find((p) => p.module === mod))) });
   }
+  out.context = contextSummary();
   if (want('flags.json')) out.flags = flagsSummary();   // pilot-v0.9
   if (want('frames.json')) { const f = readFrames(); out.frames = { rev: f.rev, pending: f.pending, applied: f.applied, resets: f.resets }; }   // pilot-v0.10
   // items carry `prov` ({added, fields}) when a part of them came from a hand edit (pilot-v0.6, see stats.js)
   if (want('state.json')) { st = readState(); Object.assign(out, { items: stats.withProvenance(st.items, metricsEvents()), stateRev: st.rev, stateError: st.error || null }); }
   // a broken hand-editable file: the page says "file X is not valid JSON, showing last good version" until fixed
   const fileErrors = {};
-  for (const [f, e] of [['state.json', (st || readState()).error], ['modules.json', (m || readModules()).error], ['roles.json', readJsonGood(ROLES, {}).error], ['flags.json', readFlags().error], ['frames.json', readFrames().error]]) if (e) fileErrors[f] = e;
+  for (const [f, e] of [['state.json', (st || readState()).error], ['modules.json', (m || readModules()).error], ['roles.json', readJsonGood(ROLES, {}).error], ['flags.json', readFlags().error], ['frames.json', readFrames().error], ['context.json', readContext().error]]) if (e) fileErrors[f] = e;
   out.fileErrors = fileErrors;
   return out;
 }
@@ -1093,12 +1149,15 @@ function serveStatic(req, res, pathname) {
 // with its id. Proposed and rejected items are left out (a missing status means added by hand, i.e. confirmed). A broken
 // state.json reads as its last good items (readState); an empty board adds nothing.
 const BOARD_MAX = 8;   // per kind, so the message stays small
-function boardContext() {
+function boardContext() { return boardSnapshot()?.message || null; }
+function boardSnapshot() {
   let items;
   try { items = readState().items; } catch { return null; }
   const live = items.filter((i) => (i.status || 'confirmed') === 'confirmed');
+  let count = 0;
   const list = (title, its, fmt) => {
     if (!its.length) return [];
+    count += Math.min(its.length, BOARD_MAX);
     const shown = its.slice(-BOARD_MAX).map((i) => `- ${i.id}: ${fmt(i)}`);
     return [`${title}:`, ...shown, ...(its.length > BOARD_MAX ? [`- (${its.length - BOARD_MAX} older not shown)`] : [])];
   };
@@ -1108,19 +1167,23 @@ function boardContext() {
     ...list('Sources', live.filter((i) => i.kind === 'source'), (i) => i.url ? `${i.text} <${i.url}>` : i.text),
   ];
   if (!lines.length) return null;
-  return { role: 'system', content: ['Project board (the user\'s confirmed state):', ...lines,
-    'Treat confirmed decisions as current constraints. If a request conflicts with one, say so and name its id.'].join('\n') };
+  return { items: count, message: { role: 'system', content: ['Project board (the user\'s confirmed state):', ...lines,
+    'Treat confirmed decisions as current constraints. If a request conflicts with one, say so and name its id.'].join('\n') } };
 }
 
 async function handleChat(req, res) {
   let text;
   try { text = String(JSON.parse(await readBody(req)).text || '').trim(); } catch { return sendJson(res, 400, { error: 'expected JSON {text}' }); }
   if (!text) return sendJson(res, 400, { error: 'empty message' });
+  if (secrets.looksLikeKey(text) || /^\/key\b/.test(text)) return sendJson(res, 400, { error: KEY_HINT });
 
   const userLine = await appendLine('user', text, null);
   const history = readTranscript().filter((l) => l.role === 'user' || l.role === 'assistant').slice(-HISTORY)
     .map((l) => ({ role: l.role, content: l.text }));
-  const board = boardContext();
+  const snapshot = readContext().share.board ? boardSnapshot() : null;
+  const board = snapshot?.message;
+  const context = { board: !!board, items: snapshot?.items || 0 };
+  await metric('chat_context', { context });
   // Ported from 4c2dd98: keep board constraints adjacent to the newest request.
   if (board) history.splice(history.length - 1, 0, board);
 
@@ -1131,7 +1194,7 @@ async function handleChat(req, res) {
 
   let replyLine = null;
   try {
-    const { text: reply, candidate } = await callRole('chat', history, (d) => res.write(d), abort.signal);
+    const { text: reply, candidate } = await callRole('chat', history, (d) => res.write(d), abort.signal, undefined, context);
     replyLine = await appendLine('assistant', reply, candidate.name);
   } catch (err) {
     // Keep whatever arrived before the failure, then record the failure as a system line.
@@ -1163,11 +1226,32 @@ const HELP = [
   '/flag [settled-input on|off]  experiments (pilot-v0.9): show them, or switch one (kept in flags.json; default off)',
   '/flag frame-proposals on|off  experiment (pilot-v0.10): the frame role may suggest how a pane shows its cards',
   '/frame [reset [map|kanban]]  frames (pilot-v0.10): what is proposed and applied per pane; reset undoes an applied frame',
+  '/context [share board on|off]  preview or change board sharing (default off)',
+  '/key [status]              open Settings or show key sources; never type keys in chat',
   '/help                      this list',
 ];
 
 async function runCommand(input) {
   const [cmd, ...args] = input.trim().split(/\s+/);
+  if (secrets.looksLikeKey(input) || (cmd === '/key' && args.length && args.join(' ') !== 'status')) return { ok: false, lines: [KEY_HINT] };
+  if (cmd === '/key') return { ok: true, settings: !args.length, lines: keyStatus().map(k => `${k.name}: ${k.source === 'env' ? 'from environment' : k.source}`) };
+  if (cmd === '/context') {
+    if (args.length) {
+      if (args.length !== 3 || args[0] !== 'share' || args[1] !== 'board' || !['on', 'off'].includes(args[2])) return { ok: false, lines: ['usage: /context [share board on|off]'] };
+      const result = await serial(() => {
+        const current = readContext();
+        if (current.error) return { error: current.error };
+        const doc = { rev: current.rev + 1, share: { board: args[2] === 'on' }, changedBy: 'user', changedAt: new Date().toISOString() };
+        atomicWrite(CONTEXT, JSON.stringify(doc, null, 2) + '\n');
+        appendJsonl(METRICS, { ts: doc.changedAt, event: 'context_share', ...doc });
+        appendJsonl(TRANSCRIPT, { id: lineId(), ts: doc.changedAt, role: 'system', text: `board sharing ${args[2]} (/context): ${contextSummary().status}`, model: null });
+        return doc;
+      });
+      if (result.error) return { ok: false, lines: [result.error] };
+    }
+    const c = contextSummary();
+    return { ok: true, lines: [c.status, ...(c.error ? [c.error] : []), ...Object.entries(c.roles).map(([role, r]) => `${role}: ${r.candidate || 'none'}${r.location ? ` (${r.location})` : ''}; ${r.sends}${r.skipReason ? `; skipped: ${r.skipReason}` : ''}; preview ${JSON.stringify(r.messagesTemplate || r.extraSystemMessage || null)}`), c.nextMessage ? JSON.stringify(c.nextMessage) : 'nothing beyond this conversation'], context: c };
+  }
   if (cmd === '/help') return { ok: true, lines: HELP };
   if (cmd === '/theme') return { ok: true, lines: ['/theme is handled in the page (it changes only this browser)'] };
   if (cmd === '/model') {
@@ -1271,7 +1355,27 @@ async function runCommand(input) {
 
 const server = http.createServer(async (req, res) => {
   try {
+    const hosts = [`127.0.0.1:${PORT}`, `localhost:${PORT}`];
+    const hostOK = hosts.includes(req.headers.host);
+    const originOK = req.method === 'GET' || (req.headers.origin ? hosts.map(h => `http://${h}`).includes(req.headers.origin) : req.headers['x-pilot'] === '1');
+    if (!hostOK || !originOK) {
+      await metric('request_rejected', { reason: hostOK ? 'origin' : 'host' });
+      req.resume();
+      return sendJson(res, 403, { error: 'forbidden localhost request' });
+    }
     const { pathname, searchParams } = new URL(req.url, `http://${HOST}`);
+    if (req.method === 'GET' && pathname === '/settings/keys') {
+      try { return sendJson(res, 200, { keys: keyStatus() }); }
+      catch (e) { return sendJson(res, 409, { error: e.message }); }
+    }
+    if (['POST', 'DELETE'].includes(req.method) && pathname === '/settings/key') {
+      let body;
+      try { body = JSON.parse(await readBody(req, 10000)); } catch { return sendJson(res, 400, { error: 'expected key settings JSON' }); }
+      if (!body || !keyNames.includes(body.name)) return sendJson(res, 400, { error: 'unknown configured key name' });
+      if (req.method === 'POST' && (typeof body.value !== 'string' || !body.value.trim() || body.value.length > 4096 || /[\r\n\x00-\x1f\x7f]/.test(body.value))) return sendJson(res, 400, { error: 'invalid key: use a nonempty single line of at most 4096 characters' });
+      try { secrets.update(body.name, req.method === 'DELETE' ? undefined : body.value.trim()); return sendJson(res, 200, { keys: keyStatus() }); }
+      catch (e) { return sendJson(res, 409, { error: e.message }); }
+    }
     if (req.method === 'GET' && pathname === '/state') {
       const only = searchParams.has('only') ? searchParams.get('only').split(',').filter(Boolean) : null;
       return sendJson(res, 200, statePayload(only));

@@ -24,13 +24,13 @@ node -e '
   c.roles.extract.candidates[0].baseUrl="http://127.0.0.1:5802/v1";
   require("fs").writeFileSync(process.argv[1], JSON.stringify(c,null,2));' "$T/conf.json"
 fake() { node dev/fake-model.js "$1" "$2" > "$T/fake-$1.log" 2>&1 & PIDS+=($!); }
-server() { PILOT_DIR="$1" PILOT_CONFIG="$T/conf.json" node server.js >> "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); for i in $(seq 1 50); do curl -s -m 1 localhost:4800/state > /dev/null && return; sleep 0.1; done; }
+server() { PILOT_DIR="$1" PILOT_CONFIG="$T/conf.json" node server.js >> "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); for i in $(seq 1 50); do curl -H 'x-pilot: 1' -s -m 1 localhost:4800/state > /dev/null && return; sleep 0.1; done; }
 stop_server() { [ -n "$SERVER" ] && { kill $SERVER 2>/dev/null; wait $SERVER 2>/dev/null; SERVER=""; }; }
-chat() { curl -sN -X POST localhost:4800/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
-cmdraw() { curl -s -w '\n%{http_code}' -X POST localhost:4800/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
-why() { curl -s -X POST localhost:4800/command -H 'content-type: application/json' -d "{\"text\":\"/why $1\"}" | q 'x.lines.join("\n")'; }
-post() { curl -s -w '\n%{http_code}' -X POST "localhost:4800/$1" -H 'content-type: application/json' -d "$2"; }
-state() { curl -s "localhost:4800/state${1:-}"; }
+chat() { curl -H 'x-pilot: 1' -sN -X POST localhost:4800/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+cmdraw() { curl -H 'x-pilot: 1' -s -w '\n%{http_code}' -X POST localhost:4800/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+why() { curl -H 'x-pilot: 1' -s -X POST localhost:4800/command -H 'content-type: application/json' -d "{\"text\":\"/why $1\"}" | q 'x.lines.join("\n")'; }
+post() { curl -H 'x-pilot: 1' -s -w '\n%{http_code}' -X POST "localhost:4800/$1" -H 'content-type: application/json' -d "$2"; }
+state() { curl -H 'x-pilot: 1' -s "localhost:4800/state${1:-}"; }
 settle() { for i in $(seq 1 100); do [ "$(state | q 'x.extracting')" = "false" ] && return; sleep 0.1; done; }
 has() { grep -qE -- "$1" <<< "$2"; }   # status only; a check ends its chain with && echo true
 editjs() { node -e "const f=process.argv[1],fs=require('fs'),s=JSON.parse(fs.readFileSync(f,'utf8'));$2;fs.writeFileSync(f,JSON.stringify(s,null,2))" "$3/$1"; }
@@ -114,14 +114,14 @@ check "every source cited after the hand edits resolves ($(tail -1 $T/cites3.txt
 [ $RC -ne 0 ] && head -20 "$T/cites3.txt"
 cp "$DIR/state.json" "$T/st.json"; printf '{"rev": 9, "items": [' > "$DIR/state.json"; sleep 0.4
 OUT=$(cmdraw '/why dec-1'); W=$(why "")
-check "broken state.json: /why dec-1 answers (400, names the error), /why says items cannot be explained, the server lives" "$(echo "$OUT" | tail -1 | grep -qx 400 && has 'state.json is not valid JSON' "$OUT" && has 'state.json is not valid JSON.*items cannot be explained' "$W" && curl -s -m 1 localhost:4800/state > /dev/null && echo true)"
+check "broken state.json: /why dec-1 answers (400, names the error), /why says items cannot be explained, the server lives" "$(echo "$OUT" | tail -1 | grep -qx 400 && has 'state.json is not valid JSON' "$OUT" && has 'state.json is not valid JSON.*items cannot be explained' "$W" && curl -H 'x-pilot: 1' -s -m 1 localhost:4800/state > /dev/null && echo true)"
 cp "$T/st.json" "$DIR/state.json"
 cp "$DIR/modules.json" "$T/mo.json"; printf '{"panes": [' > "$DIR/modules.json"; sleep 0.4
 check "broken modules.json: /why map says it cannot explain until the file is fixed" "$(has 'cannot explain: modules.json is not valid JSON' "$(why map)" && echo true)"
 cp "$T/mo.json" "$DIR/modules.json"; sleep 0.3
 sums "$DIR" > "$T/s3"; for t in "" index map kanban dec-1 dec-9 task-9 task-1; do why "$t" > /dev/null; done; sleep 0.3; sums "$DIR" > "$T/s4"
 check "/why is read-only on live data too" "$(cmp -s "$T/s3" "$T/s4" && echo true)"
-check "/help lists /why" "$(curl -s -X POST localhost:4800/command -H 'content-type: application/json' -d '{"text":"/help"}' | q 'x.lines.some(l=>l.startsWith("/why"))')"
+check "/help lists /why" "$(curl -H 'x-pilot: 1' -s -X POST localhost:4800/command -H 'content-type: application/json' -d '{"text":"/help"}' | q 'x.lines.some(l=>l.startsWith("/why"))')"
 stop_server
 
 echo "== 4. page (headless Chrome): /why, links, the why? affordance, keyboard, layout at 800/1280/1600 (+820, 1000)"
@@ -137,10 +137,10 @@ check "contrast-check.js passes, including the why? button and the /why lines" "
 echo "== 5. demo v0.7 within 30 s (ports +200, dir $T/.pilot-demo-verify07)"
 PILOT_FIXTURE_ROOT="$T" DEMO_PORT_SHIFT=200 PILOT_DEMO_DIR="$T/.pilot-demo-verify07" node scripts/demo.js v0.7 < /dev/null > "$T/demo.log" 2>&1 & DEMO=$!; PIDS+=($!)
 D0=$(date +%s); UP=""
-for i in $(seq 1 60); do if curl -s -m 1 localhost:4968/state > "$T/ds.json" 2>/dev/null && [ -s "$T/ds.json" ]; then UP=1; break; fi; sleep 0.5; done
+for i in $(seq 1 60); do if curl -H 'x-pilot: 1' -s -m 1 localhost:4968/state > "$T/ds.json" 2>/dev/null && [ -s "$T/ds.json" ]; then UP=1; break; fi; sleep 0.5; done
 echo "   up after $(( $(date +%s) - D0 )) s"
 check "demo serves /state within 30 s: index, map and kanban grown from the fixtures" "$( [ -n "$UP" ] && q 'x.panes.join()==="map,index,kanban" && Object.values(x.paneInfo).every(p=>p.metric&&p.recorded)' < "$T/ds.json")"
-DW=$(curl -s -X POST localhost:4968/command -H 'content-type: application/json' -d '{"text":"/why dec-2"}' | q 'x.lines.join("\n")')
+DW=$(curl -H 'x-pilot: 1' -s -X POST localhost:4968/command -H 'content-type: application/json' -d '{"text":"/why dec-2"}' | q 'x.lines.join("\n")')
 check "demo /why dec-2 answers from the demo's files" "$(has 'from message m-f003 by you' "$DW" && echo true)"
 for i in $(seq 1 20); do grep -q 'Ctrl+C stops' "$T/demo.log" && break; sleep 0.2; done
 check "try lines: /why, /why map, /why dec-2, the why? click" "$(grep -q 'type /why' "$T/demo.log" && grep -q '/why map' "$T/demo.log" && grep -q '/why dec-2' "$T/demo.log" && grep -q 'Click "why?" on a pane bar' "$T/demo.log" && echo true)"

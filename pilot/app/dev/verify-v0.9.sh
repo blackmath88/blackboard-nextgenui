@@ -26,13 +26,13 @@ conf() { node -e '
   if (process.argv[2]==="none") delete c.experiments; else c.experiments=JSON.parse(process.argv[2]);
   require("fs").writeFileSync(process.argv[1], JSON.stringify(c,null,2));' "$1" "$2"; }
 fake() { node dev/fake-model.js "$1" "$2" > "$T/fake-$1.log" 2>&1 & PIDS+=($!); }
-server() { PILOT_DIR="$DIR" PILOT_CONFIG="$1" node server.js >> "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); for i in $(seq 1 50); do curl -s -m 1 localhost:4820/state > /dev/null && return; sleep 0.1; done; }
+server() { PILOT_DIR="$DIR" PILOT_CONFIG="$1" node server.js >> "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); for i in $(seq 1 50); do curl -H 'x-pilot: 1' -s -m 1 localhost:4820/state > /dev/null && return; sleep 0.1; done; }
 stop_server() { [ -n "$SERVER" ] && { kill $SERVER 2>/dev/null; wait $SERVER 2>/dev/null; SERVER=""; }; }
-cmd() { curl -s -X POST localhost:4820/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+cmd() { curl -H 'x-pilot: 1' -s -X POST localhost:4820/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
 lines() { cmd "$1" | q 'x.lines.join("\n")'; }
-metric() { curl -s -w '\n%{http_code}' -X POST localhost:4820/metric -H 'content-type: application/json' -d "$1"; }
+metric() { curl -H 'x-pilot: 1' -s -w '\n%{http_code}' -X POST localhost:4820/metric -H 'content-type: application/json' -d "$1"; }
 code() { metric "$1" | tail -1; }
-flags() { curl -s "localhost:4820/state?only=flags.json" | q "$1"; }
+flags() { curl -H 'x-pilot: 1' -s "localhost:4820/state?only=flags.json" | q "$1"; }
 ev() { qa "$1" < "$DIR/metrics.jsonl"; }
 has() { grep -qE -- "$1" <<< "$2"; }
 
@@ -82,7 +82,7 @@ check "experiments.settledInput true: on; settleMs 50 is clamped to 300" "$(flag
 check "/flag nope on -> 400 unknown flag; /flag settled-input maybe -> 400 usage" "$(cmd '/flag nope on' | q '!x.ok && /unknown flag/.test(x.lines[0])' | grep -q true && cmd '/flag settled-input maybe' | q '!x.ok && /usage: \/flag settled-input on\|off/.test(x.lines[0])')"
 cmd '/flag settled-input off' > /dev/null
 check "/flag settled-input off: flags.json {rev 1, experiments.settledInput false}, a system line, a flag event; /state says flags.json wins over the config" "$(q 'x.rev===1 && x.experiments.settledInput===false' < "$DIR/flags.json" | grep -q true && qa 'x.some(l=>l.role==="system"&&l.text==="experiment settled-input off (/flag)")' < "$DIR/transcript.jsonl" | grep -q true && ev 'x.some(e=>e.event==="flag"&&e.name==="settled-input"&&e.value===false&&e.was===true)' | grep -q true && flags 'x.flags.settledInput===false && /flags\.json \(\/flag\)$/.test(x.flags.source)')"
-check "the /flag system line is not a turn" "$(curl -s localhost:4820/state | q 'x.turn===0')"
+check "the /flag system line is not a turn" "$(curl -H 'x-pilot: 1' -s localhost:4820/state | q 'x.turn===0')"
 cmd '/flag settled-input on' > /dev/null
 stop_server; server "$T/off.json"
 check "after a restart with a config that says off, flags.json (on, rev 2) still wins" "$(flags 'x.flags.settledInput===true && x.flags.rev===2')"
@@ -113,11 +113,11 @@ check "npm run stats -- $DIR prints exactly the lines of /stats" "$( [ "$NPM" = 
 
 echo "== 6. a broken flags.json: last good version, never overwritten"
 printf '{"rev": 9, "experiments": {' > "$DIR/flags.json"; sleep 0.3
-check "/state reports flags.json in fileErrors and keeps the last good value (on)" "$(curl -s localhost:4820/state | q 'x.fileErrors["flags.json"] && x.flags.settledInput===true')"
+check "/state reports flags.json in fileErrors and keeps the last good value (on)" "$(curl -H 'x-pilot: 1' -s localhost:4820/state | q 'x.fileErrors["flags.json"] && x.flags.settledInput===true')"
 OUT=$(cmd '/flag settled-input off')
 check "/flag refuses to write it (400), the file is unchanged" "$(q '!x.ok && /not valid JSON/.test(x.lines[0])' <<< "$OUT" | grep -q true && [ "$(cat "$DIR/flags.json")" = '{"rev": 9, "experiments": {' ] && echo true)"
 printf '{"rev": 9, "experiments": {"settledInput": false}}\n' > "$DIR/flags.json"; sleep 0.3
-check "a repaired hand edit is read: off, no file error" "$(curl -s localhost:4820/state | q '!x.fileErrors["flags.json"] && x.flags.settledInput===false')"
+check "a repaired hand edit is read: off, no file error" "$(curl -H 'x-pilot: 1' -s localhost:4820/state | q '!x.fileErrors["flags.json"] && x.flags.settledInput===false')"
 node dev/sse-probe.js listen 4820 1500 "$T/ev.jsonl" & L=$!; PIDS+=($!)
 for i in $(seq 1 50); do grep -q '"hello"' "$T/ev.jsonl" 2>/dev/null && break; sleep 0.05; done
 cmd '/flag settled-input on' > /dev/null; wait "$L" 2>/dev/null
@@ -137,15 +137,15 @@ check "contrast-check.js passes (the offer uses the checked --muted pair)" "$( [
 echo "== 8. demo v0.9 within 30 s (ports +200, dir $T/.pilot-demo-verify09)"
 PILOT_FIXTURE_ROOT="$T" DEMO_PORT_SHIFT=200 PILOT_DEMO_DIR="$T/.pilot-demo-verify09" node scripts/demo.js v0.9 < /dev/null > "$T/demo.log" 2>&1 & DEMO=$!; PIDS+=($!)
 D0=$(date +%s); UP=""
-for i in $(seq 1 60); do if curl -s -m 1 localhost:4976/state > "$T/ds.json" 2>/dev/null && [ -s "$T/ds.json" ]; then UP=1; break; fi; sleep 0.5; done
+for i in $(seq 1 60); do if curl -H 'x-pilot: 1' -s -m 1 localhost:4976/state > "$T/ds.json" 2>/dev/null && [ -s "$T/ds.json" ]; then UP=1; break; fi; sleep 0.5; done
 echo "   up after $(( $(date +%s) - D0 )) s"
 check "demo serves /state within 30 s with the flag on (demo config only), offer after 1800 ms (the default)" "$( [ -n "$UP" ] && q 'x.flags.settledInput===true && x.flags.settleMs===1800 && /demo\.config\.json experiments\.settledInput$/.test(x.flags.source) && x.faded.join()==="kanban"' < "$T/ds.json")"
-curl -sN -X POST localhost:4976/chat -H 'content-type: application/json' -d '{"text":"what is left for Monday?"}' > /dev/null; sleep 0.5
-check "demo: a message neither fades a pane nor asks a removal question (thresholds 20)" "$(curl -s localhost:4976/state | q 'x.faded.join()==="kanban" && !x.pending')"
+curl -H 'x-pilot: 1' -sN -X POST localhost:4976/chat -H 'content-type: application/json' -d '{"text":"what is left for Monday?"}' > /dev/null; sleep 0.5
+check "demo: a message neither fades a pane nor asks a removal question (thresholds 20)" "$(curl -H 'x-pilot: 1' -s localhost:4976/state | q 'x.faded.join()==="kanban" && !x.pending')"
 for i in $(seq 1 20); do grep -q 'Ctrl+C stops' "$T/demo.log" && break; sleep 0.2; done
 check "try lines: pause, Tab, keep typing, Enter still sends, /stats experiments, /flag settled-input off" "$(grep -q 'pause' "$T/demo.log" && grep -q 'Press Tab' "$T/demo.log" && grep -q 'keep typing' "$T/demo.log" && grep -q 'Enter still sends' "$T/demo.log" && grep -q '/flag settled-input off restores the default' "$T/demo.log" && echo true)"
-OUT=$(curl -s -X POST localhost:4976/command -H 'content-type: application/json' -d '{"text":"/flag settled-input off"}')
-check "demo: /flag settled-input off restores the default" "$(curl -s 'localhost:4976/state?only=flags.json' | q 'x.flags.settledInput===false')"
+OUT=$(curl -H 'x-pilot: 1' -s -X POST localhost:4976/command -H 'content-type: application/json' -d '{"text":"/flag settled-input off"}')
+check "demo: /flag settled-input off restores the default" "$(curl -H 'x-pilot: 1' -s 'localhost:4976/state?only=flags.json' | q 'x.flags.settledInput===false')"
 kill -INT $DEMO; wait $DEMO 2>/dev/null; sleep 0.5
 check "Ctrl+C on the demo leaves no processes on its ports" "$( ! pgrep -f 'fake-model.js 597(8|9)' > /dev/null && ! lsof -iTCP:4976 -sTCP:LISTEN > /dev/null 2>&1 && echo true)"
 check "the v0.8 fixture is unchanged by the v0.9 generator" "$(git diff --quiet -- demo/fixtures/v0.8 && echo true)"

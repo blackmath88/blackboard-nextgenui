@@ -123,7 +123,7 @@ function updatePlaceholder() {
 
 // Notice above the log: a broken hand-edited file (until it is fixed) and, for a few seconds, a stale-write message.
 function renderNotice() {
-  const lines = Object.keys(state.fileErrors || {}).map((f) => `file ${f} is not valid JSON, showing last good version`);
+  const lines = Object.keys(state.fileErrors || {}).map((f) => f === 'context.json' ? 'file context.json is invalid; board sharing is off' : `file ${f} is not valid JSON, showing last good version`);
   if (flash) lines.push(flash);
   notice.textContent = lines.join('\n');
   notice.title = Object.values(state.fileErrors || {}).join('\n');
@@ -291,7 +291,7 @@ function frameNodes(mod) {
   return nodes;
 }
 async function sendFrame(mod, id, action, fromPane) {
-  const res = await fetch('/frame', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pane: mod, id, action, rev: (state.frames || {}).rev }) });
+  const res = await fetch('/frame', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ pane: mod, id, action, rev: (state.frames || {}).rev }) });
   if (!res.ok) await writeFailed(res);
   await loadState();
   if (!fromPane) return;
@@ -369,7 +369,7 @@ async function writeFailed(res) {
 }
 
 async function sendDecision(id, word, fromCard) {
-  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ itemId: id, decision: word, rev: state.stateRev }) });
+  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ itemId: id, decision: word, rev: state.stateRev }) });
   if (!res.ok) await writeFailed(res);
   else if (selected === id) selected = null;
   await loadState();
@@ -403,7 +403,7 @@ function renderIndex(body) {
 function jumpTo(id) {
   if (!$(`msg-${id}`)) return;
   // Usefulness (P5): the server logs index_jump; fire and forget, a failure never blocks the jump
-  fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: 'index_jump', target: id }) }).catch(() => {});
+  fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ event: 'index_jump', target: id }) }).catch(() => {});
   scrollToMsg(id);
 }
 function scrollToMsg(id) {
@@ -548,6 +548,7 @@ function renderModels(m) {
     const name = r.active || 'none';
     return `${role}: ${r.last && r.last !== name ? `${name}→${r.last}` : name}${r.pinned ? ' (pinned)' : ''}`;
   }).join(' · ');
+  models.textContent += ` · ${state.context?.status || 'conversation-only'}`;
   models.title = roles.map(([role, r]) => `${role}: ${r.pinned ? 'pinned, no fallback' : r.policy}, candidates ${
     r.candidates.map((n) => (r.local || []).includes(n) ? `${n} (local)` : n).join(', ') || 'none'}`).join('\n');
 }
@@ -565,6 +566,7 @@ const PARTS = { 'transcript.jsonl': ['transcript', 'total'], 'modules.json': ['p
   'roles.json': ['models'], 'state.json': ['items', 'stateRev', 'stateError'] };
 PARTS['modules.json'].push('paneInfo', 'pendingKind', 'removals', 'faded');   // pilot-v0.6, pilot-v0.8
 PARTS['transcript.jsonl'].push('turn');                                       // pilot-v0.8
+PARTS['context.json'] = ['context'];
 PARTS['flags.json'] = ['flags'];                                              // pilot-v0.9
 PARTS['frames.json'] = ['frames'];                                            // pilot-v0.10
 let reqGen = 0;
@@ -576,13 +578,14 @@ const sigOf = {
   // a touch (lastTouch moves) does not re-render the panes
   panes: (s) => [(s.panes || []).join(','), (s.faded || []).join(','), JSON.stringify(s.frames), !!(s.flags && s.flags.frameProposals), s.stateRev, JSON.stringify(s.items), JSON.stringify(s.paneInfo, (k, v) => (k === 'fade'
     ? (v && v.faded ? { fadedTurn: v.fadedTurn, lastTouch: v.lastTouch && v.lastTouch.turn, fadeAfter: v.fadeAfter } : null) : v))].join('|'),
-  models: (s) => JSON.stringify(s.models) + !!(s.flags && s.flags.frameProposals),
+  models: (s) => JSON.stringify(s.context) + JSON.stringify(s.models) + !!(s.flags && s.flags.frameProposals),
 };
 async function loadState(files) {
   const gen = ++reqGen;
   const list = files ? files.filter((f) => PARTS[f]) : Object.keys(PARTS);
   if (files && !list.length) return;
   const next = await (await fetch(files ? `/state?only=${encodeURIComponent(list.join(','))}` : '/state')).json();
+  if (next.context) state.context = next.context;
   for (const f of list) {
     if (gen <= (appliedGen[f] || 0)) continue;
     appliedGen[f] = gen;
@@ -638,7 +641,7 @@ const touched = {};   // pane -> turn of the last report
 function sendTouch(mod, how, force) {
   if (!force && touched[mod] === state.turn) return;
   touched[mod] = state.turn;
-  fetch('/touch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ module: mod, how }) })
+  fetch('/touch', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ module: mod, how }) })
     .then((r) => r.json()).then((b) => {
       // keep the modules.json rev current, so the touch never makes a consent answer stale
       if (b && Number.isInteger(b.rev) && b.rev > (state.modulesRev || 0)) state.modulesRev = b.rev;
@@ -656,7 +659,7 @@ bench.addEventListener('focusin', (e) => {
 });
 
 async function sendAnswer(module, word) {
-  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ module, answer: word, rev: state.modulesRev }) });
+  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ module, answer: word, rev: state.modulesRev }) });
   if (!res.ok) await writeFailed(res);
   await loadState();
   input.focus();
@@ -665,6 +668,8 @@ async function sendAnswer(module, word) {
 // Command output is shown locally only; it never goes to a model and is not stored (except /model switches).
 async function runCommand(text) {
   const [cmd, arg] = text.trim().split(/\s+/);
+  if (looksLikeKey(text) || (cmd === '/key' && arg && arg !== 'status')) { addLine('system', KEY_HINT); return; }
+  if (cmd === '/key' && !arg) { await openSettings(); return; }
   if (cmd === '/theme') {                        // page-only command, never sent to the server
     const ok = ['light', 'dark', 'auto'].includes(arg);
     if (ok) { applyTheme(arg); try { localStorage.setItem('pilot-theme', arg); } catch { /* not kept */ } }
@@ -672,7 +677,7 @@ async function runCommand(text) {
     addLine('out', ok ? `theme: ${arg}` : 'usage: /theme light|dark|auto').p.classList.toggle('err', !ok);
     return;
   }
-  const res = await fetch('/command', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+  const res = await fetch('/command', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ text }) });
   const out = await res.json();
   await loadState();                             // picks up a /model system line and the new status bar
   addLine('out', text).p.classList.add('cmd');
@@ -691,7 +696,7 @@ const settleOn = () => !!(state.flags && state.flags.settledInput);
 let offerEl = null;          // created only while the flag is on: off renders exactly the old prompt
 let settleTimer = null, lastInputAt = 0, offer = null, tabSend = null, offerSeq = 0;
 function settleMetric(event, fields) {
-  fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event, ...fields }) }).catch(() => {});
+  fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ event, ...fields }) }).catch(() => {});
 }
 // Drops the offer. how = typed | escape logs settle_ignore; without how it just goes (blur, flag off, sent).
 function dropOffer(how) {
@@ -792,6 +797,7 @@ form.addEventListener('submit', async (e) => {
   const text = input.value.trim();
   const viaTab = tabSend; tabSend = null;
   if (!text) return;
+  if (looksLikeKey(text) || (/^\/key\s/.test(text) && text !== '/key status')) { input.value = ''; addLine('system', KEY_HINT); return; }
   // pilot-v0.9: measure the send (messages only; commands never get an offer and are not counted)
   clearTimeout(settleTimer);
   if (settleOn() && !text.startsWith('/')) {
@@ -811,7 +817,7 @@ form.addEventListener('submit', async (e) => {
   p.classList.add('streaming');
   meta.textContent = 'thinking…';
   try {
-    const res = await fetch('/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+    const res = await fetch('/chat', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ text }) });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -836,3 +842,43 @@ form.addEventListener('submit', async (e) => {
 
 loadState().catch((err) => { meta.textContent = 'offline'; addLine('system', `cannot load state: ${err.message}`); });
 connectEvents();
+
+// Credentials never enter the conversation, localStorage, metrics, or rendered output.
+const KEY_HINT = 'API keys cannot be sent in chat. Use Settings (or /key) to save a key locally.';
+function looksLikeKey(text) {
+  return /\b(?:sk-(?:proj-|ant-)?|mistral[-_])[A-Za-z0-9_-]{8,}/i.test(text) || /^[A-Za-z0-9_+=\/.\-]{32,}$/.test(text.trim());
+}
+async function openSettings() {
+  const dialog = $('settings'), fields = $('key-fields');
+  fields.textContent = ''; $('key-notice').textContent = '';
+  if (!dialog.open) dialog.showModal();
+  try {
+    const res = await fetch('/settings/keys'); const out = await res.json();
+    if (!res.ok) throw new Error(out.error);
+    for (const k of out.keys) {
+      const row = document.createElement('div'); row.className = 'key-setting';
+      const label = document.createElement('label'); label.textContent = k.name;
+      const field = document.createElement('input'); field.type = 'password'; field.autocomplete = 'new-password'; field.maxLength = 4096; field.id = `key-${k.name}`; label.htmlFor = field.id;
+      const status = document.createElement('span'); status.className = 'key-source'; status.textContent = k.source === 'env' ? 'from environment' : k.source;
+      row.append(label, field, status);
+      for (const [title, method] of [['Save', 'POST'], ['Remove', 'DELETE']]) {
+        const b = document.createElement('button'); b.type = 'button'; b.textContent = title;
+        b.addEventListener('click', async () => {
+          const value = field.value; field.value = ''; b.disabled = true;
+          try {
+            const res = await fetch('/settings/key', { method, headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ name: k.name, ...(method === 'POST' ? { value } : {}) }) });
+            const out = await res.json(); if (!res.ok) throw new Error(out.error);
+            const source = out.keys.find(x => x.name === k.name).source;
+            status.textContent = source === 'env' ? 'from environment' : source;
+            $('key-notice').textContent = method === 'POST' ? 'Key saved locally.' : 'Saved key removed.';
+          } catch (e) { $('key-notice').textContent = e.message; }
+          finally { b.disabled = false; }
+        }); row.append(b);
+      }
+      fields.append(row);
+    }
+  } catch (e) { $('key-notice').textContent = e.message; }
+}
+$('settings-open').addEventListener('click', openSettings);
+$('settings-close').addEventListener('click', () => $('settings').close());
+$('settings').addEventListener('close', () => { $('key-fields').textContent = ''; input.focus(); });

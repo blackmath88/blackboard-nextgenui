@@ -34,22 +34,22 @@ fake() { node dev/fake-model.js "$1" "$2" "${@:3}" > "$T/fake-$1.log" 2>&1 & PID
 # frame fakes: restartable, with a mode
 frame3() { [ -n "$F3" ] && { kill $F3 2>/dev/null; wait $F3 2>/dev/null; }; F3=""; [ "$1" = "down" ] && return; fake 5833 morrow "$@"; F3=$LASTFAKE; sleep 0.3; }
 frame4() { [ -n "$F4" ] && { kill $F4 2>/dev/null; wait $F4 2>/dev/null; }; F4=""; [ "$1" = "down" ] && return; fake 5834 frontier "$@"; F4=$LASTFAKE; sleep 0.3; }
-server() { PILOT_DIR="$DIR" PILOT_CONFIG="$1" node server.js >> "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); for i in $(seq 1 50); do curl -s -m 1 localhost:4830/state > /dev/null && return; sleep 0.1; done; }
+server() { PILOT_DIR="$DIR" PILOT_CONFIG="$1" node server.js >> "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); for i in $(seq 1 50); do curl -H 'x-pilot: 1' -s -m 1 localhost:4830/state > /dev/null && return; sleep 0.1; done; }
 stop_server() { [ -n "$SERVER" ] && { kill $SERVER 2>/dev/null; wait $SERVER 2>/dev/null; SERVER=""; }; }
-cmd() { curl -s -X POST localhost:4830/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+cmd() { curl -H 'x-pilot: 1' -s -X POST localhost:4830/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
 lines() { cmd "$1" | q 'x.lines.join("\n")'; }
-chat() { curl -sN -X POST localhost:4830/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}" > /dev/null; settle; }
+chat() { curl -H 'x-pilot: 1' -sN -X POST localhost:4830/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}" > /dev/null; settle; }
 # wait until extraction and the frame run of the last turn are done
-settle() { for i in $(seq 1 100); do curl -s localhost:4830/state | q '!x.extracting && !x.framing' | grep -q true && return; sleep 0.05; done; }
-post() { curl -s -w '\n%{http_code}' -X POST localhost:4830/frame -H 'content-type: application/json' -d "$1"; }
+settle() { for i in $(seq 1 100); do curl -H 'x-pilot: 1' -s localhost:4830/state | q '!x.extracting && !x.framing' | grep -q true && return; sleep 0.05; done; }
+post() { curl -H 'x-pilot: 1' -s -w '\n%{http_code}' -X POST localhost:4830/frame -H 'content-type: application/json' -d "$1"; }
 code() { post "$1" | tail -1; }
-st() { curl -s "localhost:4830/state${1:-}"; }
+st() { curl -H 'x-pilot: 1' -s "localhost:4830/state${1:-}"; }
 ev() { qa "$1" < "$DIR/metrics.jsonl"; }
 fr() { q "$1" < "$DIR/frames.json"; }
 has() { grep -qE -- "$1" <<< "$2"; }
 nev() { grep -c "\"event\":\"$1\"" "$DIR/metrics.jsonl" 2>/dev/null || true; }
 # the v0.10 fixture, with fading thresholds raised to 100 so the ~16 turns of this script never fade a pane or ask
-seed() { fixture_reset "$DIR"; mkdir -p "$DIR"; for f in transcript.jsonl metrics.jsonl state.json modules.json rules.json; do cp demo/fixtures/v0.10/$f "$DIR/"; done
+seed() { fixture_reset "$DIR"; mkdir -p "$DIR"; printf '%s\n' '{"rev":1,"share":{"board":true},"changedBy":"frame-test"}' > "$DIR/context.json"; for f in transcript.jsonl metrics.jsonl state.json modules.json rules.json; do cp demo/fixtures/v0.10/$f "$DIR/"; done
   node -e 'const f=process.argv[1],fs=require("fs"),r=JSON.parse(fs.readFileSync(f));r.fadeAfterTurns=100;r.askRemoveAfterTurns=100;fs.writeFileSync(f,JSON.stringify(r,null,2))' "$DIR/rules.json"; }
 sums() { shasum "$DIR/modules.json" "$DIR/state.json" | awk '{print $1}' | tr '\n' ' '; }
 
@@ -261,12 +261,13 @@ check "contrast-check.js passes (frame note, byline and keys use checked pairs)"
 echo "== 10. demo v0.10 within 30 s (ports +200, dir $T/.pilot-demo-verify10)"
 PILOT_FIXTURE_ROOT="$T" DEMO_PORT_SHIFT=200 PILOT_DEMO_DIR="$T/.pilot-demo-verify10" node scripts/demo.js v0.10 < /dev/null > "$T/demo.log" 2>&1 & DEMO=$!; PIDS+=($!)
 D0=$(date +%s); UP=""
-for i in $(seq 1 60); do if curl -s -m 1 localhost:4978/state > "$T/ds.json" 2>/dev/null && [ -s "$T/ds.json" ]; then UP=1; break; fi; sleep 0.5; done
+for i in $(seq 1 60); do if curl -H 'x-pilot: 1' -s -m 1 localhost:4978/state > "$T/ds.json" 2>/dev/null && [ -s "$T/ds.json" ]; then UP=1; break; fi; sleep 0.5; done
 echo "   up after $(( $(date +%s) - D0 )) s"
 check "demo serves /state within 30 s: frame-proposals on (demo config only), settled-input off, the map shown with 6 decisions (+3 rejected)" "$( [ -n "$UP" ] && q 'x.flags.frameProposals===true && x.flags.settledInput===false && /demo\.config\.json experiments\.frameProposals$/.test(x.flags.frameSource) && x.panes.includes("map") && !x.faded.includes("map") && x.items.filter(i=>i.kind==="decision"&&i.status!=="rejected").length===6' < "$T/ds.json")"
-curl -sN -X POST localhost:4978/chat -H 'content-type: application/json' -d '{"text":"what about keeping the claim local?"}' > /dev/null
-for i in $(seq 1 40); do curl -s localhost:4978/state | q '!!(x.frames.pending.map)' | grep -q true && break; sleep 0.1; done
-check "demo: the next message yields a frame proposal for the map (focus dec-2) within about a second" "$(curl -s localhost:4978/state | q 'x.frames.pending.map.intent.focus==="dec-2" && x.frames.pending.map.model==="morrow"')"
+curl -H 'x-pilot: 1' -s -X POST localhost:4978/command -H 'content-type: application/json' -d '{"text":"/context share board on"}' > /dev/null
+curl -H 'x-pilot: 1' -sN -X POST localhost:4978/chat -H 'content-type: application/json' -d '{"text":"what about keeping the claim local?"}' > /dev/null
+for i in $(seq 1 40); do curl -H 'x-pilot: 1' -s localhost:4978/state | q '!!(x.frames.pending.map)' | grep -q true && break; sleep 0.1; done
+check "demo: the next message yields a frame proposal for the map (focus dec-2) within about a second" "$(curl -H 'x-pilot: 1' -s localhost:4978/state | q 'x.frames.pending.map.intent.focus==="dec-2" && x.frames.pending.map.model==="morrow"')"
 for i in $(seq 1 20); do grep -q 'Ctrl+C stops' "$T/demo.log" && break; sleep 0.2; done
 check "try lines: the note, apply with f, /why map, /frame reset map" "$(grep -q 'model suggests: focus dec-2' "$T/demo.log" && grep -q 'press f' "$T/demo.log" && grep -q '/why map explains the applied frame' "$T/demo.log" && grep -q '/frame reset map' "$T/demo.log" && echo true)"
 kill -INT $DEMO; wait $DEMO 2>/dev/null; sleep 0.5

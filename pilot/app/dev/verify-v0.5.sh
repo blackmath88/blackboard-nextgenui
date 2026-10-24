@@ -22,12 +22,12 @@ node -e '
   c.roles.extract.candidates[0].baseUrl="http://127.0.0.1:5782/v1";
   require("fs").writeFileSync(process.argv[1], JSON.stringify(c,null,2));' "$T/conf.json"
 fake() { node dev/fake-model.js "$1" "$2" > "$T/fake-$1.log" 2>&1 & PIDS+=($!); }
-server() { PILOT_DIR="$DIR" PILOT_CONFIG="$T/conf.json" node server.js >> "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); for i in $(seq 1 50); do curl -s -m 1 localhost:4780/state > /dev/null && return; sleep 0.1; done; }
+server() { PILOT_DIR="$DIR" PILOT_CONFIG="$T/conf.json" node server.js >> "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); for i in $(seq 1 50); do curl -H 'x-pilot: 1' -s -m 1 localhost:4780/state > /dev/null && return; sleep 0.1; done; }
 stop_server() { [ -n "$SERVER" ] && { kill $SERVER 2>/dev/null; wait $SERVER 2>/dev/null; }; }
-chat() { curl -sN -X POST localhost:4780/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
-cmd() { curl -s -X POST localhost:4780/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
-post() { curl -s -w '\n%{http_code}' -X POST localhost:4780/answer -H 'content-type: application/json' -d "$1"; }
-state() { curl -s "localhost:4780/state${1:-}"; }
+chat() { curl -H 'x-pilot: 1' -sN -X POST localhost:4780/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+cmd() { curl -H 'x-pilot: 1' -s -X POST localhost:4780/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+post() { curl -H 'x-pilot: 1' -s -w '\n%{http_code}' -X POST localhost:4780/answer -H 'content-type: application/json' -d "$1"; }
+state() { curl -H 'x-pilot: 1' -s "localhost:4780/state${1:-}"; }
 settle() { for i in $(seq 1 100); do [ "$(state | q 'x.extracting')" = "false" ] && return; sleep 0.1; done; }
 # listen <ms>: SSE events into $T/ev.jsonl in the background; returns once the hello has arrived
 listen() { node dev/sse-probe.js listen 4780 "$1" "$T/ev.jsonl" & LISTEN=$!; PIDS+=($!); for i in $(seq 1 50); do grep -q '"hello"' "$T/ev.jsonl" 2>/dev/null && return; sleep 0.05; done; }
@@ -133,7 +133,7 @@ check "contrast-check.js still passes (notice uses --text on the panel)" "$( [ $
 echo "== 8. demo v0.5 within 30 s; the printed one-liners work as printed (ports +200, dir $T/.pilot-demo-verify05)"
 PILOT_FIXTURE_ROOT="$T" DEMO_PORT_SHIFT=200 PILOT_DEMO_DIR="$T/.pilot-demo-verify05" node scripts/demo.js v0.5 < /dev/null > "$T/demo.log" 2>&1 & DEMO=$!; PIDS+=($!)
 D0=$(date +%s); UP=""
-for i in $(seq 1 60); do if curl -s -m 1 localhost:4958/state > "$T/ds.json" 2>/dev/null && [ -s "$T/ds.json" ]; then UP=1; break; fi; sleep 0.5; done
+for i in $(seq 1 60); do if curl -H 'x-pilot: 1' -s -m 1 localhost:4958/state > "$T/ds.json" 2>/dev/null && [ -s "$T/ds.json" ]; then UP=1; break; fi; sleep 0.5; done
 echo "   up after $(( $(date +%s) - D0 )) s"
 check "demo serves /state within 30 s: map pane, dec-2 proposed" "$( [ -n "$UP" ] && q 'x.panes.includes("map") && x.items.some(i=>i.id==="dec-2"&&i.status==="proposed")' < "$T/ds.json")"
 for i in $(seq 1 20); do grep -q 'Ctrl+C stops' "$T/demo.log" && break; sleep 0.2; done
@@ -143,9 +143,9 @@ check "try lines: two tabs, the flip and break one-liners point at the demo's ow
 node dev/sse-probe.js listen 4958 1500 "$T/dev.jsonl" & DL=$!; PIDS+=($!)
 for i in $(seq 1 50); do grep -q hello "$T/dev.jsonl" 2>/dev/null && break; sleep 0.05; done
 eval "$FLIP"; wait $DL
-check "the printed flip one-liner: SSE event for state.json, /state shows dec-2 confirmed" "$(qa 'x.some(e=>e.data.file==="state.json")' < "$T/dev.jsonl" | grep -q true && curl -s localhost:4958/state | q 'x.items.find(i=>i.id==="dec-2").status==="confirmed"')"
+check "the printed flip one-liner: SSE event for state.json, /state shows dec-2 confirmed" "$(qa 'x.some(e=>e.data.file==="state.json")' < "$T/dev.jsonl" | grep -q true && curl -H 'x-pilot: 1' -s localhost:4958/state | q 'x.items.find(i=>i.id==="dec-2").status==="confirmed"')"
 eval "$BREAK"; sleep 0.4
-check "the printed break one-liner: fileErrors state.json; run again: repaired" "$(curl -s localhost:4958/state | q '!!x.fileErrors["state.json"]' | grep -q true && eval "$BREAK" && sleep 0.4 && curl -s localhost:4958/state | q '!x.fileErrors["state.json"]')"
+check "the printed break one-liner: fileErrors state.json; run again: repaired" "$(curl -H 'x-pilot: 1' -s localhost:4958/state | q '!!x.fileErrors["state.json"]' | grep -q true && eval "$BREAK" && sleep 0.4 && curl -H 'x-pilot: 1' -s localhost:4958/state | q '!x.fileErrors["state.json"]')"
 kill -INT $DEMO; wait $DEMO 2>/dev/null; sleep 0.5
 check "Ctrl+C on the demo leaves no processes on its ports" "$( ! pgrep -f 'fake-model.js 59(58|59)' > /dev/null && ! lsof -iTCP:4958 -sTCP:LISTEN > /dev/null 2>&1 && echo true)"
 

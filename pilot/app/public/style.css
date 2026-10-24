@@ -242,3 +242,14 @@ body { margin: 0; background: var(--base); color: var(--text); font: 400 15px/1.
 .item.framed { box-shadow: inset 4px 0 0 var(--lavender); padding-left: 12px; }   /* its own border (status) stays */
 .items .grp { margin: 2px 0 4px; color: var(--muted); font-size: 11.5px; text-transform: lowercase; letter-spacing: 0.04em; }
 .items .grp + .item::before { display: none; }
+
+/* Compact keyboard-accessible credentials panel, using the workbench palette. */
+dialog { color: inherit; background: var(--panel); border: 1px solid currentColor; max-width: min(38rem, 90vw); }
+dialog::backdrop { background: var(--base); opacity: .65; }
+.key-setting { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin: 1rem 0; }
+.key-setting label { flex-basis: 100%; }
+.key-setting input { min-width: 10rem; max-width: 100%; }
+#settings-open { margin-left: auto; }
+
+#settings-open, dialog button, dialog input { font: inherit; color: var(--text); background: var(--base); border: 1px solid var(--line); padding: .2rem .5rem; }
+#settings-open:focus-visible, dialog :focus-visible { outline: 2px solid var(--accent-fg); outline-offset: 2px; }

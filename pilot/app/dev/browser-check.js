@@ -74,7 +74,7 @@ function shutdown() {
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) process.on(signal, () => {
   shutdown().then(() => process.exit(code), (err) => { console.error('ERROR cleanup', err.message); process.exit(1); });
 });
-async function startServer() { start('server', ['server.js'], { PILOT_CONFIG: ENV.config, PILOT_DIR: ENV.dir }); await waitHttp(URL); }
+async function startServer() { start('server', ['server.js'], { PILOT_CONFIG: ENV.config, PILOT_DIR: ENV.dir, PILOT_SECRETS_FILE: path.join(ROOT, 'private', 'secrets.json') }); await waitHttp(URL); }
 async function waitHttp(url) { for (let i = 0; i < 50; i++) { try { await fetch(url); return; } catch { await sleep(100); } } throw new Error(`${url} did not come up`); }
 
 // ---- minimal CDP client ----
@@ -966,6 +966,7 @@ async function v09(page) {
 }
 
 async function v10(page) {
+  fs.writeFileSync(path.join(ENV.dir, 'context.json'), JSON.stringify({ rev: 1, share: { board: true }, changedBy: 'frame-test' }));
   const file = (f) => path.join(ENV.dir, f);
   await stop('server');
   const fix = path.join(APP, 'demo', 'fixtures', 'v0.10');
@@ -1109,8 +1110,41 @@ async function v10(page) {
   check('no frame write touched state.json items or modules.json panes', events().filter((e) => e.event === 'item_write').length === writes0 && JSON.parse(fs.readFileSync(file('modules.json'), 'utf8')).panes.length === 3);
 }
 
-const SCENARIOS = { p1, p2, v03, v04, v05, v06, v07, v08, v09, v10 };
+async function m1(page) {
+  await page.goto(URL);
+  check('M1 default conversation-only status', (await page.status()).includes('conversation-only'));
+  await page.eval(`document.getElementById('settings-open').focus()`);
+  await page.key('Enter'); await sleep(250);
+  check('M1 Settings keyboard reachable with password field and missing status', await page.eval(`document.getElementById('settings').open && document.querySelector('#key-fields input').type === 'password' && document.querySelector('.key-source').textContent === 'missing'`));
+  await page.eval(`document.querySelector('#key-fields input').value = 'sk-browser-SENTINEL-012345678901234567890'; document.querySelector('#key-fields button').click()`); await sleep(250);
+  check('M1 save clears field, status saved, no key in page text', await page.eval(`document.querySelector('#key-fields input').value === '' && document.querySelector('.key-source').textContent === 'saved' && !document.body.innerText.includes('sk-browser-SENTINEL')`));
+  await page.eval(`document.getElementById('settings-close').click()`);
+  await page.submit('/context', 350);
+  check('M1 /context says nothing beyond conversation', await page.eval(`document.getElementById('log').textContent.includes('nothing beyond this conversation')`));
+  fs.writeFileSync(path.join(ENV.dir, 'state.json'), JSON.stringify({ rev: 1, items: [{ id: 'dec-m1', kind: 'decision', text: 'Use Postgres', status: 'confirmed', author: 'user' }] }));
+  await page.submit('/context share board on', 400);
+  check('M1 cloud recipient in status and board preview in /context', (await page.status()).includes('board is sent to frontier (cloud)') && await page.eval(`document.getElementById('log').textContent.includes('dec-m1: Use Postgres')`));
+  await page.submit('a browser chat request');
+  check('M1 saved key allows fake model chat', await page.eval(`document.querySelector('.ln.assistant .text').textContent.includes('[fake:frontier]')`));
+  const requests = page.net.filter(n => n.url.endsWith('/chat')).length;
+  await page.submit('sk-browser-SENTINEL-012345678901234567890', 250);
+  check('M1 pasted key does not enter transcript or network chat', page.net.filter(n => n.url.endsWith('/chat')).length === requests && await page.eval(`!document.getElementById('log').textContent.includes('sk-browser-SENTINEL') && document.getElementById('log').textContent.includes('Use Settings')`));
+  await page.submit('/key', 250);
+  check('M1 /key opens Settings', await page.eval(`document.getElementById('settings').open`));
+  await page.eval(`document.querySelectorAll('#key-fields button')[1].click()`); await sleep(250);
+  check('M1 Remove returns missing status', await page.eval(`document.querySelector('.key-source').textContent === 'missing'`));
+  await page.eval(`document.getElementById('settings-close').click()`);
+  await page.submit('/context share board off', 350);
+  check('M1 off restores conversation-only status', (await page.status()).includes('conversation-only'));
+}
+
+const SCENARIOS = { m1, p1, p2, v03, v04, v05, v06, v07, v08, v09, v10 };
 const ENVS = {
+  m1: () => {
+    const c = { port: 4845, roles: { chat: { candidates: [{ name: 'frontier', model: 'fake-mistral', baseUrl: 'http://127.0.0.1:5846/v1', keyEnv: 'M1_BROWSER_KEY' }] } } };
+    const file = path.join(ROOT, 'm1-config.json'); fs.writeFileSync(file, JSON.stringify(c));
+    return { url: 'http://127.0.0.1:4845/', fakes: [5846, 5847], dir: '.pilot-verify-m1b', config: file, cdp: 9423 };
+  },
   v03: () => {
     const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
     c.port = 4765;

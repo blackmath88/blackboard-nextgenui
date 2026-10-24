@@ -19,8 +19,8 @@ qa() { node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const x=
 fake() { node dev/fake-model.js "$@" > "$T/fake-$1.log" 2>&1 & eval "FAKE_$1=$!"; PIDS+=($!); }
 server() { PILOT_CONFIG="$1" node server.js > "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); sleep 0.5; }
 stop_server() { kill $SERVER; wait $SERVER 2>/dev/null; }
-chat() { curl -sN -X POST localhost:4750/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
-cmd() { curl -s -X POST localhost:4750/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+chat() { curl -H 'x-pilot: 1' -sN -X POST localhost:4750/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+cmd() { curl -H 'x-pilot: 1' -s -X POST localhost:4750/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
 last() { tail -1 "$PILOT_DIR/transcript.jsonl"; }
 metrics_since() { tail -n +$(( $1 + 1 )) "$PILOT_DIR/metrics.jsonl" 2>/dev/null; }
 mcount() { [ -f "$PILOT_DIR/metrics.jsonl" ] && wc -l < "$PILOT_DIR/metrics.jsonl" | tr -d ' ' || echo 0; }
@@ -29,7 +29,7 @@ fixture_reset "$PILOT_DIR"
 fake 5701 frontier; fake 5702 morrow; sleep 0.3
 server "$T/dev.json"
 
-echo "== status bar data at start"; curl -s localhost:4750/state | q 'JSON.stringify(x.models)'
+echo "== status bar data at start"; curl -H 'x-pilot: 1' -s localhost:4750/state | q 'JSON.stringify(x.models)'
 chat "hello" > /dev/null
 check "first reply from frontier" "$(last | q 'x.role==="assistant" && x.model==="frontier" && x.text.startsWith("[fake:frontier]")')"
 
@@ -37,13 +37,13 @@ echo "== /model chat morrow"; cmd "/model chat morrow"; echo
 chat "now private" > /dev/null
 check "/model chat morrow: next assistant line records morrow" "$(last | q 'x.model==="morrow" && x.text.startsWith("[fake:morrow]")')"
 check "system line records the switch" "$(grep -c 'model for chat switched to morrow' "$PILOT_DIR/transcript.jsonl" | q 'x===1')"
-check "status data shows chat active=morrow" "$(curl -s localhost:4750/state | q 'x.models.chat.active==="morrow"')"
+check "status data shows chat active=morrow" "$(curl -H 'x-pilot: 1' -s localhost:4750/state | q 'x.models.chat.active==="morrow"')"
 check "unknown candidate rejected" "$(cmd '/model chat nobody' | q 'x.ok===false')"
 check "/help answers" "$(cmd '/help' | q 'x.ok && x.lines.length>0')"
 check "commands are not sent or stored as user lines" "$(grep -c '"role":"user","text":"/' "$PILOT_DIR/transcript.jsonl" | q 'x===0')"
 
 echo "== restart: /model choice persists"; stop_server; server "$T/dev.json"
-check "after restart chat active=morrow" "$(curl -s localhost:4750/state | q 'x.models.chat.active==="morrow"')"
+check "after restart chat active=morrow" "$(curl -H 'x-pilot: 1' -s localhost:4750/state | q 'x.models.chat.active==="morrow"')"
 # ADAPTED in pilot-v0.3: was "/model chat frontier", which now pins frontier (no fallback). auto restores the policy.
 cmd "/model chat auto" > /dev/null
 
@@ -52,7 +52,7 @@ M=$(mcount); chat "frontier is down" > /dev/null
 check "second candidate answered" "$(last | q 'x.model==="morrow" && x.text.startsWith("[fake:morrow]")')"
 metrics_since $M
 check "metrics: failed frontier call, fallback, ok morrow call" "$(metrics_since $M | qa 'x.some(e=>e.event==="model_call"&&e.candidate==="frontier"&&!e.ok) && x.some(e=>e.event==="fallback"&&e.from==="frontier"&&e.to==="morrow") && x.some(e=>e.event==="model_call"&&e.candidate==="morrow"&&e.ok)')"
-check "status data shows frontier→morrow (last answer)" "$(curl -s localhost:4750/state | q 'x.models.chat.active==="frontier" && x.models.chat.last==="morrow"')"
+check "status data shows frontier→morrow (last answer)" "$(curl -H 'x-pilot: 1' -s localhost:4750/state | q 'x.models.chat.active==="frontier" && x.models.chat.last==="morrow"')"
 
 echo "== fallback on HTTP 500"; fake 5701 frontier --status=500; sleep 0.3
 M=$(mcount); chat "frontier errors" > /dev/null

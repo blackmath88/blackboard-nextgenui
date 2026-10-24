@@ -27,9 +27,9 @@ unfake() { eval "local p=\$FAKE_$1"; kill $p 2>/dev/null; wait $p 2>/dev/null; }
 server() { PILOT_DIR="$DIR" PILOT_CONFIG="$T/$1" node server.js > "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); sleep 0.5; }
 stop_server() { [ -n "$SERVER" ] && { kill $SERVER 2>/dev/null; wait $SERVER 2>/dev/null; }; }
 fresh() { stop_server; fixture_reset "$DIR"; server "$1"; }
-chat() { curl -sN -X POST localhost:4760/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
-cmd() { curl -s -X POST localhost:4760/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
-state() { curl -s localhost:4760/state; }
+chat() { curl -H 'x-pilot: 1' -sN -X POST localhost:4760/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+cmd() { curl -H 'x-pilot: 1' -s -X POST localhost:4760/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+state() { curl -H 'x-pilot: 1' -s localhost:4760/state; }
 last() { tail -${1:-1} "$DIR/transcript.jsonl" | head -1; }
 mcount() { [ -f "$DIR/metrics.jsonl" ] && wc -l < "$DIR/metrics.jsonl" | tr -d ' ' || echo 0; }
 since() { tail -n +$(( $1 + 1 )) "$DIR/metrics.jsonl" 2>/dev/null; }
@@ -111,7 +111,7 @@ check "contrast-check.js passes" "$( [ $RC -eq 0 ] && echo true)"
 echo "== 8. demo starts and serves /state within 30 s (ports shifted +200, dir $T/.pilot-demo-verify)"
 PILOT_FIXTURE_ROOT="$T" DEMO_PORT_SHIFT=200 PILOT_DEMO_DIR="$T/.pilot-demo-verify" node scripts/demo.js v0.3 < /dev/null > "$T/demo.log" 2>&1 & DEMO=$!
 D0=$(date +%s); UP=""
-for i in $(seq 1 60); do if curl -s -m 1 localhost:4950/state > "$T/demo-state.json" 2>/dev/null && [ -s "$T/demo-state.json" ]; then UP=1; break; fi; sleep 0.5; done
+for i in $(seq 1 60); do if curl -H 'x-pilot: 1' -s -m 1 localhost:4950/state > "$T/demo-state.json" 2>/dev/null && [ -s "$T/demo-state.json" ]; then UP=1; break; fi; sleep 0.5; done
 echo "   up after $(( $(date +%s) - D0 )) s"
 check "demo serves /state within 30 s" "$( [ -n "$UP" ] && echo true)"
 check "demo state: chat pinned to morrow, index question pending, seeded transcript" "$(q 'x.models.chat.pinned && x.models.chat.active==="morrow" && x.pending==="index" && x.total>=10' < "$T/demo-state.json")"

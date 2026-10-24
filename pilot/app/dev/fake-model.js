@@ -39,6 +39,7 @@
 // Every chat reply starts with "[fake:<name>]" so you can tell instances apart.
 'use strict';
 const http = require('http');
+const fs = require('fs');
 
 const port = Number(process.argv[2]);
 const name = (process.argv[3] && !process.argv[3].startsWith('--')) ? process.argv[3] : `fake-${port}`;
@@ -154,6 +155,7 @@ http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
   req.on('end', () => {
+    if (process.env.PILOT_FAKE_CAPTURE) fs.appendFileSync(process.env.PILOT_FAKE_CAPTURE, JSON.stringify({ headers: req.headers, body: JSON.parse(body || '{}') }) + '\n', { mode: 0o600 });
     let peek = {};
     try { peek = JSON.parse(body); } catch { /* ignore */ }
     const sys = (tag) => Array.isArray(peek.messages) && peek.messages.some((m) => m.role === 'system' && String(m.content).includes(tag));
@@ -164,6 +166,15 @@ http.createServer((req, res) => {
 }).listen(port, '127.0.0.1', () => console.log(`[dev] fake model "${name}" on http://127.0.0.1:${port}/v1${delay ? ` (delay ${delay} ms)` : ''}${failStatus ? ` (always HTTP ${failStatus})` : ''}${stallAfter ? ` (stalls after ${stallAfter} tokens)` : ''} (extract: ${extractMode}${extractDelay ? `, +${extractDelay} ms` : ''}; frame: ${frameMode})`));
 
 function respond(req, res, body, isExtract, isFrame) {
+  const reflect = process.argv.find(a => a.startsWith('--reflect-key='))?.split('=')[1];
+  if (reflect) {
+    const key = (req.headers.authorization || '').replace(/^Bearer /, '');
+    if (reflect === 'error') { res.writeHead(401, { 'content-type': 'text/plain' }); return res.end('upstream echoed ' + key); }
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    const parts = ['reflected ', key.slice(0, 7), key.slice(7, 18), key.slice(18), ' end'];
+    for (const part of parts) res.write('data: ' + JSON.stringify({ choices: [{ delta: { content: part } }] }) + '\n\n');
+    return res.end('data: [DONE]\n\n');
+  }
   if (failStatus) {
     res.writeHead(failStatus, { 'content-type': 'application/json' });
     return res.end(JSON.stringify({ error: { message: `[fake:${name}] forced error ${failStatus}` } }));

@@ -23,12 +23,12 @@ node -e '
   c.roles.extract.candidates[0].baseUrl="http://127.0.0.1:5792/v1";
   require("fs").writeFileSync(process.argv[1], JSON.stringify(c,null,2));' "$T/conf.json"
 fake() { node dev/fake-model.js "$1" "$2" > "$T/fake-$1.log" 2>&1 & PIDS+=($!); }
-server() { PILOT_DIR="$1" PILOT_CONFIG="$T/conf.json" node server.js >> "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); for i in $(seq 1 50); do curl -s -m 1 localhost:4790/state > /dev/null && return; sleep 0.1; done; }
+server() { PILOT_DIR="$1" PILOT_CONFIG="$T/conf.json" node server.js >> "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); for i in $(seq 1 50); do curl -H 'x-pilot: 1' -s -m 1 localhost:4790/state > /dev/null && return; sleep 0.1; done; }
 stop_server() { [ -n "$SERVER" ] && { kill $SERVER 2>/dev/null; wait $SERVER 2>/dev/null; SERVER=""; }; }
-chat() { curl -sN -X POST localhost:4790/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
-cmd() { curl -s -X POST localhost:4790/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
-post() { curl -s -w '\n%{http_code}' -X POST "localhost:4790/$1" -H 'content-type: application/json' -d "$2"; }
-state() { curl -s "localhost:4790/state${1:-}"; }
+chat() { curl -H 'x-pilot: 1' -sN -X POST localhost:4790/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+cmd() { curl -H 'x-pilot: 1' -s -X POST localhost:4790/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+post() { curl -H 'x-pilot: 1' -s -w '\n%{http_code}' -X POST "localhost:4790/$1" -H 'content-type: application/json' -d "$2"; }
+state() { curl -H 'x-pilot: 1' -s "localhost:4790/state${1:-}"; }
 settle() { for i in $(seq 1 100); do [ "$(state | q 'x.extracting')" = "false" ] && return; sleep 0.1; done; }
 ev() { qa "$1" < "$DIR/metrics.jsonl"; }
 editjs() { node -e "const f=process.argv[1],fs=require('fs'),s=JSON.parse(fs.readFileSync(f,'utf8'));$2;fs.writeFileSync(f,JSON.stringify(s,null,2))" "$DIR/$1"; }
@@ -143,17 +143,17 @@ check "contrast-check.js passes, including the new author chips on the pane bar"
 echo "== 7. demo v0.6 within 30 s (ports +200, dir $T/.pilot-demo-verify06)"
 PILOT_FIXTURE_ROOT="$T" DEMO_PORT_SHIFT=200 PILOT_DEMO_DIR="$T/.pilot-demo-verify06" node scripts/demo.js v0.6 < /dev/null > "$T/demo.log" 2>&1 & DEMO=$!; PIDS+=($!)
 D0=$(date +%s); UP=""
-for i in $(seq 1 60); do if curl -s -m 1 localhost:4964/state > "$T/ds.json" 2>/dev/null && [ -s "$T/ds.json" ]; then UP=1; break; fi; sleep 0.5; done
+for i in $(seq 1 60); do if curl -H 'x-pilot: 1' -s -m 1 localhost:4964/state > "$T/ds.json" 2>/dev/null && [ -s "$T/ds.json" ]; then UP=1; break; fi; sleep 0.5; done
 echo "   up after $(( $(date +%s) - D0 )) s"
 check "demo serves /state within 30 s: three panes with rule and answer; items from model, you, and file edits" "$( [ -n "$UP" ] && q 'x.panes.length===3 && Object.values(x.paneInfo).every(p=>p.metric&&p.recorded) && x.items.some(i=>i.author==="model"&&!i.prov) && x.items.some(i=>i.decidedBy==="user"&&!i.prov) && x.items.some(i=>i.prov&&i.prov.fields.includes("status")) && x.items.some(i=>i.author==="user"&&i.prov.added)' < "$T/ds.json")"
-DS=$(curl -s -X POST localhost:4964/command -H 'content-type: application/json' -d '{"text":"/stats"}' | q 'x.lines.join("\n")')
+DS=$(curl -H 'x-pilot: 1' -s -X POST localhost:4964/command -H 'content-type: application/json' -d '{"text":"/stats"}' | q 'x.lines.join("\n")')
 check "demo /stats: 3 PASS, 2 NOT YET, labelled as fixture data" "$(echo "$DS" | grep -q '^3 PASS, 2 NOT YET' && echo "$DS" | grep -q '^FIXTURE DATA: 130 of 131 metrics events' && echo true)"
 for i in $(seq 1 20); do grep -q 'Ctrl+C stops' "$T/demo.log" && break; sleep 0.2; done
 FLIP=$(sed -n "s/^   - [^:]*: \(node -e .*\)$/\1/p" "$T/demo.log" | sed -n 1p)
 STATS=$(sed -n 's/^   - Type \/stats: [^:]*Same from the shell: //p' "$T/demo.log")
 check "try lines: /stats, index clicks, the npm run stats line and the flip one-liner for the demo's own dir" "$(grep -q '/stats' "$T/demo.log" && grep -qi 'click three entries in the index' "$T/demo.log" && echo "$STATS" | grep -Fq ".pilot-demo-verify06" && echo "$FLIP" | grep -Fq ".pilot-demo-verify06/state.json" && echo true)"
 eval "$FLIP"; sleep 0.5
-check "the printed flip one-liner: dec-7 confirmed, /state prov fields [status] (\"confirmed by you (file edit)\")" "$(curl -s localhost:4964/state | q '(d=>d.status==="confirmed"&&d.prov.fields.join()==="status")(x.items.find(i=>i.id==="dec-7"))')"
+check "the printed flip one-liner: dec-7 confirmed, /state prov fields [status] (\"confirmed by you (file edit)\")" "$(curl -H 'x-pilot: 1' -s localhost:4964/state | q '(d=>d.status==="confirmed"&&d.prov.fields.join()==="status")(x.items.find(i=>i.id==="dec-7"))')"
 check "the printed npm run stats line works as printed (FIXTURE DATA, five measures)" "$(eval "$STATS" 2>/dev/null | grep -q '^FIXTURE DATA' && echo true)"
 kill -INT $DEMO; wait $DEMO 2>/dev/null; sleep 0.5
 check "Ctrl+C on the demo leaves no processes on its ports" "$( ! pgrep -f 'fake-model.js 59(64|65)' > /dev/null && ! lsof -iTCP:4964 -sTCP:LISTEN > /dev/null 2>&1 && echo true)"

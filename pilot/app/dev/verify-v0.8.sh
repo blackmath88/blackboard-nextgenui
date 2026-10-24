@@ -24,13 +24,13 @@ node -e '
   c.roles.extract.candidates[0].baseUrl="http://127.0.0.1:5812/v1";
   require("fs").writeFileSync(process.argv[1], JSON.stringify(c,null,2));' "$T/conf.json"
 fake() { node dev/fake-model.js "$1" "$2" > "$T/fake-$1.log" 2>&1 & PIDS+=($!); }
-server() { PILOT_DIR="$1" PILOT_CONFIG="$T/conf.json" node server.js >> "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); for i in $(seq 1 50); do curl -s -m 1 localhost:4810/state > /dev/null && return; sleep 0.1; done; }
+server() { PILOT_DIR="$1" PILOT_CONFIG="$T/conf.json" node server.js >> "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); for i in $(seq 1 50); do curl -H 'x-pilot: 1' -s -m 1 localhost:4810/state > /dev/null && return; sleep 0.1; done; }
 stop_server() { [ -n "$SERVER" ] && { kill $SERVER 2>/dev/null; wait $SERVER 2>/dev/null; SERVER=""; }; }
-chat() { curl -sN -X POST localhost:4810/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}" > /dev/null; settle; }
-why() { curl -s -X POST localhost:4810/command -H 'content-type: application/json' -d "{\"text\":\"/why $1\"}" | q 'x.lines.join("\n")'; }
-cmd() { curl -s -X POST localhost:4810/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}" | q 'x.lines.join("\n")'; }
-post() { curl -s -w '\n%{http_code}' -X POST "localhost:4810/$1" -H 'content-type: application/json' -d "$2"; }
-state() { curl -s "localhost:4810/state${1:-}"; }
+chat() { curl -H 'x-pilot: 1' -sN -X POST localhost:4810/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}" > /dev/null; settle; }
+why() { curl -H 'x-pilot: 1' -s -X POST localhost:4810/command -H 'content-type: application/json' -d "{\"text\":\"/why $1\"}" | q 'x.lines.join("\n")'; }
+cmd() { curl -H 'x-pilot: 1' -s -X POST localhost:4810/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}" | q 'x.lines.join("\n")'; }
+post() { curl -H 'x-pilot: 1' -s -w '\n%{http_code}' -X POST "localhost:4810/$1" -H 'content-type: application/json' -d "$2"; }
+state() { curl -H 'x-pilot: 1' -s "localhost:4810/state${1:-}"; }
 settle() { for i in $(seq 1 100); do [ "$(state | q 'x.extracting')" = "false" ] && return; sleep 0.1; done; }
 has() { grep -qE -- "$1" <<< "$2"; }   # status only; a check ends its chain with && echo true
 ev() { qa "$1" < "$2/metrics.jsonl"; }   # an expression over the metrics events x
@@ -153,11 +153,11 @@ check "contrast-check.js passes (the tab reuses the checked pane-title and meta 
 echo "== 5. demo v0.8 within 30 s (ports +200, dir $T/.pilot-demo-verify08)"
 PILOT_FIXTURE_ROOT="$T" DEMO_PORT_SHIFT=200 PILOT_DEMO_DIR="$T/.pilot-demo-verify08" node scripts/demo.js v0.8 < /dev/null > "$T/demo.log" 2>&1 & DEMO=$!; PIDS+=($!)
 D0=$(date +%s); UP=""
-for i in $(seq 1 60); do if curl -s -m 1 localhost:4972/state > "$T/ds.json" 2>/dev/null && [ -s "$T/ds.json" ]; then UP=1; break; fi; sleep 0.5; done
+for i in $(seq 1 60); do if curl -H 'x-pilot: 1' -s -m 1 localhost:4972/state > "$T/ds.json" 2>/dev/null && [ -s "$T/ds.json" ]; then UP=1; break; fi; sleep 0.5; done
 echo "   up after $(( $(date +%s) - D0 )) s"
 check "demo serves /state within 30 s: kanban a tab, map and index shown" "$( [ -n "$UP" ] && q 'x.faded.join()==="kanban" && x.panes.join()==="map,index,kanban"' < "$T/ds.json")"
-curl -sN -X POST localhost:4972/chat -H 'content-type: application/json' -d '{"text":"what is left for Monday?"}' > /dev/null; sleep 0.5
-check "demo: one message fades the map and asks to remove the kanban" "$(curl -s localhost:4972/state | q 'x.faded.join()==="map,kanban" && x.pending==="kanban" && x.pendingKind==="remove"')"
+curl -H 'x-pilot: 1' -sN -X POST localhost:4972/chat -H 'content-type: application/json' -d '{"text":"what is left for Monday?"}' > /dev/null; sleep 0.5
+check "demo: one message fades the map and asks to remove the kanban" "$(curl -H 'x-pilot: 1' -s localhost:4972/state | q 'x.faded.join()==="map,kanban" && x.pending==="kanban" && x.pendingKind==="remove"')"
 for i in $(seq 1 20); do grep -q 'Ctrl+C stops' "$T/demo.log" && break; sleep 0.2; done
 check "try lines: the tab, /why map, the message that fades the map and the removal question, clicking a tab" "$(grep -q 'slim "kanban" tab' "$T/demo.log" && grep -q '/why map' "$T/demo.log" && grep -q 'Remove the kanban pane' "$T/demo.log" && grep -q 'Click the map tab' "$T/demo.log" && echo true)"
 kill -INT $DEMO; wait $DEMO 2>/dev/null; sleep 0.5

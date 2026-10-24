@@ -18,10 +18,10 @@ q() { node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const x=J
 server() { PILOT_CONFIG="$T/dev.json" node server.js > "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); sleep 0.5; }
 restart() { kill $SERVER; wait $SERVER 2>/dev/null; server; }
 fresh() { kill $SERVER 2>/dev/null; wait $SERVER 2>/dev/null; fixture_reset "$PILOT_DIR"; server; }
-turn() { curl -sN -X POST localhost:4750/chat -H 'content-type: application/json' -d "{\"text\":\"${1:-a message}\"}" > /dev/null; }
-answer() { curl -s -X POST localhost:4750/answer -H 'content-type: application/json' -d "{\"module\":\"$1\",\"answer\":\"$2\"}"; }
-cmd() { curl -s -X POST localhost:4750/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
-state() { curl -s localhost:4750/state; }
+turn() { curl -H 'x-pilot: 1' -sN -X POST localhost:4750/chat -H 'content-type: application/json' -d "{\"text\":\"${1:-a message}\"}" > /dev/null; }
+answer() { curl -H 'x-pilot: 1' -s -X POST localhost:4750/answer -H 'content-type: application/json' -d "{\"module\":\"$1\",\"answer\":\"$2\"}"; }
+cmd() { curl -H 'x-pilot: 1' -s -X POST localhost:4750/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+state() { curl -H 'x-pilot: 1' -s localhost:4750/state; }
 asks() { grep -c '"role":"controller".*"module":"index"' "$PILOT_DIR/transcript.jsonl"; }
 msgs() { grep -c '"role":"\(user\|assistant\)"' "$PILOT_DIR/transcript.jsonl"; }
 threshold() { node -e 'const f=process.env.PILOT_DIR+"/rules.json",r=JSON.parse(require("fs").readFileSync(f));r.rules.find(x=>x.module==="index").threshold='$1';require("fs").writeFileSync(f,JSON.stringify(r,null,2))'; }
@@ -55,12 +55,12 @@ restart
 for i in 1 2 3 4 5; do turn "after never $i"; done
 check "never: $(msgs) messages (> 2x threshold) after restart, still exactly 1 question" "$(asks | q 'x===1')"
 check "never: no pane, nothing pending" "$(state | q 'x.panes.length===0 && x.pending===null && x.answers.index.answer==="never"')"
-check "answering when nothing is pending: 409" "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:4750/answer -d '{"module":"index","answer":"y"}' | q 'x===409')"
+check "answering when nothing is pending: 409" "$(curl -H 'x-pilot: 1' -s -o /dev/null -w '%{http_code}' -X POST localhost:4750/answer -d '{"module":"index","answer":"y"}' | q 'x===409')"
 
 echo "== y adds the index"
 fresh; threshold 2; turn "hello"
 check "asked at 2 messages" "$(asks | q 'x===1')"
-check "bad answer: 400" "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:4750/answer -d '{"module":"index","answer":"maybe"}' | q 'x===400')"
+check "bad answer: 400" "$(curl -H 'x-pilot: 1' -s -o /dev/null -w '%{http_code}' -X POST localhost:4750/answer -d '{"module":"index","answer":"maybe"}' | q 'x===400')"
 answer index y > /dev/null
 check "y: /state lists the index pane" "$(state | q 'JSON.stringify(x.panes)==="[\"index\"]" && x.pending===null')"
 check "y: modules.json records pane and answer, rev bumped" "$(cat "$PILOT_DIR/modules.json" | q 'x.panes[0].module==="index" && x.answers.index.answer==="yes" && x.rev===2')"
