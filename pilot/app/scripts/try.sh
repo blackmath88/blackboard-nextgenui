@@ -18,13 +18,15 @@ VERSION=${TAG#pilot-}
 source "$(dirname "$0")/../dev/lib/safe-dir.sh"
 SAFE_HELPER="$(cd "$(dirname "$0")/.." && pwd)/dev/lib/safe-dir.js"
 TRY_ROOT=$(fixture_temp); FIXTURE_ROOT=$TRY_ROOT
-WT="$TRY_ROOT/pilot-$VERSION"
-cleanup() { git -C "$REPO" worktree remove --force "$WT" 2>/dev/null; fixture_remove "$TRY_ROOT"; }
+WT="$TRY_ROOT/pilot"
+cleanup() { if [ -d "$WT" ]; then fixture_owned "$WT" || return 1; git -C "$REPO" worktree remove --force "$WT" 2>/dev/null || return 1; fi; fixture_remove "$TRY_ROOT"; }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 git -C "$REPO" worktree add --detach "$WT" "$REF" > /dev/null || exit 1
+printf 'pilot fixture\n' > "$WT/.pilot-fixture"
 echo "[try] $TAG ($(git -C "$WT" rev-parse --short HEAD)) checked out in $WT (removed again on exit)"
 if [ ! -f "$WT/pilot/app/demo/fixtures/$VERSION/demo.json" ]; then
-  echo "[try] $TAG has no demo/fixtures/$VERSION/ (demos exist from pilot-v0.3 on)"; exit 2
+  printf 'pilot fixture\n' > "$WT/.pilot-fixture"
+echo "[try] $TAG has no demo/fixtures/$VERSION/ (demos exist from pilot-v0.3 on)"; exit 2
 fi
 cd "$WT/pilot/app" && npm run --silent demo -- "$VERSION"
