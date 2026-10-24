@@ -24,7 +24,7 @@ function tree(dir) {
   walk(dir, '.'); return JSON.stringify(result);
 }
 async function stop(child, signal = 'SIGTERM') {
-  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
   await new Promise((resolve) => {
     child.once('exit', resolve);
     try { process.kill(-child.pid, signal); } catch (e) { if (e.code !== 'ESRCH') throw e; }
@@ -54,6 +54,7 @@ for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) process.on(sig
 function launch(args, cwd, env = {}) {
   if (stopping) throw Error('self-test stopping');
   const child = cp.spawn(args[0], args.slice(1), { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  child.on('error', (err) => { child.spawnError = err; });
   lastOutput = '';
   for (const stream of [child.stdout, child.stderr]) stream.on('data', (b) => { lastOutput += b; });
   children.add(child); child.once('exit', () => children.delete(child));
