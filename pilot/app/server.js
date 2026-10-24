@@ -583,8 +583,8 @@ async function callCandidate(candidate, messages, onDelta, signal, extraBody) {
   const emit = (delta, flush = false) => {
     pending = scrub(pending + delta);
     let keep = 0;
-    if (key && !flush) for (let n = 1; n < key.length && n <= pending.length; n++) if (pending.endsWith(key.slice(0, n))) keep = n;
-    const safe = pending.slice(0, pending.length - keep); pending = pending.slice(pending.length - keep);
+    if (key) for (let n = 1; n < key.length && n <= pending.length; n++) if (pending.endsWith(key.slice(0, n))) keep = n;
+    const safe = pending.slice(0, pending.length - keep) + (flush && keep ? '[redacted]' : ''); pending = flush ? '' : pending.slice(pending.length - keep);
     if (safe) onDelta(safe);
     return safe;
   };
@@ -613,8 +613,7 @@ async function callCandidate(candidate, messages, onDelta, signal, extraBody) {
       const body = await res.json();
       started();
       full = (body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content) || '';
-      full = scrub(full);
-      if (full) onDelta(full);
+      full = emit(full, true);
       return full;
     }
     const decoder = new TextDecoder();

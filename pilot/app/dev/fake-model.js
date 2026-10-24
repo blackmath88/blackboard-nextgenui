@@ -148,6 +148,7 @@ function frameReply(msgs) {
 }
 
 http.createServer((req, res) => {
+  if (req.method === 'GET' && req.url === '/v1/models') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ data: [{ id: name }] })); }
   if (req.method !== 'POST' || req.url !== '/v1/chat/completions') {
     res.writeHead(404, { 'content-type': 'application/json' });
     return res.end(JSON.stringify({ error: { message: 'not found' } }));
@@ -170,8 +171,15 @@ function respond(req, res, body, isExtract, isFrame) {
   if (reflect) {
     const key = (req.headers.authorization || '').replace(/^Bearer /, '');
     if (reflect === 'error') { res.writeHead(401, { 'content-type': 'text/plain' }); return res.end('upstream echoed ' + key); }
-    res.writeHead(200, { 'content-type': 'text/event-stream' });
-    if (reflect === 'prefix-stall') { res.write('data: ' + JSON.stringify({ choices: [{ delta: { content: key.slice(0, 7) } }] }) + '\n\n'); return; }
+    res.writeHead(200, { 'content-type': reflect === 'prefix-nonstream' ? 'application/json' : 'text/event-stream' });
+    if (reflect.startsWith('prefix-')) {
+      const prefix = key.slice(0, -1);
+      if (reflect === 'prefix-nonstream') { res.end(JSON.stringify({ choices: [{ message: { content: prefix } }] })); return; }
+      res.write('data: ' + JSON.stringify({ choices: [{ delta: { content: 'safe text ' + prefix } }] }) + '\n\n');
+      if (reflect === 'prefix-done') res.end('data: [DONE]\n\n');
+      else if (reflect === 'prefix-eof') res.end();
+      return;
+    }
     const parts = ['reflected ', key.slice(0, 7), key.slice(7, 18), key.slice(18), ' end'];
     for (const part of parts) res.write('data: ' + JSON.stringify({ choices: [{ delta: { content: part } }] }) + '\n\n');
     return res.end('data: [DONE]\n\n');

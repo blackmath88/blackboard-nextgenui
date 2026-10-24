@@ -109,6 +109,17 @@ async function main() {
     assert.equal(calls().length, prefixCalls + 1, 'a withheld credential prefix must not enable fallback');
     await stop(fake); fake = start(['dev/fake-model.js', '5841', 'mistral'], { PILOT_FAKE_CAPTURE: capture }); await ready('http://127.0.0.1:5841');
     pass('no fallback after a credential prefix was received and withheld');
+    for (const mode of ['prefix-done', 'prefix-eof', 'prefix-nonstream', 'prefix-abort']) {
+      await stop(fake); fake = start(['dev/fake-model.js', '5841', 'mistral', '--reflect-key=' + mode], { PILOT_FAKE_CAPTURE: capture }); await ready('http://127.0.0.1:5841');
+      if (mode === 'prefix-abort') {
+        const ac = new AbortController();
+        const r = await fetch(url + '/chat', { method: 'POST', headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ text: 'client abort after prefix' }), signal: ac.signal });
+        outputs += new TextDecoder().decode((await r.body.getReader().read()).value); ac.abort(); await sleep(100);
+      } else await request('/chat', { text: 'near-complete credential ' + mode });
+    }
+    await stop(fake); fake = start(['dev/fake-model.js', '5841', 'mistral'], { PILOT_FAKE_CAPTURE: capture }); await ready('http://127.0.0.1:5841');
+    pass('near-complete key prefix absent after DONE, EOF, nonstreaming completion, stall and client abort');
+
     await stop(server); server = start(['server.js'], { M1_TEST_KEY: envKey }); await ready(url);
     assert.equal((await request('/settings/keys')).json.keys[0].source, 'env'); await request('/chat', { text: 'environment priority' }); assert.equal(chatCalls().at(-1).headers.authorization, 'Bearer ' + envKey);
     await request('/settings/key', { name: 'M1_TEST_KEY' }, 'DELETE'); assert.equal((await request('/settings/keys')).json.keys[0].source, 'env');
@@ -117,7 +128,7 @@ async function main() {
     const ac = new AbortController(); const r = await fetch(url + '/events', { signal: ac.signal }); const reader = r.body.getReader(); outputs += new TextDecoder().decode((await reader.read()).value); ac.abort();
     await stop(server);
     let project = ''; for (const name of fs.readdirSync(data)) if (fs.statSync(path.join(data, name)).isFile()) project += fs.readFileSync(path.join(data, name), 'utf8');
-    for (const secret of [sentinel, envKey]) assert(![project, outputs, log].some(s => s.includes(secret)), 'key leaked to an observable output');
+    for (const secret of [sentinel, envKey, sentinel.slice(0, -1), envKey.slice(0, -1)]) assert(![project, outputs, log].some(s => s.includes(secret)), 'key leaked to an observable output');
     pass('sentinel absent from state, settings, SSE, transcript, metrics, server log and error output');
     console.log('ALL M1 HTTP CHECKS PASSED');
   } finally { await Promise.all([...children].map(stop)); }
