@@ -12,8 +12,8 @@ const sentinel = 'sk-m1-SENTINEL-123456789012345678901234567890';
 const envKey = 'sk-m1-ENV-123456789012345678901234567890';
 const url = 'http://127.0.0.1:4840';
 const config = path.join(root, 'config.json');
-const candidate = { name: 'mistral-test', model: 'fake-mistral', baseUrl: 'http://127.0.0.1:5841/v1', keyEnv: 'M1_TEST_KEY' };
-fs.writeFileSync(config, JSON.stringify({ port: 4840, experiments: { frameProposals: true }, roles: { chat: { candidates: [candidate] }, extract: { candidates: [candidate] }, frame: { candidates: [candidate] } } }));
+const candidate = { name: 'mistral-test', model: 'fake-mistral', stallMs: 200, baseUrl: 'http://127.0.0.1:5841/v1', keyEnv: 'M1_TEST_KEY' };
+fs.writeFileSync(config, JSON.stringify({ port: 4840, experiments: { frameProposals: true }, roles: { chat: { policy: 'fallback', candidates: [candidate, { ...candidate, name: 'fallback-must-not-run-after-token' }] }, extract: { candidates: [candidate] }, frame: { candidates: [candidate] } } }));
 fs.writeFileSync(path.join(data, 'modules.json'), JSON.stringify({ rev: 1, panes: [{ module: 'map' }], answers: { map: { answer: 'yes' } } }));
 const children = new Set(); let log = '', outputs = '';
 function start(args, env = {}) {
@@ -103,6 +103,12 @@ async function main() {
     await request('/chat', { text: 'reflected error credential' });
     await stop(fake); fake = start(['dev/fake-model.js', '5841', 'mistral'], { PILOT_FAKE_CAPTURE: capture }); await ready('http://127.0.0.1:5841');
     pass('provider error-body and split streaming credential reflections cannot escape');
+    await stop(fake); fake = start(['dev/fake-model.js', '5841', 'mistral', '--reflect-key=prefix-stall'], { PILOT_FAKE_CAPTURE: capture }); await ready('http://127.0.0.1:5841');
+    const prefixCalls = calls().length;
+    await request('/chat', { text: 'withheld prefix stalls' });
+    assert.equal(calls().length, prefixCalls + 1, 'a withheld credential prefix must not enable fallback');
+    await stop(fake); fake = start(['dev/fake-model.js', '5841', 'mistral'], { PILOT_FAKE_CAPTURE: capture }); await ready('http://127.0.0.1:5841');
+    pass('no fallback after a credential prefix was received and withheld');
     await stop(server); server = start(['server.js'], { M1_TEST_KEY: envKey }); await ready(url);
     assert.equal((await request('/settings/keys')).json.keys[0].source, 'env'); await request('/chat', { text: 'environment priority' }); assert.equal(chatCalls().at(-1).headers.authorization, 'Bearer ' + envKey);
     await request('/settings/key', { name: 'M1_TEST_KEY' }, 'DELETE'); assert.equal((await request('/settings/keys')).json.keys[0].source, 'env');
