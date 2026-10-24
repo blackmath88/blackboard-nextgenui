@@ -48,9 +48,9 @@ check "turn event after the reply: ok, lines and messages as in the transcript" 
 check "(setup) the controller asked for the index (threshold 2)" "$(state | q 'x.pending==="index"')"
 post answer '{"module":"index","answer":"y"}' > /dev/null
 CID=$(qa 'x.filter(e=>e.event==="consent").pop().id' < "$DIR/metrics.jsonl")
-check "consent event has an id ($CID); modules.json answers.index.consentId is the same" "$( [ -n "$CID" ] && node -e 'console.log(require(process.argv[1]).answers.index.consentId===process.argv[2])' "$APPDIR/"$DIR/modules.json"" "$CID")"
+check "consent event has an id ($CID); modules.json answers.index.consentId is the same" "$( [ -n "$CID" ] && node -e 'console.log(require(process.argv[1]).answers.index.consentId===process.argv[2])' "$DIR/modules.json" "$CID")"
 check "controller_add {module: index, answer: yes, answerRef: $CID} logged with the consent" "$(ev "x.some(e=>e.event==='controller_add'&&e.module==='index'&&e.answer==='yes'&&e.answerRef==='$CID')")"
-check "the pane entry records its rule {metric: messages, threshold: 2}" "$(node -e 'const p=require(process.argv[1]).panes.find(p=>p.module==="index");console.log(p.rule.metric==="messages"&&p.rule.threshold===2)' "$APPDIR/"$DIR/modules.json"")"
+check "the pane entry records its rule {metric: messages, threshold: 2}" "$(node -e 'const p=require(process.argv[1]).panes.find(p=>p.module==="index");console.log(p.rule.metric==="messages"&&p.rule.threshold===2)' "$DIR/modules.json")"
 check "/state paneInfo.index: rule, answer yes, recorded" "$(state | q 'x.paneInfo.index.metric==="messages" && x.paneInfo.index.threshold===2 && x.paneInfo.index.answer==="yes" && x.paneInfo.index.recorded===true')"
 chat "one more" > /dev/null; settle
 check "(setup) map asked (decisions 1)" "$(state | q 'x.pending==="map"')"
@@ -74,7 +74,7 @@ echo "== 3. authorship: item_write ledger, hand edits as file edits"
 check "extraction: one item_write per new item, equal to the item in state.json" "$(node -e '
   const fs=require("fs"),d=process.argv[1],st=JSON.parse(fs.readFileSync(d+"/state.json","utf8")).items;
   const w=fs.readFileSync(d+"/metrics.jsonl","utf8").trim().split("\n").map(JSON.parse).filter(e=>e.event==="item_write");
-  console.log(st.length===2 && st.every(i=>{const e=w.filter(x=>x.itemId===i.id);return e.length===1&&e[0].via==="extract"&&JSON.stringify(e[0].item)===JSON.stringify(i)}))' "$APPDIR/"$DIR"")"
+  console.log(st.length===2 && st.every(i=>{const e=w.filter(x=>x.itemId===i.id);return e.length===1&&e[0].via==="extract"&&JSON.stringify(e[0].item)===JSON.stringify(i)}))' "$DIR")"
 check "/state: untouched model items carry no prov" "$(state | q 'x.items.every(i=>!i.prov)')"
 post answer '{"itemId":"dec-1","decision":"c"}' > /dev/null
 check "decide: item_write via decide, then decide as the last metrics line" "$(ev 'x[x.length-2].event==="item_write"&&x[x.length-2].via==="decide"&&x[x.length-2].item.status==="confirmed"&&x[x.length-1].event==="decide"')"
@@ -93,7 +93,7 @@ server "$DIR"
 check "edited while the server was down: dec-1 status -> prov fields [status]" "$(state | q 'x.items.find(i=>i.id==="dec-1").prov.fields.join()==="status"')"
 check "hand-added user item task-9 -> prov added" "$(state | q 'x.items.find(i=>i.id==="task-9").prov.added===true')"
 check "a model item without ledger entry (older data) -> no prov: the declared author is shown" "$(state | q '!x.items.find(i=>i.id==="dec-9").prov')"
-check "state.json carries no authorship field the server added (keys only from the schema)" "$(node -e 'const ok=["id","kind","text","status","author","model","quote","fromMessage","createdAt","decidedAt","decidedBy","column","url"];console.log(require(process.argv[1]).items.every(i=>Object.keys(i).every(k=>ok.includes(k))))' "$APPDIR/"$DIR/state.json"")"
+check "state.json carries no authorship field the server added (keys only from the schema)" "$(node -e 'const ok=["id","kind","text","status","author","model","quote","fromMessage","createdAt","decidedAt","decidedBy","column","url"];console.log(require(process.argv[1]).items.every(i=>Object.keys(i).every(k=>ok.includes(k))))' "$DIR/state.json")"
 
 echo "== 4. continuity across a restart"
 check "second server_start: lines = the last turn's lines or more" "$(ev '((s,t)=>s.length===2&&s[1].lines>=t.lines)(x.filter(e=>e.event==="server_start"),x.filter(e=>e.event==="turn").pop())')"
@@ -110,9 +110,9 @@ check "npm run stats -- $C: exit 0, five measures" "$( [ $RC -eq 0 ] && [ $(echo
 check "fixture verdicts: continuity PASS, consent PASS, usefulness NOT YET, signal PASS, quiet NOT YET" "$( [ "$(echo "$NPMOUT" | verdicts)" = "continuity PASS,consent PASS,usefulness NOT YET,signal PASS,quiet NOT YET," ] && echo true)"
 check "labelled as fixture data (FIXTURE DATA: 130 of 130 metrics events ...)" "$(echo "$NPMOUT" | grep -q '^FIXTURE DATA: 130 of 130 metrics events and 64 of 64 transcript lines' && echo true)"
 check "each measure names its threshold from 04-build-plan.md and the numbers behind it" "$(echo "$NPMOUT" | grep -q 'at least 3 times in one session' && echo "$NPMOUT" | grep -q '8 confirmed, 3 rejected (73% confirmed)' && echo "$NPMOUT" | grep -q '5 controller questions in 1.5 h of work' && echo true)"
-(cd "$T" && npm --prefix "$APPDIR" run -s stats -- "$APPDIR/"$C"" > "$T/abs.txt" 2>&1)
+(cd "$T" && npm --prefix "$APPDIR" run -s stats -- "$C" > "$T/abs.txt" 2>&1)
 check "npm run stats from another directory with an absolute path: same output" "$(diff -q <(echo "$NPMOUT") "$T/abs.txt" > /dev/null && echo true)"
-(cd "$APPDIR/.." && npm --prefix app run -s stats -- app/"$C" > "$T/rel.txt" 2>&1)
+(cd "$APPDIR/.." && npm --prefix app run -s stats -- "app/${C#"$APPDIR/"}" > "$T/rel.txt" 2>&1)
 check "a relative path resolves against the directory npm was run from (INIT_CWD)" "$(diff -q <(echo "$NPMOUT") "$T/rel.txt" > /dev/null && echo true)"
 find "$C" -type f -exec shasum {} + | sort > "$T/sum1"; npm run -s stats -- "$C" > /dev/null; find "$C" -type f -exec shasum {} + | sort > "$T/sum2"
 check "npm run stats is read-only (every file byte-identical, no file added)" "$(cmp -s "$T/sum1" "$T/sum2" && echo true)"

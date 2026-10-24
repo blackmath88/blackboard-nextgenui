@@ -5,13 +5,13 @@
 set -u
 cd "$(dirname "$0")/.."
 source dev/lib/safe-dir.sh
-T=$(fixture_temp); FIXTURE_ROOT="$T";
+T=$(fixture_temp) || exit 1; FIXTURE_ROOT="$T";
 export PILOT_DIR="$T/data" PILOT_CONFIG="$T/dev.json"
 node -e 'const c=require("./pilot.config.dev.json");c.port=4750;console.log(JSON.stringify(c))' > "$T/dev.json"
-fixture_ports 4750 5701 5702
 PIDS=()
 cleanup() { kill "${PIDS[@]}" 2>/dev/null; wait 2>/dev/null; fixture_remove "$T"; }
 trap cleanup EXIT
+fixture_ports 4750 5701 5702
 FAILS=0
 check() { if [ "$2" = "true" ]; then echo "PASS $1"; else echo "FAIL $1"; FAILS=$((FAILS+1)); fi; }
 q() { node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=s.trim().split('\n').map(l=>{try{return JSON.parse(l)}catch{return null}}).filter(v=>v!==null);const x=j.length===1?j[0]:j;console.log(String($1))})"; }

@@ -15,7 +15,11 @@ function remove(dir, root) {
   // Resolve existing ancestors too: neither the target nor a parent may escape via a symlink.
   let ancestor = target;
   while (!fs.existsSync(ancestor)) ancestor = path.dirname(ancestor);
-  if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) refuse();
+  let component = target;
+  while (component !== path.dirname(component)) {
+    if (fs.lstatSync(component, { throwIfNoEntry: false })?.isSymbolicLink()) refuse();
+    component = path.dirname(component);
+  }
   const real = fs.realpathSync(ancestor);
   if (real !== ancestor) refuse();
   const inside = root && fs.existsSync(root) && fs.realpathSync(root) === path.resolve(root)

@@ -5,11 +5,11 @@
 set -u
 cd "$(dirname "$0")/.."
 source dev/lib/safe-dir.sh
-T=$(fixture_temp); FIXTURE_ROOT="$T"; L="$T"
+T=$(fixture_temp) || exit 1; FIXTURE_ROOT="$T"; L="$T"
 export PILOT_DIR="$T/data" PILOT_CONFIG="$T/dev.json"
 node -e 'const c=require("./pilot.config.dev.json");c.port=4750;console.log(JSON.stringify(c))' > "$T/dev.json"
-fixture_ports 4750 5701 5702
 trap 'kill ${S:-} ${F1:-} ${F2:-} 2>/dev/null; wait 2>/dev/null; fixture_remove "$T"' EXIT
+fixture_ports 4750 5701 5702
 fixture_reset "$PILOT_DIR"
 node dev/fake-model.js 5701 frontier > "$L/f1.log" 2>&1 & F1=$!
 node dev/fake-model.js 5702 morrow  > "$L/f2.log" 2>&1 & F2=$!
