@@ -737,7 +737,8 @@ async function loadState(files) {
   syncSettle();
   meta.textContent = state.extracting ? 'extracting proposals…'
     : state.total > state.transcript.length ? `showing last ${state.transcript.length} of ${state.total}` : live ? 'ready · live' : 'ready';
-  document.body.dataset.loaded = '1';
+  // An early transcript/context SSE response is not the initial pane snapshot.
+  if (appliedGen['modules.json']) document.body.dataset.loaded = '1';
   clearTimeout(pollTimer);
   if (state.extracting && !live) pollTimer = setTimeout(() => loadState().catch(() => {}), 300);   // fallback only
 }
