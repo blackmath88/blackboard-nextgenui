@@ -137,8 +137,8 @@ for i in $(seq 1 60); do if curl -s -m 1 localhost:4958/state > "$T/ds.json" 2>/
 echo "   up after $(( $(date +%s) - D0 )) s"
 check "demo serves /state within 30 s: map pane, dec-2 proposed" "$( [ -n "$UP" ] && q 'x.panes.includes("map") && x.items.some(i=>i.id==="dec-2"&&i.status==="proposed")' < "$T/ds.json")"
 for i in $(seq 1 20); do grep -q 'Ctrl+C stops' "$T/demo.log" && break; sleep 0.2; done
-FLIP=$(sed -n "s/^.*: \(node -e .*\)$/\1/p" "$T/demo.log" | sed -n 1p)
-BREAK=$(sed -n "s/^.*: \(node -e .*\)   ->.*$/\1/p" "$T/demo.log")
+FLIP=$(sed -n "s/^   - [^:]*: \(node -e .*\)$/\1/p" "$T/demo.log" | sed -n 1p)
+BREAK=$(sed -n "s/^   - [^:]*: \(node -e .*\)   ->.*$/\1/p" "$T/demo.log")
 check "try lines: two tabs, the flip and break one-liners point at the demo's own dir" "$(grep -qi 'two tabs' "$T/demo.log" && echo "$FLIP" | grep -Fq ".pilot-demo-verify05/state.json" && echo "$BREAK" | grep -Fq ".pilot-demo-verify05/state.json" && echo true)"
 node dev/sse-probe.js listen 4958 1500 "$T/dev.jsonl" & DL=$!; PIDS+=($!)
 for i in $(seq 1 50); do grep -q hello "$T/dev.jsonl" 2>/dev/null && break; sleep 0.05; done

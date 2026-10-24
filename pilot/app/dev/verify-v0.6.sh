@@ -149,8 +149,8 @@ check "demo serves /state within 30 s: three panes with rule and answer; items f
 DS=$(curl -s -X POST localhost:4964/command -H 'content-type: application/json' -d '{"text":"/stats"}' | q 'x.lines.join("\n")')
 check "demo /stats: 3 PASS, 2 NOT YET, labelled as fixture data" "$(echo "$DS" | grep -q '^3 PASS, 2 NOT YET' && echo "$DS" | grep -q '^FIXTURE DATA: 130 of 131 metrics events' && echo true)"
 for i in $(seq 1 20); do grep -q 'Ctrl+C stops' "$T/demo.log" && break; sleep 0.2; done
-FLIP=$(sed -n "s/^.*: \(node -e .*\)$/\1/p" "$T/demo.log" | sed -n 1p)
-STATS=$(sed -n 's/^.*Same from the shell: //p' "$T/demo.log")
+FLIP=$(sed -n "s/^   - [^:]*: \(node -e .*\)$/\1/p" "$T/demo.log" | sed -n 1p)
+STATS=$(sed -n 's/^   - Type \/stats: [^:]*Same from the shell: //p' "$T/demo.log")
 check "try lines: /stats, index clicks, the npm run stats line and the flip one-liner for the demo's own dir" "$(grep -q '/stats' "$T/demo.log" && grep -qi 'click three entries in the index' "$T/demo.log" && echo "$STATS" | grep -Fq ".pilot-demo-verify06" && echo "$FLIP" | grep -Fq ".pilot-demo-verify06/state.json" && echo true)"
 eval "$FLIP"; sleep 0.5
 check "the printed flip one-liner: dec-7 confirmed, /state prov fields [status] (\"confirmed by you (file edit)\")" "$(curl -s localhost:4964/state | q '(d=>d.status==="confirmed"&&d.prov.fields.join()==="status")(x.items.find(i=>i.id==="dec-7"))')"
