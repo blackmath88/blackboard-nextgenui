@@ -15,11 +15,16 @@ if [ -z "$TAG" ] || ! git -C "$REPO" rev-parse -q --verify "$REF^{commit}" > /de
   exit 2
 fi
 VERSION=${TAG#pilot-}
-WT=$(mktemp -d)/pilot-$VERSION
-cleanup() { git -C "$REPO" worktree remove --force "$WT" 2>/dev/null; rm -rf "$(dirname "$WT")"; }
+source "$(dirname "$0")/../dev/lib/safe-dir.sh" || exit 1
+APP=$(cd "$(dirname "$0")/.." && pwd) || exit 1
+SAFE_HELPER="$APP/dev/lib/safe-dir.js"
+TRY_ROOT=$(fixture_temp) || exit 1; fixture_root "$TRY_ROOT"; FIXTURE_ROOT=$TRY_ROOT
+WT="$TRY_ROOT/pilot"
+cleanup() { if [ -d "$WT" ]; then fixture_owned "$WT" || return 1; git -C "$REPO" worktree remove --force "$WT" 2>/dev/null || return 1; fi; fixture_remove "$TRY_ROOT"; }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 git -C "$REPO" worktree add --detach "$WT" "$REF" > /dev/null || exit 1
+printf 'pilot fixture\n' > "$WT/.pilot-fixture"
 echo "[try] $TAG ($(git -C "$WT" rev-parse --short HEAD)) checked out in $WT (removed again on exit)"
 if [ ! -f "$WT/pilot/app/demo/fixtures/$VERSION/demo.json" ]; then
   echo "[try] $TAG has no demo/fixtures/$VERSION/ (demos exist from pilot-v0.3 on)"; exit 2
