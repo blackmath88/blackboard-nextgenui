@@ -492,7 +492,7 @@ async function callCandidate(candidate, messages, onDelta, signal, extraBody) {
     if (!key) throw new Error(`key ${candidate.keyEnv} is missing; use Settings or the environment`);
     headers.authorization = `Bearer ${key}`;
   }
-  let pending = '';
+  let pending = '', receivedDelta = false;
   const scrub = text => key ? String(text).replaceAll(key, '[redacted]') : text;
   const emit = (delta, flush = false) => {
     pending = scrub(pending + delta);
@@ -509,6 +509,7 @@ async function callCandidate(candidate, messages, onDelta, signal, extraBody) {
   const stall = new AbortController();
   let stallTimer = null;
   const started = () => {
+    receivedDelta = true;
     clearTimeout(timer);
     clearTimeout(stallTimer);
     stallTimer = setTimeout(() => { const e = new Error(`no new token for ${stallMs} ms`); e.stall = true; e.stallMs = stallMs; stall.abort(e); }, stallMs);
@@ -549,7 +550,7 @@ async function callCandidate(candidate, messages, onDelta, signal, extraBody) {
     full += emit('', true);
     return full;
   } catch (err) {
-    if (err && typeof err.message === 'string') err.message = scrub(err.message);
+    if (err && typeof err.message === 'string') { err.message = scrub(err.message); err.receivedDelta = receivedDelta; }
     if (stall.signal.aborted && !signal.aborted) throw stall.signal.reason;
     if (firstByte.signal.aborted && !signal.aborted) throw firstByte.signal.reason;
     throw err;
@@ -586,7 +587,8 @@ async function callRole(role, messages, onDelta, signal, extraBody, context) {
       lastErr = new Error(`${c.name}: ${msg}`);
       lastErr.candidate = c; lastErr.partial = streamed; lastErr.reason = msg; lastErr.stall = !!(err && err.stall);
       if (c.local === true) failedLocal = c;
-      if (streamed || signal.aborted) break;
+      // A credential prefix retained by the scrubber is still a started reply: never fall back after it.
+      if (streamed || signal.aborted || err.receivedDelta) break;
     }
   }
   if (lastErr && pinnedName(role) && rc.policy === 'fallback' && !streamed && !signal.aborted) lastErr.message += ` (${role} is pinned to ${lastErr.candidate.name}, no fallback; /model ${role} auto unpins)`;
