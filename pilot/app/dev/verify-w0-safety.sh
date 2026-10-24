@@ -10,9 +10,9 @@ node <<'JS' &
 const fs = require('fs'), path = require('path'), cp = require('child_process'), crypto = require('crypto');
 const safety = require('./dev/lib/safe-dir');
 const APP = process.cwd();
-let root, cleaning, stopping = false;
+let root, cleaning, stopping = false, lastOutput = '';
 const children = new Set();
-function check(name, ok) { if (!ok) throw Error(name); console.log(`PASS ${name}`); }
+function check(name, ok) { if (!ok) { if (lastOutput) console.error('== nested log tail\n' + lastOutput.split('\n').slice(-120).join('\n')); throw Error(name); } console.log(`PASS ${name}`); }
 function tree(dir) {
   const result = [];
   function walk(file, rel) {
@@ -54,6 +54,8 @@ for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) process.on(sig
 function launch(args, cwd, env = {}) {
   if (stopping) throw Error('self-test stopping');
   const child = cp.spawn(args[0], args.slice(1), { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  lastOutput = '';
+  for (const stream of [child.stdout, child.stderr]) stream.on('data', (b) => { lastOutput += b; });
   children.add(child); child.once('exit', () => children.delete(child));
   return child;
 }
