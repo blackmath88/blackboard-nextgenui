@@ -23,7 +23,11 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const safety = require('./lib/safe-dir');
-const ROOT = safety.tempRoot();
+let ROOT;
+let stopping = false;
+let shutdownPromise;
+const pages = new Set();
+const stopPromises = new WeakMap();
 const URLConstructor = globalThis.URL;
 
 const APP = path.join(__dirname, '..');
@@ -38,9 +42,38 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
 // ---- processes ----
 const procs = {};
 function start(key, args, env = {}) {
-  procs[key] = spawn(process.execPath, args, { cwd: APP, env: { ...process.env, ...env }, stdio: 'ignore' });
+  if (stopping) throw new Error('browser runner stopping');
+  const child = procs[key] = spawn(process.execPath, args, { cwd: APP, env: { ...process.env, ...env }, stdio: 'ignore', detached: true });
+  child.on('error', (err) => { child.spawnError = err; });
 }
-async function stop(key) { const p = procs[key]; if (!p) return; p.kill(); await new Promise((r) => (p.exitCode !== null || p.signalCode !== null) ? r() : p.once('exit', r)); delete procs[key]; }
+async function stop(key) {
+  const p = procs[key]; if (!p) return;
+  if (!stopPromises.has(p)) stopPromises.set(p, (async () => {
+    if (p.exitCode === null && p.signalCode === null && p.pid) {
+      await new Promise((resolve) => {
+        p.once('exit', resolve);
+        const kill = (signal) => { try { process.kill(-p.pid, signal); } catch (e) { if (e.code !== 'ESRCH') throw e; } };
+        kill('SIGTERM');
+        const timer = setTimeout(() => kill('SIGKILL'), 3000);
+        p.once('exit', () => clearTimeout(timer));
+      });
+    }
+    if (procs[key] === p) delete procs[key];
+  })());
+  await stopPromises.get(p);
+}
+function shutdown() {
+  if (!shutdownPromise) shutdownPromise = (async () => {
+    stopping = true;
+    for (const page of pages) page.close();
+    await Promise.all(Object.keys(procs).map(stop));
+    if (ROOT) safety.remove(ROOT, ROOT);
+  })();
+  return shutdownPromise;
+}
+for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) process.on(signal, () => {
+  shutdown().then(() => process.exit(code), (err) => { console.error('ERROR cleanup', err.message); process.exit(1); });
+});
 async function startServer() { start('server', ['server.js'], { PILOT_CONFIG: ENV.config, PILOT_DIR: ENV.dir }); await waitHttp(URL); }
 async function waitHttp(url) { for (let i = 0; i < 50; i++) { try { await fetch(url); return; } catch { await sleep(100); } } throw new Error(`${url} did not come up`); }
 
@@ -48,7 +81,9 @@ async function waitHttp(url) { for (let i = 0; i < 50; i++) { try { await fetch(
 async function openBrowser() {
   const dir = safety.mark(fs.mkdtempSync(path.join(ROOT, 'cdp-')));
   const port = ENV.cdp;
-  const chrome = procs.chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, '--no-first-run', 'about:blank'], { stdio: 'ignore' });
+  if (stopping) throw new Error('browser runner stopping');
+  const chrome = procs.chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, '--no-first-run', 'about:blank'], { stdio: 'ignore', detached: true });
+  chrome.on('error', (err) => { chrome.spawnError = err; });
   let target;
   for (let i = 0; i < 80 && !target; i++) {
     try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'); } catch { /* not up yet */ }
@@ -57,8 +92,6 @@ async function openBrowser() {
   const page = await connectTab(target);
   // pilot-v0.5: a second tab in the same browser (two tabs stay in sync)
   page.newTab = async () => connectTab(await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: 'PUT' })).json());
-  const closeFirst = page.close;
-  page.close = () => { closeFirst(); chrome.kill(); setTimeout(() => { if (fs.existsSync(dir)) safety.remove(dir, ROOT); }, 300); };
   return page;
 }
 
@@ -100,8 +133,9 @@ async function connectTab(target) {
     async type(text) { await page.eval(`document.getElementById('input').focus()`); await send('Input.insertText', { text }); },
     async submit(text, wait = 1800) { await page.type(text); await page.key('Enter'); await sleep(wait); },
     status() { return page.eval(`document.getElementById('models').textContent`); },
-    close() { ws.close(); },
+    close() { ws.close(); pages.delete(page); },
   };
+  pages.add(page);
   return page;
 }
 
@@ -1168,6 +1202,8 @@ const ENVS = {
   if (!list.every((n) => SCENARIOS[n])) { console.error(`unknown scenario "${which}". Use: ${Object.keys(SCENARIOS).join(', ')}, all`); process.exit(2); }
   let page;
   try {
+    ROOT = safety.tempRoot();
+    safety.validateRoot(ROOT);
     for (const name of list) {
       console.log(`== ${name}`);
       ENV = ENVS[name] ? ENVS[name]() : { url: 'http://127.0.0.1:4750/', fakes: [5701, 5702], dir: '.pilot-verify-browser', config: 'pilot.config.dev.json', cdp: 9333 };
@@ -1194,9 +1230,7 @@ const ENVS = {
     }
   } catch (err) { console.error('ERROR', err); fails++; }
   finally {
-    if (page) page.close();
-    for (const k of Object.keys(procs)) await stop(k);
-    safety.remove(ROOT, ROOT);
+    await shutdown();
   }
   console.log(fails ? `\n${fails} BROWSER CHECK(S) FAILED` : '\nALL BROWSER CHECKS PASSED');
   process.exitCode = fails ? 1 : 0;
