@@ -1368,7 +1368,7 @@ async function runCommand(input) {
         const doc = { rev: current.rev + 1, share: { board: args[2] === 'on' }, changedBy: 'user', changedAt: new Date().toISOString() };
         atomicWrite(CONTEXT, JSON.stringify(doc, null, 2) + '\n');
         appendJsonl(METRICS, { ts: doc.changedAt, event: 'context_share', ...doc });
-        appendJsonl(TRANSCRIPT, { id: lineId(), ts: doc.changedAt, role: 'system', text: `board sharing ${args[2]} (/context): ${contextSummary().status}`, model: null });
+        appendTranscript({ id: lineId(), ts: doc.changedAt, role: 'system', text: `board sharing ${args[2]} (/context): ${contextSummary().status}`, model: null });
         return doc;
       });
       if (result.error) return { ok: false, lines: [result.error] };
