@@ -777,7 +777,8 @@ function sendTouch(mod, how, force) {
     .then((r) => r.json()).then((b) => {
       // keep the modules.json rev current, so the touch never makes a consent answer stale
       if (b && Number.isInteger(b.rev) && b.rev > (state.modulesRev || 0)) state.modulesRev = b.rev;
-      if (!live) loadState().catch(() => {});
+      // A touch can withdraw the shared question: refresh both its state and the active chat's system line together.
+      loadState(['modules.json', 'transcript.jsonl']).catch(() => {});
     }).catch(() => {});
 }
 const paneOf = (el) => { const sec = el && el.closest ? el.closest('.side[data-pane]') : null; return sec && !sec.classList.contains('faded') ? sec.dataset.pane : null; };
