@@ -1594,5 +1594,5 @@ server.listen(PORT, HOST, () => {
     items: st.items.length, panes: visiblePanes(m).length, answers: Object.keys(m.answers).length,
     fileErrors: [m.error, st.error].filter(Boolean) }).catch((err) => console.error('server_start:', err.message));
   noteItems();   // baseline for file-edit detection (edits made while the server was down show via the ledger)
-  console.log(`CLI Pilot on http://${HOST}:${PORT}  (config: ${path.relative(APP, configPath)}, data: ${path.relative(APP, PILOT)}/)`);
+  console.log(`CLI Pilot on http://${HOST}:${PORT}  (config: ${PROJECT ? configPath : path.relative(APP, configPath)}, data: ${PROJECT ? PILOT : path.relative(APP, PILOT)}/)`);
 });
