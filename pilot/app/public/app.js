@@ -595,7 +595,7 @@ function renderPanes(contentOnly) {
     });
     return done();
   }
-  const first = shownPanes === '' && !document.body.dataset.loaded;
+  const first = shownPanes === ''; // first pane must exist immediately, even after an early partial state response
   shownPanes = key;
   if (!first && document.startViewTransition && !reducedMotion.matches) document.startViewTransition(() => { apply(); done(); });
   else { apply(); done(); }
