@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // DEV ONLY. Drives the real page in headless Chrome over the DevTools protocol and prints PASS/FAIL.
-// p1/p2: start their own fake models and server (PILOT_CONFIG=pilot.config.dev.json, ports 4747/5701/5702)
-// and WIPE .pilot/ first. v03: own ports (4765/5766/5767, Chrome 9343) and its own dir .pilot-verify-v03b/,
+// p1/p2: start their own fake models and server (PILOT_CONFIG=pilot.config.dev.json, ports 4750/5701/5702)
+// in an isolated fixture. v03: own ports (4765/5766/5767, Chrome 9343) and its own dir .pilot-verify-v03b/,
 // so it never touches .pilot/ or a running demo. v04 (pilot-v0.4 proposals): ports 4775/5776/5777, Chrome 9353,
 // dir .pilot-verify-v04b/. v05 (pilot-v0.5 live files, c/r only on a focused card): ports 4785/5786/5787,
 // Chrome 9363, dir .pilot-verify-v05b/; opens a second tab. v06 (pilot-v0.6 authorship, metrics, /stats): ports
@@ -18,15 +18,22 @@
 // Needs Node 22+ (global WebSocket) and Google Chrome. No dependencies.
 // Usage: node dev/browser-check.js [p1|p2|v03|v04|v05|v06|v07|v08|v09|v10|all]     (CHROME=/path/to/chrome to override; all = p1 p2)
 'use strict';
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const safety = require('./lib/safe-dir');
+let ROOT;
+let stopping = false;
+let shutdownPromise;
+const pages = new Set();
+const stopPromises = new WeakMap();
+const URLConstructor = globalThis.URL;
 
 const APP = path.join(__dirname, '..');
 const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-// Per-scenario environment (see ENVS below); p1/p2 keep the P1/P2 ports and .pilot/.
-let ENV = { url: 'http://127.0.0.1:4747/', fakes: [5701, 5702], dir: '.pilot', config: 'pilot.config.dev.json', cdp: 9333 };
+// Each scenario uses a marked directory below its fresh run root.
+let ENV = { url: 'http://127.0.0.1:4750/', fakes: [5701, 5702], dir: '.pilot-verify-browser', config: 'pilot.config.dev.json', cdp: 9333 };
 let URL = ENV.url;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let fails = 0;
@@ -35,17 +42,48 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
 // ---- processes ----
 const procs = {};
 function start(key, args, env = {}) {
-  procs[key] = spawn(process.execPath, args, { cwd: APP, env: { ...process.env, ...env }, stdio: 'ignore' });
+  if (stopping) throw new Error('browser runner stopping');
+  const child = procs[key] = spawn(process.execPath, args, { cwd: APP, env: { ...process.env, ...env }, stdio: 'ignore', detached: true });
+  child.on('error', (err) => { child.spawnError = err; });
 }
-async function stop(key) { const p = procs[key]; if (!p) return; p.kill(); await new Promise((r) => p.exitCode !== null ? r() : p.once('exit', r)); delete procs[key]; }
-async function startServer() { start('server', ['server.js'], { PILOT_CONFIG: ENV.config, PILOT_DIR: ENV.dir }); await waitHttp(URL); }
+async function stop(key) {
+  const p = procs[key]; if (!p) return;
+  if (!stopPromises.has(p)) stopPromises.set(p, (async () => {
+    if (p.exitCode === null && p.signalCode === null && p.pid) {
+      await new Promise((resolve) => {
+        p.once('exit', resolve);
+        const kill = (signal) => { try { process.kill(-p.pid, signal); } catch (e) { if (e.code !== 'ESRCH') throw e; } };
+        kill('SIGTERM');
+        const timer = setTimeout(() => kill('SIGKILL'), 3000);
+        p.once('exit', () => clearTimeout(timer));
+      });
+    }
+    if (procs[key] === p) delete procs[key];
+  })());
+  await stopPromises.get(p);
+}
+function shutdown() {
+  if (!shutdownPromise) shutdownPromise = (async () => {
+    stopping = true;
+    for (const page of pages) page.close();
+    await Promise.all(Object.keys(procs).map(stop));
+    if (ROOT) safety.remove(ROOT, ROOT);
+  })();
+  return shutdownPromise;
+}
+for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) process.on(signal, () => {
+  shutdown().then(() => process.exit(code), (err) => { console.error('ERROR cleanup', err.message); process.exit(1); });
+});
+async function startServer() { start('server', ENV.project ? ['bin/pilot.js', 'start', ENV.project, '--port', new URLConstructor(ENV.url).port] : ['server.js'], { PILOT_CONFIG: ENV.config, PILOT_DIR: ENV.dir, PILOT_SECRETS_FILE: path.join(ROOT, 'private', 'secrets.json'), I1_BROWSER_KEY: '' }); await waitHttp(URL); }
 async function waitHttp(url) { for (let i = 0; i < 50; i++) { try { await fetch(url); return; } catch { await sleep(100); } } throw new Error(`${url} did not come up`); }
 
 // ---- minimal CDP client ----
 async function openBrowser() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-cdp-'));
+  const dir = safety.mark(fs.mkdtempSync(path.join(ROOT, 'cdp-')));
   const port = ENV.cdp;
-  const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, '--no-first-run', 'about:blank'], { stdio: 'ignore' });
+  if (stopping) throw new Error('browser runner stopping');
+  const chrome = procs.chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, '--no-first-run', 'about:blank'], { stdio: 'ignore', detached: true });
+  chrome.on('error', (err) => { chrome.spawnError = err; });
   let target;
   for (let i = 0; i < 80 && !target; i++) {
     try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'); } catch { /* not up yet */ }
@@ -54,8 +92,6 @@ async function openBrowser() {
   const page = await connectTab(target);
   // pilot-v0.5: a second tab in the same browser (two tabs stay in sync)
   page.newTab = async () => connectTab(await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: 'PUT' })).json());
-  const closeFirst = page.close;
-  page.close = () => { closeFirst(); chrome.kill(); setTimeout(() => fs.rmSync(dir, { recursive: true, force: true }), 300); };
   return page;
 }
 
@@ -97,8 +133,9 @@ async function connectTab(target) {
     async type(text) { await page.eval(`document.getElementById('input').focus()`); await send('Input.insertText', { text }); },
     async submit(text, wait = 1800) { await page.type(text); await page.key('Enter'); await sleep(wait); },
     status() { return page.eval(`document.getElementById('models').textContent`); },
-    close() { ws.close(); },
+    close() { ws.close(); pages.delete(page); },
   };
+  pages.add(page);
   return page;
 }
 
@@ -134,7 +171,7 @@ async function p1(page) {
 }
 
 function editJson(file, fn) {
-  const f = path.join(APP, ENV.dir, file);
+  const f = path.join(ENV.dir, file);
   const j = JSON.parse(fs.readFileSync(f, 'utf8')); fn(j);
   fs.writeFileSync(f, JSON.stringify(j, null, 2));
 }
@@ -156,7 +193,7 @@ async function p2(page) {
   check('y adds the index pane (n2 layout)', await page.eval(`!!document.getElementById('pane-index') && document.getElementById('bench').className === 'bench n2'`));
   check('the y keystroke was not typed into the input', await page.eval(`document.getElementById('input').value === ''`));
   check('pane change used a View Transition', await page.eval(`window.__vt === 1 || !document.startViewTransition`), `calls: ${await page.eval('window.__vt')}`);
-  const mods = JSON.parse(fs.readFileSync(path.join(APP, '.pilot', 'modules.json'), 'utf8'));
+  const mods = JSON.parse(fs.readFileSync(path.join(ENV.dir, 'modules.json'), 'utf8'));
   check('modules.json records the answer yes and the pane', mods.answers.index.answer === 'yes' && mods.panes[0].module === 'index');
 
   for (let i = 3; i <= 8; i++) await page.submit(`message number ${i} to fill the terminal`, 1500);
@@ -218,7 +255,7 @@ async function v03(page) {
   await page.eval(`document.getElementById('input').focus()`);
   await page.key('n'); await sleep(900);
   check('empty input: n answers the question', answers() === 1 && (await pending()) === null && (await val()) === '');
-  const mods = JSON.parse(fs.readFileSync(path.join(APP, ENV.dir, 'modules.json'), 'utf8'));
+  const mods = JSON.parse(fs.readFileSync(path.join(ENV.dir, 'modules.json'), 'utf8'));
   check('modules.json records answer no', mods.answers.index.answer === 'no');
 
   for (let i = 3; i <= 4; i++) await page.submit(`message ${i}`);
@@ -257,7 +294,7 @@ async function v03(page) {
 // rejected toggle, pickup of a background extraction without reload, hand-added items shown solid.
 async function v04(page) {
   const at = (m) => new Date(Date.UTC(2026, 9, 17, 9, m)).toISOString();
-  const file = (f) => path.join(APP, ENV.dir, f);
+  const file = (f) => path.join(ENV.dir, f);
   fs.writeFileSync(file('state.json'), JSON.stringify({ rev: 1, items: [
     { id: 'dec-1', kind: 'decision', text: 'keep the claim local', status: 'confirmed', author: 'model', model: 'morrow', quote: 'Decision: keep the claim local.', fromMessage: 'm-x1', createdAt: at(1), decidedAt: at(2), decidedBy: 'user' },
     { id: 'dec-2', kind: 'decision', text: 'write the letter in German', status: 'proposed', author: 'model', model: 'morrow', quote: 'Decision: write the letter in German.', fromMessage: 'm-x1', createdAt: at(1) },
@@ -365,7 +402,7 @@ async function v04(page) {
 const timings = {};
 async function v05(page) {
   const at = (m) => new Date(Date.UTC(2026, 9, 17, 9, m)).toISOString();
-  const file = (f) => path.join(APP, ENV.dir, f);
+  const file = (f) => path.join(ENV.dir, f);
   const prop = (id, text) => ({ id, kind: 'decision', text, status: 'proposed', author: 'model', model: 'morrow', quote: `Decision: ${text}.`, fromMessage: 'm-x1', createdAt: at(1) });
   fs.writeFileSync(file('state.json'), JSON.stringify({ rev: 1, items: [
     { id: 'dec-1', kind: 'decision', text: 'keep the claim local', status: 'confirmed', author: 'model', model: 'morrow', quote: 'Decision: keep the claim local.', fromMessage: 'm-x1', createdAt: at(1), decidedAt: at(2), decidedBy: 'user' },
@@ -478,7 +515,7 @@ async function v05(page) {
 
 // pilot-v0.6: authorship on lines, cards and panes; hand edits as "you (file edit)"; index jumps; /stats in the page.
 async function v06(page) {
-  const file = (f) => path.join(APP, ENV.dir, f);
+  const file = (f) => path.join(ENV.dir, f);
   await stop('server');   // reseed from the v0.6 fixture before the server starts (its server_start counts the files)
   const fix = path.join(APP, 'demo', 'fixtures', 'v0.6');
   for (const f of fs.readdirSync(fix)) if (!['demo.json', 'pilot.config.json'].includes(f)) fs.copyFileSync(path.join(fix, f), file(f));
@@ -570,7 +607,7 @@ async function v06(page) {
 }
 
 async function v07(page) {
-  const file = (f) => path.join(APP, ENV.dir, f);
+  const file = (f) => path.join(ENV.dir, f);
   await stop('server');   // reseed from the v0.7 fixture before the server starts
   const fix = path.join(APP, 'demo', 'fixtures', 'v0.7');
   for (const f of fs.readdirSync(fix)) if (!['demo.json', 'pilot.config.json'].includes(f)) fs.copyFileSync(path.join(fix, f), file(f));
@@ -677,7 +714,7 @@ async function v07(page) {
 }
 
 async function v08(page) {
-  const file = (f) => path.join(APP, ENV.dir, f);
+  const file = (f) => path.join(ENV.dir, f);
   await stop('server');   // reseed from the v0.8 fixture before the server starts
   const fix = path.join(APP, 'demo', 'fixtures', 'v0.8');
   for (const f of fs.readdirSync(fix)) if (!['demo.json', 'pilot.config.json'].includes(f)) fs.copyFileSync(path.join(fix, f), file(f));
@@ -804,7 +841,7 @@ async function v08(page) {
 // pilot-v0.9: settled input. Off (the config default here): exactly the old prompt. On (/flag): the offer after a pause on
 // a finished-looking input, Tab sends only while it shows, Enter always sends, every offer has at most one outcome.
 async function v09(page) {
-  const file = (f) => path.join(APP, ENV.dir, f);
+  const file = (f) => path.join(ENV.dir, f);
   await stop('server');
   const fix = path.join(APP, 'demo', 'fixtures', 'v0.9');
   for (const f of fs.readdirSync(fix)) if (!['demo.json', 'pilot.config.json'].includes(f)) fs.copyFileSync(path.join(fix, f), file(f));
@@ -929,7 +966,8 @@ async function v09(page) {
 }
 
 async function v10(page) {
-  const file = (f) => path.join(APP, ENV.dir, f);
+  fs.writeFileSync(path.join(ENV.dir, 'context.json'), JSON.stringify({ rev: 1, share: { board: true }, changedBy: 'frame-test' }));
+  const file = (f) => path.join(ENV.dir, f);
   await stop('server');
   const fix = path.join(APP, 'demo', 'fixtures', 'v0.10');
   for (const f of fs.readdirSync(fix)) if (!['demo.json', 'pilot.config.json'].includes(f)) fs.copyFileSync(path.join(fix, f), file(f));
@@ -1072,15 +1110,89 @@ async function v10(page) {
   check('no frame write touched state.json items or modules.json panes', events().filter((e) => e.event === 'item_write').length === writes0 && JSON.parse(fs.readFileSync(file('modules.json'), 'utf8')).panes.length === 3);
 }
 
-const SCENARIOS = { p1, p2, v03, v04, v05, v06, v07, v08, v09, v10 };
+async function m1(page) {
+  await page.goto(URL);
+  check('M1 default conversation-only status', (await page.status()).includes('conversation-only'));
+  await page.eval(`document.getElementById('settings-open').focus()`);
+  await page.key('Enter'); await sleep(250);
+  check('M1 Settings keyboard reachable with password field and missing status', await page.eval(`document.getElementById('settings').open && document.querySelector('#key-fields input').type === 'password' && document.querySelector('.key-source').textContent === 'missing'`));
+  await page.eval(`document.querySelector('#key-fields input').value = 'sk-browser-SENTINEL-012345678901234567890'; document.querySelector('#key-fields button').click()`); await sleep(250);
+  check('M1 save clears field, status saved, no key in page text', await page.eval(`document.querySelector('#key-fields input').value === '' && document.querySelector('.key-source').textContent === 'saved' && !document.body.innerText.includes('sk-browser-SENTINEL')`));
+  await page.eval(`document.getElementById('settings-close').click()`);
+  await page.submit('/context', 350);
+  check('M1 /context says nothing beyond conversation', await page.eval(`document.getElementById('log').textContent.includes('nothing beyond this conversation')`));
+  fs.writeFileSync(path.join(ENV.dir, 'state.json'), JSON.stringify({ rev: 1, items: [{ id: 'dec-m1', kind: 'decision', text: 'Use Postgres', status: 'confirmed', author: 'user' }] }));
+  await page.submit('/context share board on', 400);
+  check('M1 cloud recipient in status and board preview in /context', (await page.status()).includes('board is sent to frontier (cloud)') && await page.eval(`document.getElementById('log').textContent.includes('dec-m1: Use Postgres')`));
+  await page.submit('a browser chat request');
+  check('M1 saved key allows fake model chat', await page.eval(`document.querySelector('.ln.assistant .text').textContent.includes('[fake:frontier]')`));
+  const requests = page.net.filter(n => n.url.endsWith('/chat')).length;
+  await page.submit('sk-browser-SENTINEL-012345678901234567890', 250);
+  check('M1 pasted key does not enter transcript or network chat', page.net.filter(n => n.url.endsWith('/chat')).length === requests && await page.eval(`!document.getElementById('log').textContent.includes('sk-browser-SENTINEL') && document.getElementById('log').textContent.includes('Use Settings')`));
+  await page.submit('/key', 250);
+  check('M1 /key opens Settings', await page.eval(`document.getElementById('settings').open`));
+  await page.eval(`document.querySelectorAll('#key-fields button')[1].click()`); await sleep(250);
+  check('M1 Remove returns missing status', await page.eval(`document.querySelector('.key-source').textContent === 'missing'`));
+  await page.eval(`document.getElementById('settings-close').click()`);
+  await page.submit('/context share board off', 350);
+  check('M1 off restores conversation-only status', (await page.status()).includes('conversation-only'));
+}
+
+async function i1(page) {
+  const shots = '/home/nuc/orca-reports/blackboard-i1/screenshots'; fs.mkdirSync(shots, { recursive: true });
+  const shot = async name => { const r = await page.send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(shots, name + '.png'), Buffer.from(r.result.data, 'base64')); };
+  const waitFor = async (expr, ms = 6000) => { const start = Date.now(); while (Date.now() - start < ms) { if (await page.eval(expr)) return true; await sleep(30); } return false; };
+  await page.goto(URL); await shot('01-open');
+  check('I1 CLI-served workspace has Files and overview', await page.eval(`!document.getElementById('files-section').hidden && !!document.getElementById('overview')`));
+  await page.eval(`document.getElementById('settings-open').click()`); await sleep(200);
+  await page.eval(`document.querySelector('#key-fields input').value = 'sk-i1-browser-012345678901234567890123456789'; document.querySelector('#key-fields button').click()`);
+  check('I1 Settings saves a key and shows saved', await waitFor(`document.querySelector('.key-source').textContent === 'saved' && document.querySelector('#key-fields input').value === ''`)); await shot('02-settings-saved');
+  await page.eval(`document.getElementById('settings-close').click()`);
+  await page.eval(`document.getElementById('new-chat').click()`); await sleep(350);
+  const first = await page.eval(`document.querySelector('.chat[aria-current]').dataset.chat`); await shot('03-first-new-chat');
+  await page.type('Decision: keep the first conversation.'); await page.key('Enter');
+  const incremental = await waitFor(`!!document.querySelector('.ln.assistant.streaming .text') && document.querySelector('.ln.assistant.streaming .text').textContent.length > 0 && document.getElementById('input').disabled`);
+  check('I1 reply appears incrementally while request is streaming', incremental); await shot('04-streaming');
+  await waitFor(`!document.getElementById('input').disabled && !!document.querySelector('#overview .item.proposed')`); await shot('05-first-reply-proposal');
+  await page.eval(`document.getElementById('new-chat').click()`); await sleep(350);
+  const second = await page.eval(`document.querySelector('.chat[aria-current]').dataset.chat`);
+  await page.submit('Hello from the second conversation.', 1800); await shot('06-second-conversation');
+  await page.eval(`document.querySelector('.chat[data-chat="${first}"]').click()`); await sleep(350);
+  check('I1 switching back preserves first history and excludes second', await page.eval(`document.getElementById('log').textContent.includes('keep the first conversation') && !document.getElementById('log').textContent.includes('Hello from the second conversation')`)); await shot('07-first-history');
+  await stop('server'); await startServer(); await page.goto(URL);
+  check('I1 restart keeps both chats and first history', await page.eval(`!!document.querySelector('.chat[data-chat="${first}"]') && !!document.querySelector('.chat[data-chat="${second}"]') && document.getElementById('log').textContent.includes('keep the first conversation')`)); await shot('08-restart');
+  await page.eval(`document.querySelector('#overview .item.proposed').focus()`); await page.key('c');
+  check('I1 overview proposal confirms with c', await waitFor(`!!document.querySelector('#overview .item.confirmed') && !document.querySelector('#overview .item.proposed')`)); await shot('09-confirmed');
+  await page.eval(`document.querySelector('#file-list button').click()`); await sleep(200);
+  check('I1 text file opens read-only in center', await page.eval(`!document.getElementById('file-view').hidden && document.getElementById('file-text').textContent.includes('Read-only project note')`)); await shot('10-read-only-file');
+  await page.eval(`document.getElementById('file-close').click()`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false }); await sleep(100); await shot('11-narrow');
+  check('I1 narrow workspace has no horizontal overflow', await page.eval(`document.documentElement.scrollWidth <= innerWidth`));
+}
+
+const SCENARIOS = { i1, m1, p1, p2, v03, v04, v05, v06, v07, v08, v09, v10 };
 const ENVS = {
+  i1: () => {
+    const project = path.join(ROOT, 'i1-project');
+    const init = spawnSync(process.execPath, [path.join(APP, 'bin/pilot.js'), 'init', project], { cwd: ROOT, env: { ...process.env, PILOT_SECRETS_FILE: path.join(ROOT, 'private', 'secrets.json') } });
+    if (init.status !== 0) throw new Error('I1 init failed'); safety.mark(path.join(project, '.pilot'));
+    const candidate = { name: 'mistral-test', model: 'fake', keyEnv: 'I1_BROWSER_KEY', baseUrl: 'http://127.0.0.1:5856/v1', local: false };
+    const config = path.join(project, 'pilot.config.json'); fs.writeFileSync(config, JSON.stringify({ port: 4855, roles: { chat: { candidates: [candidate] }, extract: { candidates: [candidate] } } }));
+    fs.writeFileSync(path.join(project, 'notes.txt'), 'Read-only project note');
+    return { url: 'http://127.0.0.1:4855/', fakes: [5856, 5857], dir: 'i1-project/.pilot', config, cdp: 9433, project };
+  },
+  m1: () => {
+    const c = { port: 4845, roles: { chat: { candidates: [{ name: 'frontier', model: 'fake-mistral', baseUrl: 'http://127.0.0.1:5846/v1', keyEnv: 'M1_BROWSER_KEY' }] } } };
+    const file = path.join(ROOT, 'm1-config.json'); fs.writeFileSync(file, JSON.stringify(c));
+    return { url: 'http://127.0.0.1:4845/', fakes: [5846, 5847], dir: '.pilot-verify-m1b', config: file, cdp: 9423 };
+  },
   v03: () => {
     const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
     c.port = 4765;
     c.roles.chat.candidates[0].baseUrl = 'http://127.0.0.1:5766/v1';
     c.roles.chat.candidates[1].baseUrl = 'http://127.0.0.1:5767/v1';
     c.roles.extract.candidates[0].baseUrl = 'http://127.0.0.1:5767/v1';
-    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v03b-')), 'config.json');
+    const file = path.join(fs.mkdtempSync(path.join(ROOT, 'pilot-v03b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4765/', fakes: [5766, 5767], dir: '.pilot-verify-v03b', config: file, cdp: 9343 };
   },
@@ -1090,7 +1202,7 @@ const ENVS = {
     c.roles.chat.candidates[0].baseUrl = 'http://127.0.0.1:5776/v1';
     c.roles.chat.candidates[1].baseUrl = 'http://127.0.0.1:5777/v1';
     c.roles.extract.candidates[0].baseUrl = 'http://127.0.0.1:5777/v1';
-    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v04b-')), 'config.json');
+    const file = path.join(fs.mkdtempSync(path.join(ROOT, 'pilot-v04b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4775/', fakes: [5776, 5777], dir: '.pilot-verify-v04b', config: file, cdp: 9353 };
   },
@@ -1100,7 +1212,7 @@ const ENVS = {
     c.roles.chat.candidates[0].baseUrl = 'http://127.0.0.1:5786/v1';
     c.roles.chat.candidates[1].baseUrl = 'http://127.0.0.1:5787/v1';
     c.roles.extract.candidates[0].baseUrl = 'http://127.0.0.1:5787/v1';
-    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v05b-')), 'config.json');
+    const file = path.join(fs.mkdtempSync(path.join(ROOT, 'pilot-v05b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4785/', fakes: [5786, 5787], dir: '.pilot-verify-v05b', config: file, cdp: 9363 };
   },
@@ -1110,7 +1222,7 @@ const ENVS = {
     c.roles.chat.candidates[0].baseUrl = 'http://127.0.0.1:5796/v1';
     c.roles.chat.candidates[1].baseUrl = 'http://127.0.0.1:5797/v1';
     c.roles.extract.candidates[0].baseUrl = 'http://127.0.0.1:5797/v1';
-    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v06b-')), 'config.json');
+    const file = path.join(fs.mkdtempSync(path.join(ROOT, 'pilot-v06b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4795/', fakes: [5796, 5797], dir: '.pilot-verify-v06b', config: file, cdp: 9373 };
   },
@@ -1120,7 +1232,7 @@ const ENVS = {
     c.roles.chat.candidates[0].baseUrl = 'http://127.0.0.1:5806/v1';
     c.roles.chat.candidates[1].baseUrl = 'http://127.0.0.1:5807/v1';
     c.roles.extract.candidates[0].baseUrl = 'http://127.0.0.1:5807/v1';
-    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v07b-')), 'config.json');
+    const file = path.join(fs.mkdtempSync(path.join(ROOT, 'pilot-v07b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4805/', fakes: [5806, 5807], dir: '.pilot-verify-v07b', config: file, cdp: 9383 };
   },
@@ -1130,7 +1242,7 @@ const ENVS = {
     c.roles.chat.candidates[0].baseUrl = 'http://127.0.0.1:5816/v1';
     c.roles.chat.candidates[1].baseUrl = 'http://127.0.0.1:5817/v1';
     c.roles.extract.candidates[0].baseUrl = 'http://127.0.0.1:5817/v1';
-    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v08b-')), 'config.json');
+    const file = path.join(fs.mkdtempSync(path.join(ROOT, 'pilot-v08b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4815/', fakes: [5816, 5817], dir: '.pilot-verify-v08b', config: file, cdp: 9393 };
   },
@@ -1141,7 +1253,7 @@ const ENVS = {
     c.roles.chat.candidates[1].baseUrl = 'http://127.0.0.1:5827/v1';
     c.roles.extract.candidates[0].baseUrl = 'http://127.0.0.1:5827/v1';
     c.experiments = { settledInput: false, settleMs: 400 };
-    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v09b-')), 'config.json');
+    const file = path.join(fs.mkdtempSync(path.join(ROOT, 'pilot-v09b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4825/', fakes: [5826, 5827], dir: '.pilot-verify-v09b', config: file, cdp: 9403 };
   },
@@ -1153,7 +1265,7 @@ const ENVS = {
     c.roles.extract.candidates[0].baseUrl = 'http://127.0.0.1:5837/v1';
     c.roles.frame.candidates[0].baseUrl = 'http://127.0.0.1:5837/v1';
     c.experiments = { settledInput: false, settleMs: 1800, frameProposals: false };
-    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pilot-v10b-')), 'config.json');
+    const file = path.join(fs.mkdtempSync(path.join(ROOT, 'pilot-v10b-')), 'config.json');
     fs.writeFileSync(file, JSON.stringify(c));
     return { url: 'http://127.0.0.1:4835/', fakes: [5836, 5837], dir: '.pilot-verify-v10b', config: file, cdp: 9413 };
   },
@@ -1165,11 +1277,20 @@ const ENVS = {
   if (!list.every((n) => SCENARIOS[n])) { console.error(`unknown scenario "${which}". Use: ${Object.keys(SCENARIOS).join(', ')}, all`); process.exit(2); }
   let page;
   try {
+    ROOT = safety.tempRoot();
+    safety.validateRoot(ROOT);
     for (const name of list) {
       console.log(`== ${name}`);
-      ENV = ENVS[name] ? ENVS[name]() : { url: 'http://127.0.0.1:4747/', fakes: [5701, 5702], dir: '.pilot', config: 'pilot.config.dev.json', cdp: 9333 };
+      ENV = ENVS[name] ? ENVS[name]() : { url: 'http://127.0.0.1:4750/', fakes: [5701, 5702], dir: '.pilot-verify-browser', config: 'pilot.config.dev.json', cdp: 9333 };
+      ENV.dir = path.join(ROOT, ENV.dir);
+      if (!ENV.project) { safety.remove(ENV.dir, ROOT); safety.mark(ENV.dir); } // CLI init owns .pilot; cleanup removes only its enclosing marked root.
+      if (!ENVS[name]) {
+        const c = JSON.parse(fs.readFileSync(path.join(APP, 'pilot.config.dev.json'), 'utf8'));
+        c.port = 4750; ENV.config = path.join(ROOT, 'config.json');
+        fs.writeFileSync(ENV.config, JSON.stringify(c));
+      }
       URL = ENV.url;
-      fs.rmSync(path.join(APP, ENV.dir), { recursive: true, force: true });
+      await safety.portsFree([new URLConstructor(URL).port, ...ENV.fakes, ENV.cdp]);
       start('f1', ['dev/fake-model.js', String(ENV.fakes[0]), 'frontier']);
       start('f2', ['dev/fake-model.js', String(ENV.fakes[1]), 'morrow']);
       await sleep(300);
@@ -1184,9 +1305,7 @@ const ENVS = {
     }
   } catch (err) { console.error('ERROR', err); fails++; }
   finally {
-    if (page) page.close();
-    for (const k of Object.keys(procs)) await stop(k);
-    if (ENV.dir !== '.pilot') fs.rmSync(path.join(APP, ENV.dir), { recursive: true, force: true });
+    await shutdown();
   }
   console.log(fails ? `\n${fails} BROWSER CHECK(S) FAILED` : '\nALL BROWSER CHECKS PASSED');
   process.exitCode = fails ? 1 : 0;

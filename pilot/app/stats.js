@@ -236,6 +236,7 @@ function computeStats(dir) {
     lines: transcript.length, fixtureLines: transcript.filter((l) => l.fixture === true).length, notes,
     measures: { continuity: continuity(events), consent: consent(events, modules), usefulness: usefulness(events, transcript),
       signal: signal(events, items), quiet: quiet(events, transcript) },
+    context: events.filter(e => e.event === 'model_call' && e.role === 'chat' && e.context).map(e => ({ candidate: e.candidate, board: e.context.board === true, items: e.context.items || 0 })),
     experiments: { 'settled input': settledInput(events, readJsonSafe(path.join(dir, 'flags.json'), null)) },
   };
 }
@@ -261,6 +262,7 @@ function formatStats(s, label) {
     for (const l of ls) out.push(`${' '.repeat(21)}${l}`);
   }
   out.push('Work session: activity with no gap over 30 min. Hour of work: sum of gaps of at most 30 min between messages. Times in UTC.');
+  for (const c of s.context || []) out.push(`chat context: ${c.candidate} board=${c.board} items=${c.items}`);
   return out;
 }
 

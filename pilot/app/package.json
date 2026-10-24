@@ -10,5 +10,9 @@
     "demo": "node scripts/demo.js",
     "verify": "bash scripts/verify-all.sh",
     "stats": "node scripts/stats.js"
+  },
+  "version": "0.12.0",
+  "bin": {
+    "pilot": "bin/pilot.js"
   }
 }

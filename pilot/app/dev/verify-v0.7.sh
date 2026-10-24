@@ -6,12 +6,14 @@
 # (.pilot-verify-v07/, .pilot-verify-v07c/, .pilot-verify-v07b/, .pilot-demo-verify07/), so it never touches .pilot/
 # or a running demo. Usage (from anywhere): bash pilot/app/dev/verify-v0.7.sh
 set -u
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
+source dev/lib/safe-dir.sh || exit 1
 APPDIR=$(pwd)
-T=$(mktemp -d); PIDS=(); SERVER=""
-DIR=.pilot-verify-v07; C=.pilot-verify-v07c
-cleanup() { kill "${PIDS[@]}" 2>/dev/null; wait 2>/dev/null; rm -rf "$T" "$DIR" "$C" .pilot-demo-verify07; }
+T=$(fixture_temp) || exit 1; fixture_root "$T"; FIXTURE_ROOT="$T"; PIDS=(); SERVER=""
+DIR="$T/.pilot-verify-v07"; C="$T/.pilot-verify-v07c"
+cleanup() { kill "${PIDS[@]}" 2>/dev/null; wait 2>/dev/null; fixture_remove "$T"; }
 trap cleanup EXIT
+fixture_ports 4800 4968 5801 5802
 FAILS=0
 check() { if [ "$2" = "true" ]; then echo "PASS $1"; else echo "FAIL $1"; FAILS=$((FAILS+1)); fi; }
 q() { node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const x=JSON.parse(s);console.log(String($1))})"; }
@@ -22,13 +24,13 @@ node -e '
   c.roles.extract.candidates[0].baseUrl="http://127.0.0.1:5802/v1";
   require("fs").writeFileSync(process.argv[1], JSON.stringify(c,null,2));' "$T/conf.json"
 fake() { node dev/fake-model.js "$1" "$2" > "$T/fake-$1.log" 2>&1 & PIDS+=($!); }
-server() { PILOT_DIR=$1 PILOT_CONFIG="$T/conf.json" node server.js >> "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); for i in $(seq 1 50); do curl -s -m 1 localhost:4800/state > /dev/null && return; sleep 0.1; done; }
+server() { PILOT_DIR="$1" PILOT_CONFIG="$T/conf.json" node server.js >> "$T/server.log" 2>&1 & SERVER=$!; PIDS+=($!); for i in $(seq 1 50); do curl -H 'x-pilot: 1' -s -m 1 localhost:4800/state > /dev/null && return; sleep 0.1; done; }
 stop_server() { [ -n "$SERVER" ] && { kill $SERVER 2>/dev/null; wait $SERVER 2>/dev/null; SERVER=""; }; }
-chat() { curl -sN -X POST localhost:4800/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
-cmdraw() { curl -s -w '\n%{http_code}' -X POST localhost:4800/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
-why() { curl -s -X POST localhost:4800/command -H 'content-type: application/json' -d "{\"text\":\"/why $1\"}" | q 'x.lines.join("\n")'; }
-post() { curl -s -w '\n%{http_code}' -X POST "localhost:4800/$1" -H 'content-type: application/json' -d "$2"; }
-state() { curl -s "localhost:4800/state${1:-}"; }
+chat() { curl -H 'x-pilot: 1' -sN -X POST localhost:4800/chat -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+cmdraw() { curl -H 'x-pilot: 1' -s -w '\n%{http_code}' -X POST localhost:4800/command -H 'content-type: application/json' -d "{\"text\":\"$1\"}"; }
+why() { curl -H 'x-pilot: 1' -s -X POST localhost:4800/command -H 'content-type: application/json' -d "{\"text\":\"/why $1\"}" | q 'x.lines.join("\n")'; }
+post() { curl -H 'x-pilot: 1' -s -w '\n%{http_code}' -X POST "localhost:4800/$1" -H 'content-type: application/json' -d "$2"; }
+state() { curl -H 'x-pilot: 1' -s "localhost:4800/state${1:-}"; }
 settle() { for i in $(seq 1 100); do [ "$(state | q 'x.extracting')" = "false" ] && return; sleep 0.1; done; }
 has() { grep -qE -- "$1" <<< "$2"; }   # status only; a check ends its chain with && echo true
 editjs() { node -e "const f=process.argv[1],fs=require('fs'),s=JSON.parse(fs.readFileSync(f,'utf8'));$2;fs.writeFileSync(f,JSON.stringify(s,null,2))" "$3/$1"; }
@@ -37,9 +39,9 @@ sums() { find "$1" -type f -exec shasum {} + | sort; }
 fake 5801 frontier; fake 5802 morrow; sleep 0.3
 
 echo "== 1. /why on the v0.7 fixture (copy in $C)"
-rm -rf $C; mkdir $C
-for f in demo/fixtures/v0.7/*; do case $(basename $f) in demo.json|pilot.config.json) ;; *) cp $f $C/ ;; esac; done
-server $C
+fixture_reset "$C"; mkdir -p "$C"
+for f in demo/fixtures/v0.7/*; do case $(basename "$f") in demo.json|pilot.config.json) ;; *) cp "$f" "$C/" ;; esac; done
+server "$C"
 W=$(why "")
 check "/why: one line per shown pane with its rule, the count when asked, your answer and the add" "$(has '^  index: messages ≥ 12; asked at 24 messages \(2026-10-15T14:14:22.000Z\); you said yes \(2026-10-15T14:14:33.000Z\); added by the controller  \[modules.json:14 panes index.rule; rules.json:[0-9]+ rules index; metrics.jsonl:60 controller_ask; transcript.jsonl:33 m-f033; metrics.jsonl:65 consent c-f03; metrics.jsonl:66 controller_add\]$' "$W" && has '^  map: decisions ≥ 2; asked at 2 decisions' "$W" && has '^  kanban: tasks ≥ 3; asked at 6 tasks .*you said always' "$W" && echo true)"
 check "/why: items summary (16 by a model, task-7 by file edit; dec-8 status by file edit; task-1, task-2 edited)" "$(has '^  17 items: 16 proposed by a model \(extraction\), 1 added by you \(file edit\): task-7' "$W" && has 'status set by file edit: dec-8; other fields edited by file edit: task-1, task-2' "$W" && echo true)"
@@ -60,19 +62,19 @@ W=$(why chat)
 check "/why chat: always there, not grown" "$(has 'always there' "$W" && echo true)"
 OUT=$(cmdraw '/why nope')
 check "/why <unknown>: 400, names the panes and the items" "$(echo "$OUT" | tail -1 | grep -qx 400 && has 'nothing called \\"nope\\". Panes: chat, index, map, kanban. Items: dec-1' "$OUT" && echo true)"
-node dev/why-cites.js http://127.0.0.1:4800 $C > $T/cites1.txt; RC=$?
+node dev/why-cites.js http://127.0.0.1:4800 "$C" > "$T/cites1.txt"; RC=$?
 check "every source cited by /why, every pane and all 17 items resolves to the line it names ($(tail -1 $T/cites1.txt))" "$( [ $RC -eq 0 ] && echo true)"
-[ $RC -ne 0 ] && head -20 $T/cites1.txt
-sleep 0.3; sums $C > $T/s1
-for t in "" map index kanban chat dec-2 dec-8 task-7 task-1 nope; do why "$t" > /dev/null; done; node dev/why-cites.js http://127.0.0.1:4800 $C > /dev/null; sleep 0.3
-sums $C > $T/s2
-check "/why is read-only (every file byte-identical after 31 explanations, no file added)" "$(cmp -s $T/s1 $T/s2 && echo true)"
+[ $RC -ne 0 ] && head -20 "$T/cites1.txt"
+sleep 0.3; sums "$C" > "$T/s1"
+for t in "" map index kanban chat dec-2 dec-8 task-7 task-1 nope; do why "$t" > /dev/null; done; node dev/why-cites.js http://127.0.0.1:4800 "$C" > /dev/null; sleep 0.3
+sums "$C" > "$T/s2"
+check "/why is read-only (every file byte-identical after 31 explanations, no file added)" "$(cmp -s "$T/s1" "$T/s2" && echo true)"
 stop_server
 
 echo "== 2. live data: a fresh dir, real turns, consent and a decision"
-rm -rf $DIR; mkdir -p $DIR
+fixture_reset "$DIR"; mkdir -p "$DIR"
 node -e 'const f=process.argv[1],r=require("./rules.example.json");r.rules.find(x=>x.module==="index").threshold=2;r.rules.find(x=>x.module==="map").threshold=1;require("fs").writeFileSync(f,JSON.stringify(r,null,2))' "$DIR/rules.json"
-server $DIR
+server "$DIR"
 chat "Decision: keep the claim local. Task: scan the invoice." > /dev/null; settle
 post answer '{"module":"index","answer":"y"}' > /dev/null
 chat "one more" > /dev/null; settle
@@ -80,46 +82,46 @@ post answer '{"module":"map","answer":"a"}' > /dev/null
 post answer '{"itemId":"dec-1","decision":"c"}' > /dev/null
 W=$(why "")
 check "/why on live data: index and map shown, each from its question and your answer" "$(has '^  panes: chat \+ index \+ map' "$W" && has '^  index: messages ≥ 2; asked at 2 messages .*you said yes' "$W" && has '^  map: decisions ≥ 1; asked at 1 decisions .*you said always' "$W" && echo true)"
-MSG=$(qa 'x.find(l=>l.role==="user").id' < $DIR/transcript.jsonl)
+MSG=$(qa 'x.find(l=>l.role==="user").id' < "$DIR/transcript.jsonl")
 W=$(why dec-1)
 check "/why dec-1: proposed by morrow from your message $MSG, confirmed by you through the page" "$(has "^  from message $MSG by you" "$W" && has '^  proposed by model morrow at .*\(extraction' "$W" && has '^  confirmed by you at .* \(through the page\)  \[metrics.jsonl:[0-9]+ decide dec-1\]$' "$W" && echo true)"
-node dev/why-cites.js http://127.0.0.1:4800 $DIR > $T/cites2.txt; RC=$?
+node dev/why-cites.js http://127.0.0.1:4800 "$DIR" > "$T/cites2.txt"; RC=$?
 check "every source cited on live data resolves ($(tail -1 $T/cites2.txt))" "$( [ $RC -eq 0 ] && echo true)"
-[ $RC -ne 0 ] && head -20 $T/cites2.txt
+[ $RC -ne 0 ] && head -20 "$T/cites2.txt"
 
 echo "== 3. missing or hand-made facts are said plainly"
-editjs state.json 's.items.find(i=>i.id==="task-1").text="scan the invoice twice"' $DIR; sleep 0.5
+editjs state.json 's.items.find(i=>i.id==="task-1").text="scan the invoice twice"' "$DIR"; sleep 0.5
 W=$(why task-1)
 check "a hand edit while the server runs: 'text edited by you (file edit) at <ts>', citing the file_edit line" "$(has '^  text edited by you \(file edit\) at [0-9T:.-]+Z: the server wrote "scan the invoice", the file says "scan the invoice twice"  \[.*metrics.jsonl:[0-9]+ file_edit task-1\]$' "$W" && echo true)"
-editjs state.json 's.items.push({id:"task-9",kind:"task",text:"buy stamps",status:"confirmed",author:"user",createdAt:"2026-10-17T09:00:00.000Z",column:"todo"})' $DIR; sleep 0.5
+editjs state.json 's.items.push({id:"task-9",kind:"task",text:"buy stamps",status:"confirmed",author:"user",createdAt:"2026-10-17T09:00:00.000Z",column:"todo"})' "$DIR"; sleep 0.5
 W=$(why task-9)
 check "an item added by hand: 'added by you (file edit) at <ts>' (file_edit line), status set by file edit" "$(has '^  added by you \(file edit\) at [0-9T:.-]+Z  \[state.json:[0-9]+ items task-9; metrics.jsonl:[0-9]+ file_edit task-9\]$' "$W" && has 'status "confirmed" set by you \(file edit\) at' "$W" && echo true)"
-editjs state.json 's.items.push({id:"dec-9",kind:"decision",text:"from an older build",status:"proposed",author:"model",model:"morrow",quote:"q",fromMessage:"m-gone",createdAt:"2026-10-17T09:00:00.000Z"})' $DIR; sleep 0.5
+editjs state.json 's.items.push({id:"dec-9",kind:"decision",text:"from an older build",status:"proposed",author:"model",model:"morrow",quote:"q",fromMessage:"m-gone",createdAt:"2026-10-17T09:00:00.000Z"})' "$DIR"; sleep 0.5
 W=$(why dec-9)
 check "a model item the server never wrote: 'the file says author model · morrow; the server never wrote it'" "$(has 'the file says author model · morrow; the server never wrote it \(no item_write in metrics.jsonl' "$W" && echo true)"
 check "a fromMessage that is not in the transcript: 'which is not in transcript.jsonl'" "$(has 'from message m-gone, which is not in transcript.jsonl' "$W" && echo true)"
-editjs modules.json 's.panes.push({module:"kanban",addedAt:"2026-10-17T09:00:00.000Z"})' $DIR; sleep 0.4
+editjs modules.json 's.panes.push({module:"kanban",addedAt:"2026-10-17T09:00:00.000Z"})' "$DIR"; sleep 0.4
 W=$(why kanban); WF=$(why "")
 check "a pane added by hand without an answer: not shown (/state), /why says 'no recorded answer'" "$(state | q '!x.panes.includes("kanban")' | grep -q true && has '^  not shown: listed in modules.json, but there is no recorded answer' "$W" && has '^  no recorded answer  \[modules.json answers.kanban \(absent\)\]$' "$W" && has '^  kanban not shown: listed in modules.json without a recorded answer' "$WF" && echo true)"
 check "... and 'the pane entry has no controller_add event: added by file edit, when is not recorded'" "$(has 'the pane entry has no controller_add event: added by file edit, when is not recorded \(the entry says addedAt 2026-10-17T09:00:00.000Z\)' "$W" && echo true)"
-editjs modules.json 's.answers.kanban={answer:"yes",at:"2026-10-17T09:00:01.000Z",count:9}' $DIR; sleep 0.4
+editjs modules.json 's.answers.kanban={answer:"yes",at:"2026-10-17T09:00:01.000Z",count:9}' "$DIR"; sleep 0.4
 W=$(why kanban)
 check "a hand-written yes (no consent event): shown, and /why says 'written by file edit, when is not recorded'" "$(state | q 'x.panes.includes("kanban")' | grep -q true && has 'answer on file: "yes" \(says 2026-10-17T09:00:01.000Z\), but no consent event matches it: written by file edit, when is not recorded' "$W" && echo true)"
-editjs rules.json 's.rules.find(x=>x.module==="index").threshold=5' $DIR
+editjs rules.json 's.rules.find(x=>x.module==="index").threshold=5' "$DIR"
 check "rules.json changed after the pane was added: the recorded rule and 'rules.json says messages ≥ 5 now'" "$(W=$(why index); has 'rule recorded with the pane: messages ≥ 2  \[' "$W" && has 'rules.json says messages ≥ 5 now' "$W" && echo true)"
-node dev/why-cites.js http://127.0.0.1:4800 $DIR > $T/cites3.txt; RC=$?
+node dev/why-cites.js http://127.0.0.1:4800 "$DIR" > "$T/cites3.txt"; RC=$?
 check "every source cited after the hand edits resolves ($(tail -1 $T/cites3.txt))" "$( [ $RC -eq 0 ] && echo true)"
-[ $RC -ne 0 ] && head -20 $T/cites3.txt
-cp $DIR/state.json $T/st.json; printf '{"rev": 9, "items": [' > $DIR/state.json; sleep 0.4
+[ $RC -ne 0 ] && head -20 "$T/cites3.txt"
+cp "$DIR/state.json" "$T/st.json"; printf '{"rev": 9, "items": [' > "$DIR/state.json"; sleep 0.4
 OUT=$(cmdraw '/why dec-1'); W=$(why "")
-check "broken state.json: /why dec-1 answers (400, names the error), /why says items cannot be explained, the server lives" "$(echo "$OUT" | tail -1 | grep -qx 400 && has 'state.json is not valid JSON' "$OUT" && has 'state.json is not valid JSON.*items cannot be explained' "$W" && curl -s -m 1 localhost:4800/state > /dev/null && echo true)"
-cp $T/st.json $DIR/state.json
-cp $DIR/modules.json $T/mo.json; printf '{"panes": [' > $DIR/modules.json; sleep 0.4
+check "broken state.json: /why dec-1 answers (400, names the error), /why says items cannot be explained, the server lives" "$(echo "$OUT" | tail -1 | grep -qx 400 && has 'state.json is not valid JSON' "$OUT" && has 'state.json is not valid JSON.*items cannot be explained' "$W" && curl -H 'x-pilot: 1' -s -m 1 localhost:4800/state > /dev/null && echo true)"
+cp "$T/st.json" "$DIR/state.json"
+cp "$DIR/modules.json" "$T/mo.json"; printf '{"panes": [' > "$DIR/modules.json"; sleep 0.4
 check "broken modules.json: /why map says it cannot explain until the file is fixed" "$(has 'cannot explain: modules.json is not valid JSON' "$(why map)" && echo true)"
-cp $T/mo.json $DIR/modules.json; sleep 0.3
-sums $DIR > $T/s3; for t in "" index map kanban dec-1 dec-9 task-9 task-1; do why "$t" > /dev/null; done; sleep 0.3; sums $DIR > $T/s4
-check "/why is read-only on live data too" "$(cmp -s $T/s3 $T/s4 && echo true)"
-check "/help lists /why" "$(curl -s -X POST localhost:4800/command -H 'content-type: application/json' -d '{"text":"/help"}' | q 'x.lines.some(l=>l.startsWith("/why"))')"
+cp "$T/mo.json" "$DIR/modules.json"; sleep 0.3
+sums "$DIR" > "$T/s3"; for t in "" index map kanban dec-1 dec-9 task-9 task-1; do why "$t" > /dev/null; done; sleep 0.3; sums "$DIR" > "$T/s4"
+check "/why is read-only on live data too" "$(cmp -s "$T/s3" "$T/s4" && echo true)"
+check "/help lists /why" "$(curl -H 'x-pilot: 1' -s -X POST localhost:4800/command -H 'content-type: application/json' -d '{"text":"/help"}' | q 'x.lines.some(l=>l.startsWith("/why"))')"
 stop_server
 
 echo "== 4. page (headless Chrome): /why, links, the why? affordance, keyboard, layout at 800/1280/1600 (+820, 1000)"
@@ -132,13 +134,13 @@ fi
 node dev/contrast-check.js > "$T/contrast.log"; RC=$?
 check "contrast-check.js passes, including the why? button and the /why lines" "$( [ $RC -eq 0 ] && grep -q 'why? button on pane bar' "$T/contrast.log" && echo true)"
 
-echo "== 5. demo v0.7 within 30 s (ports +200, dir .pilot-demo-verify07)"
-DEMO_PORT_SHIFT=200 PILOT_DEMO_DIR=.pilot-demo-verify07 node scripts/demo.js v0.7 < /dev/null > "$T/demo.log" 2>&1 & DEMO=$!; PIDS+=($!)
+echo "== 5. demo v0.7 within 30 s (ports +200, dir $T/.pilot-demo-verify07)"
+PILOT_FIXTURE_ROOT="$T" DEMO_PORT_SHIFT=200 PILOT_DEMO_DIR="$T/.pilot-demo-verify07" node scripts/demo.js v0.7 < /dev/null > "$T/demo.log" 2>&1 & DEMO=$!; PIDS+=($!)
 D0=$(date +%s); UP=""
-for i in $(seq 1 60); do if curl -s -m 1 localhost:4968/state > "$T/ds.json" 2>/dev/null && [ -s "$T/ds.json" ]; then UP=1; break; fi; sleep 0.5; done
+for i in $(seq 1 60); do if curl -H 'x-pilot: 1' -s -m 1 localhost:4968/state > "$T/ds.json" 2>/dev/null && [ -s "$T/ds.json" ]; then UP=1; break; fi; sleep 0.5; done
 echo "   up after $(( $(date +%s) - D0 )) s"
 check "demo serves /state within 30 s: index, map and kanban grown from the fixtures" "$( [ -n "$UP" ] && q 'x.panes.join()==="map,index,kanban" && Object.values(x.paneInfo).every(p=>p.metric&&p.recorded)' < "$T/ds.json")"
-DW=$(curl -s -X POST localhost:4968/command -H 'content-type: application/json' -d '{"text":"/why dec-2"}' | q 'x.lines.join("\n")')
+DW=$(curl -H 'x-pilot: 1' -s -X POST localhost:4968/command -H 'content-type: application/json' -d '{"text":"/why dec-2"}' | q 'x.lines.join("\n")')
 check "demo /why dec-2 answers from the demo's files" "$(has 'from message m-f003 by you' "$DW" && echo true)"
 for i in $(seq 1 20); do grep -q 'Ctrl+C stops' "$T/demo.log" && break; sleep 0.2; done
 check "try lines: /why, /why map, /why dec-2, the why? click" "$(grep -q 'type /why' "$T/demo.log" && grep -q '/why map' "$T/demo.log" && grep -q '/why dec-2' "$T/demo.log" && grep -q 'Click "why?" on a pane bar' "$T/demo.log" && echo true)"

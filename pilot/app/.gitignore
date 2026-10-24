@@ -3,3 +3,4 @@
 .pilot-demo-*/
 .pilot-verify-*/
 node_modules/
+.pilot-mistral/

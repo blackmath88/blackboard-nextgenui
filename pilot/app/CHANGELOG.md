@@ -1,8 +1,46 @@
 # CHANGELOG
 
+## v0.12 integration
+
+- Integrated multi-chat from 22f9773 and acf9829 with M1 privacy/key/localhost rules.
+- Refresh the active transcript after pane touches so withdrawal lines appear.
+- Added read-only project Files, shared overview, context toggle and key status.
+- Added dependency-free `pilot init/start/key/doctor`, help/version and npm-link install.
+- Redact withheld credential prefixes at normal completion and in nonstream replies.
+- Added isolated CLI/HTTP and Chromium end-to-end checks with step screenshots.
+
 P0 to P2 (skeleton, model roles, growth controller with consent and the index pane) are the pre-iteration
 baseline, merged before the numbered iterations started; see `CHECKS.md` (# P0, # P1, # P2). Iterations are
 tagged `pilot-v0.N` by the coordinator; each one is runnable with `npm run demo -- v0.N`.
+
+## pilot-ui (branch `pilot-ui`, untagged)
+
+Closer to a real chat app: several chats, one shared board. Built on `pilot-mistral` (the chat model reads the board).
+Tested against the fakes only.
+
+**Adds**
+- **Chats (left sidebar).** `+ new` starts a chat; click one to open it; double-click a title to rename it (Enter
+  saves, Esc cancels, empty = back to the automatic title). The list is newest activity first; a title is the stored
+  one, else the first sentence of the chat's first message. The open chat is kept in this browser (localStorage).
+  - **One board for all chats.** Map, kanban and proposals are shared: a decision confirmed in one chat is a
+    constraint in every chat (the board context goes into each chat call). The model sees only the open chat's history.
+  - **Files.** Every transcript line now carries `chat`; lines without one belong to the first chat `c-1`, so old
+    transcripts load unchanged. Controller and system lines land in the chat you were last in (the last message or
+    chat switch). `.pilot/chats.json` `{rev, chats: [{id, title?, createdAt}]}` is hand-editable; a broken one is read
+    as its last good version and never written. Metrics: `chat_new`, `chat_rename`.
+  - **Log and index** show the open chat only; a pending controller question shows in every chat. Chat switching is
+    blocked while a reply streams.
+  - **Per-chat tail.** `GET /state?chat=<id>` sends that chat's lines (plus the open controller question), so an older
+    chat never looks empty after others grew past 500 lines. Every page write sends an `x-pilot-chat` header, so
+    controller and system lines land in the right chat after a server restart or with tabs in different chats. A
+    "show m-…" link in `/why` opens the message's chat first (`POST /chats {action: "find", msg}`).
+  - **API.** `POST /chat {text, chat?}` (default `c-1`; an unknown chat is 400). `POST /chats {action: "new", title?}
+    | {action: "open", id} | {action: "rename", id, title}`. `/state` gains `chats`, `chatsRev`, `defaultChat`.
+- **Theme switch** under the chat list: auto → light → dark, in sync with `/theme`.
+- **Kanban drag and drop.** Drag a confirmed task to another column, or focus it and press ← / →. Proposed tasks are
+  confirmed first (a proposal is not state); rejected ones do not move. `POST /move {itemId, column, rev?}` records
+  `movedAt` and `movedBy: "user"` (the card says "moved by you"), writes the item to the ledger (so it is not shown as
+  a file edit), logs `move`, and counts as a touch of the kanban pane. A stale `rev` gets 409 like `/answer`.
 
 ## pilot-v0.10
 

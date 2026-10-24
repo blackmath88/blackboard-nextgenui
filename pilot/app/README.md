@@ -1,5 +1,35 @@
 # CLI Pilot v1 (steps P0 to P4 + P5 metrics, iteration pilot-v0.10)
 
+
+## Quick start (v0.12)
+
+```sh
+cd /path/to/blackboard-nextgenui/pilot/app
+npm link
+pilot init ~/pilot-work
+cd ~/pilot-work
+pilot key set MISTRAL_API_KEY
+pilot doctor
+pilot start . --port 4747
+```
+
+Open the printed localhost URL. The key prompt is hidden; alternatively pipe a
+key to `pilot key set MISTRAL_API_KEY` on stdin. Settings in the page can save or
+remove the same local key. `pilot key status` prints sources only; `pilot key rm
+MISTRAL_API_KEY` removes the saved value. Environment values take priority.
+Without `npm link`, replace `pilot` with
+`node /path/to/blackboard-nextgenui/pilot/app/bin/pilot.js` from any directory.
+`pilot init [dir]` never overwrites existing files. Ctrl+C stops `pilot start`.
+
+Use **+ new** to start a conversation, click to switch, and double-click its
+title to rename (Enter saves, Escape cancels). Histories are separate; the board
+is shared. The overview shows proposals and authorship; focus a proposed card
+and press **c** to confirm or **r** to reject. Board sharing starts **off** for
+all model roles; the context block shows recipients and lets you opt in. Files
+are read-only text previews (200 KB limit, 200 names, depth 3); dot entries,
+node_modules and symlinks are excluded. Narrow screens stack the side panels.
+
+
 **Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.10` (experiment: after a turn the model may
 suggest how the map shows its cards, a dashed note "suggested by morrow, not by you"; `f` applies it, `/frame reset`
 undoes it, `/why map` explains it; v0.9: pause on a finished line and the input offers "send?", Tab sends, Enter always does; v0.8: panes fade to tabs and are removed only with your answer; v0.7: `/why`; v0.6: authorship and `/stats`; v0.5: live files, two tabs; v0.4: proposals; v0.3: pins
@@ -266,3 +296,66 @@ To start over by hand, stop the server and delete `pilot/app/.pilot/`.
 | POST | `/frame` | `{pane: "map" \| "kanban", id: "fr-1", action: "apply" \| "dismiss", rev?}` (pilot-v0.10): apply or dismiss the open frame proposal of that pane. Off → 409; a wrong id → 409; a stale `rev` (of `frames.json`) → 409 `{stale: true}`; a proposal that no longer fits the cards → 409, dropped |
 | POST | `/touch` | `{module, how}` (pilot-v0.8; how: click, focus, scroll, decide, tab): records a touch of a shown pane and brings a faded one back. The first touch of a pane per turn is written; later ones return `changed: false`. No rev. `chat` → 400, a pane not shown → 404 |
 | POST | `/metric` | `{event: "index_jump", target: "<message id>"}` (pilot-v0.6; the page sends it on an index click). pilot-v0.9, only while the settled-input flag is on: `settle_offer {offer, cue, chars, words, sinceKeyMs}`, `settle_accept {offerRef, sinceKeyMs, offerMs, chars}`, `settle_ignore {offerRef, how, offerMs}`, `enter_send {offerShowing, offerRef?, sinceKeyMs, chars}` (other fields dropped; one outcome per offer). Any other event or an unknown id → 400 |
+
+## M1: Mistral, local keys and explicit chat context
+
+Start with `PILOT_CONFIG=pilot.config.mistral.json npm start`. This config uses
+`.pilot-mistral/`, Mistral for chat/extraction, and frame proposals remain off.
+Use **Settings** (Tab reaches it), or `/key`, to save/remove the configured keys.
+`/key status` reports sources only. A key is resolved from `process.env[keyEnv]`
+first, then `${XDG_CONFIG_HOME:-~/.config}/pilot/secrets.json`. Values are never
+returned by the API; the password field clears after Save and when closed.
+This user-level file is intentionally outside project data so copying a project
+does not copy credentials. Its directory must be owned/private (0700), its file
+owned/regular with permissions no wider than 0600; a symlink is refused. Repair
+permissions yourself if an existing store is refused. `PILOT_SECRETS_FILE` is a
+test-only override; verification always sets it to a disposable fixture.
+
+Chat defaults to **conversation-only**. `/context` previews the exact extra
+system message for the next chat request, or says `nothing beyond this conversation`.
+`/context share board on` opts in; `/context share board off` opts out. The
+hand-editable project file is:
+
+```json
+{"rev":1,"share":{"board":true},"changedBy":"user","changedAt":"2026-10-24T10:00:00.000Z"}
+```
+
+Missing context.json means off. Invalid/unreadable context.json means off,
+with a file error; unlike other project files it never uses a last-good sharing
+setting. Fix it by hand or remove it before changing sharing again. Writes are
+atomic and increment rev. Changes produce a system transcript line and a
+`context_share` metric. Board context includes up to eight confirmed items per
+kind (decisions, open tasks, sources), directly before the newest user message.
+The status bar and `/context` name the active recipient and label non-local
+candidates `(cloud)`. Chat `model_call` metrics include
+`context: {board: true|false, items: n}` without item text; `/stats` lists these
+attempts, including fallback attempts. Existing pins and cloud fallback policy
+still apply. Turning sharing off stops future board prompts; it cannot retract
+content already present in conversation history or previously sent to a provider.
+With sharing off, extraction receives only the current user/assistant turn and
+instructions/schema; existing titles are omitted and dedupe still runs server-side.
+This can increase duplicate suggestions and reduce extraction quality. Frame calls
+are skipped with a recorded reason while sharing is off, even if the experiment
+is on. With sharing on, extraction includes existing item titles and the frame
+role may receive shown pane items. `/context` lists recipients/locality per role
+and exact message templates (future turn text is represented by placeholders).
+
+Every HTTP request requires Host `127.0.0.1:<configured port>` or
+`localhost:<configured port>`. Every non-GET request requires Origin exactly
+`http://127.0.0.1:<port>` or `http://localhost:<port>`; requests **without** Origin
+must instead include `x-pilot: 1`. An incorrect Origin is rejected even with
+that header. The page always sends the header; curl clients must add
+`-H 'x-pilot: 1'`. Rejections return 403 and log only the reason, never the body.
+This includes HEAD/OPTIONS, which are non-GET. No cross-origin access is enabled.
+
+New endpoints: `GET /settings/keys` returns `{keys:[{name,source}]}`, with source
+`env`, `saved`, or `missing`; `POST /settings/key {name,value}` and
+`DELETE /settings/key {name}` accept only keyEnv names referenced in the loaded
+config. Saves trim whitespace, reject blank/control-character/newline values
+and values longer than 4096 characters. Never put a key in chat: common
+key-shaped lines are refused before model dispatch or transcript writes.
+
+`bash dev/verify-m1.sh` runs isolated fake-model/privacy checks.
+`CHROME=/usr/bin/chromium bash dev/verify-m1.sh` also checks Settings and context
+in the browser; `CHROME=/usr/bin/chromium node dev/browser-check.js m1` runs that
+browser scenario alone. No real API key or paid endpoint is needed.

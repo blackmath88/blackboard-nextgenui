@@ -24,6 +24,10 @@
 // (state.frames.applied.<pane>) only arranges the cards: order first, focus marked and scrolled to, group sub-headings;
 // nothing is hidden. Its line says who suggested it and that you applied it; reset = /frame reset <pane>.
 // Off: no note, no frame line, cards in their own order, f is just a key.
+// pilot-ui: several chats (left sidebar), one shared board. Each transcript line names its chat (no chat = the first);
+// the log and the index show the open chat only, and a pending controller question shows in every chat. A theme switch
+// sits under the chat list (auto → light → dark). Confirmed tasks move between kanban columns by drag and drop, or with
+// ←/→ on a focused card (POST /move).
 'use strict';
 const $ = (id) => document.getElementById(id);
 const bench = $('bench'), log = $('log'), form = $('form'), input = $('input');
@@ -43,6 +47,12 @@ let es = null, live = false; // EventSource on /events; live = connected (else: 
 let streaming = false;      // this tab is streaming a reply: file events wait (a re-render would drop the live line)
 const deferred = new Set(); // files changed while streaming
 let flash = null, flashTimer = null;   // short notice after a stale write
+const chatList = $('chat-list'), newChatBtn = $('new-chat'), themeBtn = $('theme-toggle');
+let activeChat = null;      // the open chat; kept in this browser (localStorage), falls back to the first chat
+try { activeChat = localStorage.getItem('pilot-chat'); } catch { /* storage blocked */ }
+const chatOf = (l) => (l && typeof l.chat === 'string' && l.chat) || state.defaultChat || 'c-1';
+const hdrs = () => ({ 'x-pilot': '1', 'content-type': 'application/json', 'x-pilot-chat': encodeURIComponent(activeChat || '') });   // every write names its chat
+const chatLines = () => state.transcript.filter((l) => chatOf(l) === activeChat);
 $('brand').insertAdjacentHTML('afterbegin', Pixel.sprite('teletype', 18, 'pilot') + ' ');
 
 function addLine(role, text, model, id, kind) {
@@ -103,14 +113,20 @@ function renderLog() {
   const ctlKey = (l) => `${l.module}|${isRemove(l) ? 'remove' : 'grow'}`;
   state.transcript.forEach((l, i) => { if (l.role === 'controller' && l.module) lastCtl[ctlKey(l)] = i; });
   state.transcript.forEach((l, i) => {
-    if (l.role === 'controller') addController(l, !!l.module && lastCtl[ctlKey(l)] === i);
+    const last = !!l.module && lastCtl[ctlKey(l)] === i;
+    const pendingHere = l.role === 'controller' && last && state.pending === l.module && isRemove(l) === (state.pendingKind === 'remove');   // a question shows in every chat
+    if (chatOf(l) !== activeChat && !pendingHere) return;
+    if (l.role === 'controller') addController(l, last);
     else addLine(l.role, l.text, l.model, l.id, l.kind);
   });
+  if (!log.children.length) addLine('out', 'New chat. It shares the board (decisions, tasks, sources) with your other chats.');
+  const ib = bench.querySelector('#pane-index:not(.faded) .body');   // pilot-ui: the index follows the open chat's log
+  if (ib) renderIndex(ib);
   updateCount();
 }
 function updateCount() {
   const proposed = (state.items || []).filter((i) => i.status === 'proposed').length;
-  count.textContent = `${state.transcript.length} lines${proposed ? ` · ${proposed} proposed` : ''}`;
+  count.textContent = `${chatLines().length} lines in this chat${proposed ? ` · ${proposed} proposed` : ''}`;
 }
 
 function updatePlaceholder() {
@@ -123,7 +139,7 @@ function updatePlaceholder() {
 
 // Notice above the log: a broken hand-edited file (until it is fixed) and, for a few seconds, a stale-write message.
 function renderNotice() {
-  const lines = Object.keys(state.fileErrors || {}).map((f) => `file ${f} is not valid JSON, showing last good version`);
+  const lines = Object.keys(state.fileErrors || {}).map((f) => f === 'context.json' ? 'file context.json is invalid; board sharing is off' : `file ${f} is not valid JSON, showing last good version`);
   if (flash) lines.push(flash);
   notice.textContent = lines.join('\n');
   notice.title = Object.values(state.fileErrors || {}).join('\n');
@@ -175,6 +191,12 @@ function itemCard(it) {
     }
     el.append(keys);
   }
+  if (it.kind === 'task' && status === 'confirmed') {   // pilot-ui: drag to another column (or ←/→ when focused)
+    el.draggable = true; el.classList.add('movable');
+    el.title = `${it.quote ? `"${it.quote}"\n` : ''}drag to another column, or focus and press ← / →`;
+    el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', it.id); e.dataTransfer.effectAllowed = 'move'; dragging = it.id; el.classList.add('dragging'); });
+    el.addEventListener('dragend', () => { dragging = null; el.classList.remove('dragging'); bench.querySelectorAll('.col.drop').forEach((c) => c.classList.remove('drop')); });
+  } else if (it.kind === 'task' && status === 'proposed') el.title = `${it.quote ? `"${it.quote}"\n` : ''}confirm it (c) to move it`;
   el.addEventListener('focus', () => { if (status === 'proposed') select(it.id); el.classList.toggle('selected', status === 'proposed'); });
   el.addEventListener('blur', () => el.classList.remove('selected'));
   el.addEventListener('click', () => el.focus());
@@ -202,7 +224,8 @@ function itemMeta(it, status, byModel) {
     if (byFile) meta.append(` · ${status} by `, chip('you', 'you (file edit)'));
     else if (it.decidedBy) meta.append(` · ${status} by `, chip('you', it.decidedBy === 'user' ? 'you' : it.decidedBy), ...(it.decidedAt ? [' ', when(it.decidedAt)] : []));
   }
-  const edited = fields.filter((f) => !['status', 'decidedAt', 'decidedBy'].includes(f));
+  if (it.movedBy) meta.append(' · moved by ', chip('you', it.movedBy === 'user' ? 'you' : it.movedBy), ...(it.movedAt ? [' ', when(it.movedAt)] : []));
+  const edited = fields.filter((f) => !['status', 'decidedAt', 'decidedBy', 'movedAt', 'movedBy'].includes(f));
   if (edited.length) meta.append(' · edited by ', chip('you', 'you (file edit)'), `: ${edited.join(', ')}`);
   return meta;
 }
@@ -291,7 +314,7 @@ function frameNodes(mod) {
   return nodes;
 }
 async function sendFrame(mod, id, action, fromPane) {
-  const res = await fetch('/frame', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pane: mod, id, action, rev: (state.frames || {}).rev }) });
+  const res = await fetch('/frame', { method: 'POST', headers: hdrs(), body: JSON.stringify({ pane: mod, id, action, rev: (state.frames || {}).rev }) });
   if (!res.ok) await writeFailed(res);
   await loadState();
   if (!fromPane) return;
@@ -338,11 +361,40 @@ function renderKanban(body) {
   for (const col of ['todo', 'doing', 'done']) {
     const c = document.createElement('div');
     c.className = `col ${col}`;
+    c.dataset.col = col;
     c.append(heading(col), itemList(tasks.filter((t) => (t.column || 'todo') === col), col === 'todo' && !tasks.length ? 'No tasks yet.' : '—', appliedFrame('kanban')));
+    // pilot-ui: a column is a drop target for a dragged confirmed task
+    c.addEventListener('dragover', (e) => { if (!dragging) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; c.classList.add('drop'); });
+    c.addEventListener('dragleave', (e) => { if (!c.contains(e.relatedTarget)) c.classList.remove('drop'); });
+    c.addEventListener('drop', (e) => { e.preventDefault(); c.classList.remove('drop'); const id = e.dataTransfer.getData('text/plain') || dragging; dragging = null; if (id) moveTask(id, col); });
     cols.append(c);
   }
   body.replaceChildren(...frameNodes('kanban'), cols);
   rejectedToggle(body, PANES.kanban.kinds);
+}
+
+// pilot-ui: move a confirmed task to another column. The card moves at once; the server's answer (or a stale/refused
+// write) follows and the page reloads the file truth.
+const COLS = ['todo', 'doing', 'done'];
+let dragging = null;
+let moveChain = Promise.resolve();   // moves go one after another, each with the rev the previous one produced
+function moveTask(id, col) {
+  const it = (state.items || []).find((i) => i.id === id);
+  if (!it || (it.column || 'todo') === col) return;
+  const before = it.column;
+  it.column = col; renderPanes(true);   // the card moves at once
+  moveChain = moveChain.then(() => sendMove(id, col, before)).catch((err) => addLine('system', `error: ${err.message}`));
+}
+async function sendMove(id, col, before) {
+  const undo = () => { const cur = (state.items || []).find((i) => i.id === id); if (cur) { cur.column = before; renderPanes(true); } };
+  try {
+    const res = await fetch('/move', { method: 'POST', headers: hdrs(), body: JSON.stringify({ itemId: id, column: col, rev: state.stateRev }) });
+    if (!res.ok) { undo(); await writeFailed(res); }
+    else { const b = await res.json().catch(() => ({})); if (Number.isInteger(b.rev)) state.stateRev = b.rev; }
+  } catch (err) { undo(); throw err; }
+  await loadState();
+  const card = bench.querySelector(`#pane-kanban .item[data-id="${CSS.escape(id)}"]`);
+  if (card) { restoring = true; card.focus({ preventScroll: true }); restoring = false; card.scrollIntoView({ block: 'nearest' }); }
 }
 
 // Arrow target: the proposal ArrowDown/ArrowUp from the empty input moves focus to. Defaults to the newest proposal
@@ -369,7 +421,7 @@ async function writeFailed(res) {
 }
 
 async function sendDecision(id, word, fromCard) {
-  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ itemId: id, decision: word, rev: state.stateRev }) });
+  const res = await fetch('/answer', { method: 'POST', headers: hdrs(), body: JSON.stringify({ itemId: id, decision: word, rev: state.stateRev }) });
   if (!res.ok) await writeFailed(res);
   else if (selected === id) selected = null;
   await loadState();
@@ -387,7 +439,7 @@ function firstSentence(text) {
 function renderIndex(body) {
   const ol = document.createElement('ol');
   ol.className = 'idx';
-  for (const l of state.transcript) {
+  for (const l of chatLines()) {
     if (l.role !== 'user' && l.role !== 'assistant') continue;
     const li = document.createElement('li');
     const b = document.createElement('button');
@@ -403,7 +455,7 @@ function renderIndex(body) {
 function jumpTo(id) {
   if (!$(`msg-${id}`)) return;
   // Usefulness (P5): the server logs index_jump; fire and forget, a failure never blocks the jump
-  fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: 'index_jump', target: id }) }).catch(() => {});
+  fetch('/metric', { method: 'POST', headers: hdrs(), body: JSON.stringify({ event: 'index_jump', target: id }) }).catch(() => {});
   scrollToMsg(id);
 }
 function scrollToMsg(id) {
@@ -412,6 +464,15 @@ function scrollToMsg(id) {
   el.scrollIntoView({ block: 'center', behavior: reducedMotion.matches ? 'auto' : 'smooth' });
   el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
   return true;
+}
+
+// pilot-ui: a message in another chat: open that chat first, then scroll to it
+async function showMsg(id) {
+  if (scrollToMsg(id)) return;
+  const res = await fetch('/chats', { method: 'POST', headers: hdrs(), body: JSON.stringify({ action: 'find', msg: id }) });
+  const out = await res.json().catch(() => ({}));
+  if (res.ok && out.chat && out.chat !== activeChat) { await switchChat(out.chat, false); if (scrollToMsg(id)) return; }
+  addLine('out', `${id} is not among the lines shown`).p.classList.add('err');
 }
 
 // pilot-v0.7: "why?" on a pane bar or a card runs the same /why command as typing it. A real button, so Tab reaches it
@@ -439,7 +500,7 @@ function renderWhy(statements, ok) {
       if (st.msg) {
         const b = document.createElement('button');
         b.type = 'button'; b.className = 'go'; b.textContent = `show ${st.msg}`;
-        b.addEventListener('click', () => { if (!scrollToMsg(st.msg)) addLine('out', `${st.msg} is not among the lines shown`).p.classList.add('err'); });
+        b.addEventListener('click', () => showMsg(st.msg).catch((err) => addLine('system', `error: ${err.message}`)));
         body.append(' ', b);
       }
     }
@@ -494,7 +555,7 @@ function benchTemplate(list) {
   return `${rows.join(' ')} / ${anyShown ? 'minmax(0, 1.6fr) minmax(0, 1fr)' : 'minmax(0, 1fr) fit-content(18rem)'}`;
 }
 
-function renderPanes(contentOnly) {
+function renderPanes(contentOnly, initialSnapshot = false) {
   const list = state.panes.filter((m) => PANES[m]).slice(0, 3);
   const isFaded = (m) => (state.faded || []).includes(m);
   const key = list.map((m) => (isFaded(m) ? `${m}:tab` : m)).join(',');
@@ -534,7 +595,7 @@ function renderPanes(contentOnly) {
     });
     return done();
   }
-  const first = shownPanes === '' && !document.body.dataset.loaded;
+  const first = initialSnapshot || (shownPanes === '' && !document.body.dataset.loaded);
   shownPanes = key;
   if (!first && document.startViewTransition && !reducedMotion.matches) document.startViewTransition(() => { apply(); done(); });
   else { apply(); done(); }
@@ -548,16 +609,81 @@ function renderModels(m) {
     const name = r.active || 'none';
     return `${role}: ${r.last && r.last !== name ? `${name}→${r.last}` : name}${r.pinned ? ' (pinned)' : ''}`;
   }).join(' · ');
+  models.textContent += ` · ${state.context?.status || 'conversation-only'}`;
   models.title = roles.map(([role, r]) => `${role}: ${r.pinned ? 'pinned, no fallback' : r.policy}, candidates ${
     r.candidates.map((n) => (r.local || []).includes(n) ? `${n} (local)` : n).join(', ') || 'none'}`).join('\n');
 }
 
 // Theme: /theme light|dark|auto, kept in this browser only (localStorage); auto follows the OS.
+// pilot-ui: the switch under the chat list cycles auto → light → dark and stays in sync with /theme.
+const THEME_LABEL = { auto: '◐ theme: auto', light: '☀ theme: light', dark: '☾ theme: dark' };
+let theme = 'auto';
 function applyTheme(t) {
-  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  theme = t === 'light' || t === 'dark' ? t : 'auto';
+  if (theme !== 'auto') document.documentElement.dataset.theme = theme;
   else delete document.documentElement.dataset.theme;
+  themeBtn.textContent = THEME_LABEL[theme];
+  themeBtn.title = `colour theme: ${theme}${theme === 'auto' ? ' (follows your system)' : ''}. Click to switch (or /theme light|dark|auto).`;
 }
-try { applyTheme(localStorage.getItem('pilot-theme')); } catch { /* storage blocked: auto */ }
+function setTheme(t) { applyTheme(t); try { localStorage.setItem('pilot-theme', theme); } catch { /* not kept */ } }
+try { applyTheme(localStorage.getItem('pilot-theme')); } catch { applyTheme('auto'); }
+themeBtn.addEventListener('click', () => setTheme({ auto: 'light', light: 'dark', dark: 'auto' }[theme]));
+
+// ---- pilot-ui: chats. The list is newest activity first; double-click a title to rename it (Enter saves, Esc cancels).
+function renderChats() {
+  const chats = (state.chats || []).slice().sort((a, b) => String(b.lastTs || b.createdAt || '').localeCompare(String(a.lastTs || a.createdAt || '')));
+  chatList.replaceChildren(...chats.map((c) => {
+    const li = document.createElement('li');
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'chat'; b.dataset.chat = c.id; b.disabled = streaming && c.id !== activeChat;
+    if (c.id === activeChat) b.setAttribute('aria-current', 'true');
+    const t = document.createElement('span'); t.className = 'ct'; t.textContent = c.title;
+    const m = document.createElement('small'); m.textContent = `${c.messages} msg${c.lastTs ? ` · ${clock(c.lastTs)}` : ''}`;
+    b.append(t, m);
+    b.title = `${c.title}${c.named ? '' : ' (from its first message)'}. Double-click to rename.`;
+    b.addEventListener('click', () => switchChat(c.id));
+    b.addEventListener('dblclick', () => renameChat(li, c));
+    li.append(b);
+    return li;
+  }));
+}
+function switchChat(id, focus = true) {
+  if (streaming || !(state.chats || []).some((c) => c.id === id)) return;
+  const changed = id !== activeChat;
+  activeChat = id;
+  try { localStorage.setItem('pilot-chat', id); } catch { /* not kept */ }
+  fetch('/chats', { method: 'POST', headers: hdrs(), body: JSON.stringify({ action: 'open', id }) }).catch(() => {});
+  renderChats(); updatePlaceholder();
+  if (focus) input.focus();
+  return changed ? loadState(['transcript.jsonl']).then(() => renderPanes(true)) : Promise.resolve();
+}
+async function newChat() {
+  if (streaming) return;
+  const res = await fetch('/chats', { method: 'POST', headers: hdrs(), body: JSON.stringify({ action: 'new' }) });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) { addLine('out', out.error || `HTTP ${res.status}`).p.classList.add('err'); return; }
+  await loadState(['chats.json']);
+  switchChat(out.chat);
+}
+function renameChat(li, c) {
+  const inp = document.createElement('input');
+  inp.className = 'chat-rename'; inp.value = c.named ? c.title : ''; inp.placeholder = c.title; inp.maxLength = 80;
+  inp.setAttribute('aria-label', `rename ${c.title}`);
+  li.replaceChildren(inp); inp.focus(); inp.select();
+  let done = false;
+  const finish = async (save) => {
+    if (done) return; done = true;
+    if (save) {
+      const res = await fetch('/chats', { method: 'POST', headers: hdrs(), body: JSON.stringify({ action: 'rename', id: c.id, title: inp.value }) });
+      if (!res.ok) await writeFailed(res);
+      await loadState(['chats.json']);
+    }
+    renderChats();
+  };
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
+  inp.addEventListener('blur', () => finish(true));
+}
+newChatBtn.addEventListener('click', () => newChat().catch((err) => addLine('system', `error: ${err.message}`)));
 
 // /state parts per file (GET /state?only=<files>). Every request gets a generation; a part is applied only if its
 // response is newer than the one that last set it, so an older full load can never overwrite a newer partial one.
@@ -565,42 +691,55 @@ const PARTS = { 'transcript.jsonl': ['transcript', 'total'], 'modules.json': ['p
   'roles.json': ['models'], 'state.json': ['items', 'stateRev', 'stateError'] };
 PARTS['modules.json'].push('paneInfo', 'pendingKind', 'removals', 'faded');   // pilot-v0.6, pilot-v0.8
 PARTS['transcript.jsonl'].push('turn');                                       // pilot-v0.8
+PARTS['context.json'] = ['context'];
 PARTS['flags.json'] = ['flags'];                                              // pilot-v0.9
 PARTS['frames.json'] = ['frames'];                                            // pilot-v0.10
+PARTS['transcript.jsonl'].push('chats', 'chatsRev', 'defaultChat');           // pilot-ui
+PARTS['chats.json'] = ['chats', 'chatsRev', 'defaultChat'];
 let reqGen = 0;
 const appliedGen = {};
 const sigs = {};
 const sigOf = {
-  log: (s) => [s.total, (s.transcript[s.transcript.length - 1] || {}).id, s.pending, s.pendingKind, JSON.stringify(s.answers), JSON.stringify(s.removals)].join('|'),
+  log: (s) => [activeChat, s.total, (s.transcript[s.transcript.length - 1] || {}).id, s.pending, s.pendingKind, JSON.stringify(s.answers), JSON.stringify(s.removals)].join('|'),
   // items too: hand edits keep rev. pilot-v0.8: of the fade status only what the panes show (tab or not, its label), so
   // a touch (lastTouch moves) does not re-render the panes
   panes: (s) => [(s.panes || []).join(','), (s.faded || []).join(','), JSON.stringify(s.frames), !!(s.flags && s.flags.frameProposals), s.stateRev, JSON.stringify(s.items), JSON.stringify(s.paneInfo, (k, v) => (k === 'fade'
     ? (v && v.faded ? { fadedTurn: v.fadedTurn, lastTouch: v.lastTouch && v.lastTouch.turn, fadeAfter: v.fadeAfter } : null) : v))].join('|'),
-  models: (s) => JSON.stringify(s.models) + !!(s.flags && s.flags.frameProposals),
+  models: (s) => JSON.stringify(s.context) + JSON.stringify(s.models) + !!(s.flags && s.flags.frameProposals),
+  chats: (s) => JSON.stringify(s.chats) + activeChat + streaming,
 };
 async function loadState(files) {
   const gen = ++reqGen;
   const list = files ? files.filter((f) => PARTS[f]) : Object.keys(PARTS);
   if (files && !list.length) return;
-  const next = await (await fetch(files ? `/state?only=${encodeURIComponent(list.join(','))}` : '/state')).json();
+  const chatQ = activeChat ? `chat=${encodeURIComponent(activeChat)}` : '';   // pilot-ui: the open chat's own tail
+  const next = await (await fetch(files ? `/state?only=${encodeURIComponent(list.join(','))}${chatQ ? `&${chatQ}` : ''}` : `/state${chatQ ? `?${chatQ}` : ''}`)).json();
+  const initialModules = !appliedGen['modules.json'] && list.includes('modules.json') && Array.isArray(next.panes);
+  if (next.context) state.context = next.context;
+  if ('project' in next) state.project = next.project;
   for (const f of list) {
     if (gen <= (appliedGen[f] || 0)) continue;
     appliedGen[f] = gen;
     for (const k of PARTS[f]) if (k in next) state[k] = next[k];
   }
   if (gen > (appliedGen.flags || 0)) { appliedGen.flags = gen; state.extracting = next.extracting; state.fileErrors = next.fileErrors || {}; }
+  // pilot-ui: the open chat must exist (a fresh project, another browser, a hand-edited file): else the first one
+  if (state.chats && !state.chats.some((c) => c.id === activeChat)) { activeChat = state.defaultChat || 'c-1'; sigs.log = null; setTimeout(() => loadState(['transcript.jsonl']).catch(() => {}), 0); }
   // re-render only the areas whose content changed (keeps scroll and focus when nothing did)
   const dirty = (area) => { const v = sigOf[area](state); if (sigs[area] === v) return false; sigs[area] = v; return true; };
   if (dirty('log')) renderLog();
-  if (dirty('panes')) renderPanes();
+  if (dirty('panes')) renderPanes(false, initialModules);
   if (dirty('models')) renderModels(state.models);
+  if (dirty('chats')) renderChats();
   updateCount();
   updatePlaceholder();
   renderNotice();
+  if (typeof renderWorkspace === 'function') renderWorkspace();
   syncSettle();
   meta.textContent = state.extracting ? 'extracting proposals…'
     : state.total > state.transcript.length ? `showing last ${state.transcript.length} of ${state.total}` : live ? 'ready · live' : 'ready';
-  document.body.dataset.loaded = '1';
+  // An early transcript/context SSE response is not the initial pane snapshot.
+  if (appliedGen['modules.json']) document.body.dataset.loaded = '1';
   clearTimeout(pollTimer);
   if (state.extracting && !live) pollTimer = setTimeout(() => loadState().catch(() => {}), 300);   // fallback only
 }
@@ -638,11 +777,12 @@ const touched = {};   // pane -> turn of the last report
 function sendTouch(mod, how, force) {
   if (!force && touched[mod] === state.turn) return;
   touched[mod] = state.turn;
-  fetch('/touch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ module: mod, how }) })
+  fetch('/touch', { method: 'POST', headers: hdrs(), body: JSON.stringify({ module: mod, how }) })
     .then((r) => r.json()).then((b) => {
       // keep the modules.json rev current, so the touch never makes a consent answer stale
       if (b && Number.isInteger(b.rev) && b.rev > (state.modulesRev || 0)) state.modulesRev = b.rev;
-      if (!live) loadState().catch(() => {});
+      // A touch can withdraw the shared question: refresh both its state and the active chat's system line together.
+      loadState(['modules.json', 'transcript.jsonl']).catch(() => {});
     }).catch(() => {});
 }
 const paneOf = (el) => { const sec = el && el.closest ? el.closest('.side[data-pane]') : null; return sec && !sec.classList.contains('faded') ? sec.dataset.pane : null; };
@@ -656,7 +796,7 @@ bench.addEventListener('focusin', (e) => {
 });
 
 async function sendAnswer(module, word) {
-  const res = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ module, answer: word, rev: state.modulesRev }) });
+  const res = await fetch('/answer', { method: 'POST', headers: hdrs(), body: JSON.stringify({ module, answer: word, rev: state.modulesRev }) });
   if (!res.ok) await writeFailed(res);
   await loadState();
   input.focus();
@@ -665,14 +805,16 @@ async function sendAnswer(module, word) {
 // Command output is shown locally only; it never goes to a model and is not stored (except /model switches).
 async function runCommand(text) {
   const [cmd, arg] = text.trim().split(/\s+/);
+  if (looksLikeKey(text) || (cmd === '/key' && arg && arg !== 'status')) { addLine('system', KEY_HINT); return; }
+  if (cmd === '/key' && !arg) { await openSettings(); return; }
   if (cmd === '/theme') {                        // page-only command, never sent to the server
     const ok = ['light', 'dark', 'auto'].includes(arg);
-    if (ok) { applyTheme(arg); try { localStorage.setItem('pilot-theme', arg); } catch { /* not kept */ } }
+    if (ok) setTheme(arg);
     addLine('out', text).p.classList.add('cmd');
     addLine('out', ok ? `theme: ${arg}` : 'usage: /theme light|dark|auto').p.classList.toggle('err', !ok);
     return;
   }
-  const res = await fetch('/command', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+  const res = await fetch('/command', { method: 'POST', headers: hdrs(), body: JSON.stringify({ text }) });
   const out = await res.json();
   await loadState();                             // picks up a /model system line and the new status bar
   addLine('out', text).p.classList.add('cmd');
@@ -691,7 +833,7 @@ const settleOn = () => !!(state.flags && state.flags.settledInput);
 let offerEl = null;          // created only while the flag is on: off renders exactly the old prompt
 let settleTimer = null, lastInputAt = 0, offer = null, tabSend = null, offerSeq = 0;
 function settleMetric(event, fields) {
-  fetch('/metric', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event, ...fields }) }).catch(() => {});
+  fetch('/metric', { method: 'POST', headers: hdrs(), body: JSON.stringify({ event, ...fields }) }).catch(() => {});
 }
 // Drops the offer. how = typed | escape logs settle_ignore; without how it just goes (blur, flag off, sent).
 function dropOffer(how) {
@@ -758,6 +900,13 @@ document.addEventListener('keydown', (e) => {
   if (e.isComposing || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
   const card = e.target && e.target.closest ? e.target.closest('.item') : null;
   const emptyInput = e.target === input && input.value === '';
+  if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && card && e.target === card && card.classList.contains('movable')) {
+    const it = (state.items || []).find((i) => i.id === card.dataset.id);
+    const to = it && COLS[COLS.indexOf(it.column || 'todo') + (e.key === 'ArrowRight' ? 1 : -1)];
+    e.preventDefault();
+    if (to) moveTask(it.id, to);
+    return;
+  }
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     if (card) {
       const all = [...bench.querySelectorAll('.item')];
@@ -792,6 +941,7 @@ form.addEventListener('submit', async (e) => {
   const text = input.value.trim();
   const viaTab = tabSend; tabSend = null;
   if (!text) return;
+  if (looksLikeKey(text) || (/^\/key\s/.test(text) && text !== '/key status')) { input.value = ''; addLine('system', KEY_HINT); return; }
   // pilot-v0.9: measure the send (messages only; commands never get an offer and are not counted)
   clearTimeout(settleTimer);
   if (settleOn() && !text.startsWith('/')) {
@@ -805,13 +955,13 @@ form.addEventListener('submit', async (e) => {
     return;
   }
   input.disabled = true;
-  streaming = true;
+  streaming = true; renderChats();   // no chat switch while a reply streams
   addLine('user', text);
   const { p, body } = addLine('assistant', '');
   p.classList.add('streaming');
   meta.textContent = 'thinking…';
   try {
-    const res = await fetch('/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+    const res = await fetch('/chat', { method: 'POST', headers: hdrs(), body: JSON.stringify({ text, chat: activeChat }) });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -830,9 +980,51 @@ form.addEventListener('submit', async (e) => {
   } finally {
     if (streaming) { streaming = false; if (deferred.size) onFiles([...deferred]); deferred.clear(); }
     input.disabled = false;
+    renderChats();
     input.focus();
   }
 });
 
-loadState().catch((err) => { meta.textContent = 'offline'; addLine('system', `cannot load state: ${err.message}`); });
+loadState().then(() => switchChat(activeChat, false))   // tells the server which chat is open (controller lines land there)
+  .catch((err) => { meta.textContent = 'offline'; addLine('system', `cannot load state: ${err.message}`); });
 connectEvents();
+
+// Credentials never enter the conversation, localStorage, metrics, or rendered output.
+const KEY_HINT = 'API keys cannot be sent in chat. Use Settings (or /key) to save a key locally.';
+function looksLikeKey(text) {
+  return /\b(?:sk-(?:proj-|ant-)?|mistral[-_])[A-Za-z0-9_-]{8,}/i.test(text) || /^[A-Za-z0-9_+=\/.\-]{32,}$/.test(text.trim());
+}
+async function openSettings() {
+  const dialog = $('settings'), fields = $('key-fields');
+  fields.textContent = ''; $('key-notice').textContent = '';
+  if (!dialog.open) dialog.showModal();
+  try {
+    const res = await fetch('/settings/keys'); const out = await res.json();
+    if (!res.ok) throw new Error(out.error);
+    for (const k of out.keys) {
+      const row = document.createElement('div'); row.className = 'key-setting';
+      const label = document.createElement('label'); label.textContent = k.name;
+      const field = document.createElement('input'); field.type = 'password'; field.autocomplete = 'new-password'; field.maxLength = 4096; field.id = `key-${k.name}`; label.htmlFor = field.id;
+      const status = document.createElement('span'); status.className = 'key-source'; status.textContent = k.source === 'env' ? 'from environment' : k.source;
+      row.append(label, field, status);
+      for (const [title, method] of [['Save', 'POST'], ['Remove', 'DELETE']]) {
+        const b = document.createElement('button'); b.type = 'button'; b.textContent = title;
+        b.addEventListener('click', async () => {
+          const value = field.value; field.value = ''; b.disabled = true;
+          try {
+            const res = await fetch('/settings/key', { method, headers: { 'content-type': 'application/json', 'x-pilot': '1' }, body: JSON.stringify({ name: k.name, ...(method === 'POST' ? { value } : {}) }) });
+            const out = await res.json(); if (!res.ok) throw new Error(out.error);
+            const source = out.keys.find(x => x.name === k.name).source;
+            status.textContent = source === 'env' ? 'from environment' : source;
+            $('key-notice').textContent = method === 'POST' ? 'Key saved locally.' : 'Saved key removed.';
+          } catch (e) { $('key-notice').textContent = e.message; }
+          finally { b.disabled = false; }
+        }); row.append(b);
+      }
+      fields.append(row);
+    }
+  } catch (e) { $('key-notice').textContent = e.message; }
+}
+$('settings-open').addEventListener('click', openSettings);
+$('settings-close').addEventListener('click', () => $('settings').close());
+$('settings').addEventListener('close', () => { $('key-fields').textContent = ''; input.focus(); });
