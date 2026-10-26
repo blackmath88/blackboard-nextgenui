@@ -46,3 +46,20 @@ Date: 2026-10-26. Implements C0 and C1 of `pilot/cloud/BUILD-PLAN.md` (PR #6, `0
 - Telemetry is `console.log` JSON, metadata only (provider, model, latency, first token, chars, error category), visible in Workers Logs. No OTel exporter.
 - Real Anthropic/Mistral calls are untested: no keys were used. The adapters follow the public APIs and are tested against a fake that speaks both stream formats.
 - The JWKS fetch from the Access team domain is covered only by unit tests (real RSA keys, a mocked JWKS). The live Access flow needs the deployment.
+
+## C1 evidence
+| Step | SHA | Result |
+|---|---|---|
+| Base (PR #5 head) | `27598b3` | |
+| C1 slice | `b87fff3` | Independent review (Codex, Orca worktree `pilot-cloud-c1-review`): **REQUEST CHANGES**, 1 P1 + 3 P2 |
+| Review fixes | `c425726` | Re-review: **APPROVE at `c425726`**, 43 passed / 0 failed across required suites and reviewer probes |
+
+Builder runs at `c425726` (Node 26.8.1, wrangler 4.152.0, local workerd):
+- `npm test`: 21 passed, 0 failed.
+- `npm run test:e2e`: 8 passed, 0 failed. Covers streaming via fake Claude/Mistral (more than one chunk each), the server-side key on each provider call, conversation-only context, a provider echoing the key (redacted from stream, storage and logs), key-like input and titles refused, CSRF, DO state identical after a Worker restart, a second user seeing nothing, and 401/403/500 without a valid identity on HTML/JS/CSS/API.
+- Local Pilot at the same tree (`CHROME=/usr/bin/chromium npm run verify` in `pilot/app`): 14 of 15 scripts pass, including the browser checks. The one failure, `verify-v0.6`, is the known GNU sed baseline from PR #5. `git diff 27598b3 -- pilot/app` is empty.
+- Browser check of the hosted UI at desktop and 375 px widths: chat streams, the conversation survives reload, no horizontal scroll.
+
+Review findings fixed in `c425726`: upstream error text could carry a key prefix out (P1, now only allowlisted error types are passed on); titles skipped the key-input check (P2); a stream cut off before its end marker was saved as complete (P2); Mistral in-stream error envelopes were ignored (P2).
+
+Open after review: `npm audit` reports 2 moderate and 1 high advisory in the Wrangler dev toolchain (not shipped to the Worker; not triaged). The provider call in the DO is not registered with `ctx.waitUntil`, and eviction during an in-flight reply is untested.
