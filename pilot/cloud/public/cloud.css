@@ -1,0 +1,9 @@
+/* Pilot Cloud: layout on top of the local Pilot stylesheet (style.css, kept identical to pilot/app/public/style.css). */
+.app.cloud { grid-template-columns: 200px minmax(0, 1fr); }
+.app.cloud > .term { min-height: 0; grid-area: auto; }   /* style.css names a "chat" area for the local bench grid */
+.provider { font: 400 12px var(--mono); color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+.provider select { font: 400 12px var(--mono); color: var(--text); background: var(--panel); border: 1px solid var(--line); padding: 1px 4px; }
+@media (max-width: 1100px) {
+  .app.cloud { grid-template-columns: minmax(0, 1fr); }
+  .app.cloud > .term { min-height: 70vh; }
+}

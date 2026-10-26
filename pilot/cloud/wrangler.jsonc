@@ -1,0 +1,24 @@
+// Pilot Cloud C1. Nothing here is deployed until the owner approves account, domain and Access policy.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pilot-cloud",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  // The Worker runs before every asset, so pages and scripts are also behind authentication.
+  "assets": { "directory": "public", "binding": "ASSETS", "run_worker_first": true },
+  "durable_objects": { "bindings": [{ "name": "WORKSPACE", "class_name": "Workspace" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Workspace"] }],
+  // No public *.workers.dev or preview URL: the app is reachable only on a route protected by Cloudflare Access.
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "vars": {
+    // Set at deployment: e.g. "yourteam.cloudflareaccess.com", the Access application AUD tag, your email(s).
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
+    "ALLOWED_EMAILS": "",
+    "ANTHROPIC_MODEL": "claude-sonnet-5-5",
+    "MISTRAL_MODEL": "mistral-large-latest"
+  }
+  // Secrets (wrangler secret put, never in this file): ANTHROPIC_API_KEY, MISTRAL_API_KEY
+}
