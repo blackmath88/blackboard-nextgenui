@@ -1,0 +1,5 @@
+# Copy to .dev.vars for `npm run dev`. Never committed, never deployed (wrangler deploy does not upload it).
+# Local login: honored only on localhost/127.0.0.1.
+DEV_AUTH_EMAIL=you@example.com
+ANTHROPIC_API_KEY=
+MISTRAL_API_KEY=

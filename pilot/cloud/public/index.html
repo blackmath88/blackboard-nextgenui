@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pilot</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="cloud.css">
+</head>
+<body>
+<main class="shell">
+ <div class="app cloud">
+  <nav class="chats" aria-label="Chats">
+   <div class="bar"><span>chats</span><button type="button" class="key" id="new-chat" title="Start a new chat">+ new</button></div>
+   <ol class="chat-list" id="chat-list"></ol>
+   <div class="chats-foot"><button type="button" class="theme-toggle" id="theme-toggle"></button></div>
+  </nav>
+  <section class="pane term" aria-label="Chat">
+   <div class="bar"><span id="brand">pilot</span>
+    <label class="provider">model <select id="provider" aria-label="Model provider"></select></label>
+    <small id="meta">connecting…</small></div>
+   <p class="notice" id="notice" role="status" hidden></p>
+   <div class="body" id="log" role="log" aria-live="polite"></div>
+   <form class="prompt" id="form" autocomplete="off">
+    <label for="input">&gt;</label>
+    <input id="input" name="text" spellcheck="false" placeholder="Type a message and press Enter" autofocus>
+   </form>
+  </section>
+ </div>
+ <footer class="status"><span id="context">context: this conversation only</span><span id="who"></span></footer>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
