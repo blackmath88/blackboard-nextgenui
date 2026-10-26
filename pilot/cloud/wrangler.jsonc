@@ -13,12 +13,10 @@
   "preview_urls": false,
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "vars": {
-    // Set at deployment: e.g. "yourteam.cloudflareaccess.com", the Access application AUD tag, your email(s).
-    "ACCESS_TEAM_DOMAIN": "",
-    "ACCESS_AUD": "",
-    "ALLOWED_EMAILS": "",
     "ANTHROPIC_MODEL": "claude-sonnet-5-5",
     "MISTRAL_MODEL": "mistral-large-latest"
   }
-  // Secrets (wrangler secret put, never in this file): ANTHROPIC_API_KEY, MISTRAL_API_KEY
+  // Secrets (wrangler secret put, never in this file; the repo is public): ANTHROPIC_API_KEY, MISTRAL_API_KEY,
+  // and the Access settings ACCESS_TEAM_DOMAIN ("<team>.cloudflareaccess.com"), ACCESS_AUD, ALLOWED_EMAILS.
+  // Until all three Access settings are set, every request fails with 500.
 }
