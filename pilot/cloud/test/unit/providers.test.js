@@ -80,3 +80,41 @@ test('claudeMessages makes alternating turns that start with the user', () => {
   assert.deepEqual(claudeMessages([{ role: 'assistant', content: 'x' }, { role: 'user', content: 'a' }, { role: 'user', content: 'b' }, { role: 'assistant', content: 'c' }]),
     [{ role: 'user', content: 'a\n\nb' }, { role: 'assistant', content: 'c' }]);
 });
+
+// Review b87fff3 P1: upstream error text could carry a key or its prefix out to the browser.
+test('no upstream error text reaches the error message, so no key prefix can', async () => {
+  const LONG = 'sk-ant-' + 'x'.repeat(100);
+  const e2 = { ...env, ANTHROPIC_API_KEY: LONG };
+  const bodies = [{ error: { type: LONG } }, { error: { type: LONG.slice(0, 16) } }, { type: LONG.slice(0, 30) }, { error: { type: 'invalid_request_error', message: LONG } }];
+  for (const b of bodies) {
+    globalThis.fetch = async () => new Response(JSON.stringify(b), { status: 500 });
+    await assert.rejects(streamChat('claude', e2, [{ role: 'user', content: 'hi' }], () => {}), (e) => !e.message.includes('sk-ant-') && /^HTTP 500 from Claude/.test(e.message));
+  }
+  globalThis.fetch = async () => sse([`data: ${JSON.stringify({ type: 'error', error: { type: LONG.slice(0, 40) } })}\n\n`]);
+  await assert.rejects(streamChat('claude', e2, [{ role: 'user', content: 'hi' }], () => {}), (e) => e.message === 'Claude reported an error');
+});
+
+// Review b87fff3 P2: a body cut off before the end marker was stored as a complete reply.
+test('a stream that ends without its end marker fails and keeps the partial text', async () => {
+  const cut = {
+    claude: () => sse([`data: ${JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'truncated' } })}\n\n`]),
+    mistral: () => sse([`data: ${JSON.stringify({ choices: [{ delta: { content: 'truncated' } }] })}\n\n`]),
+  };
+  for (const [id, mk] of Object.entries(cut)) {
+    globalThis.fetch = async () => mk();
+    await assert.rejects(streamChat(id, env, [{ role: 'user', content: 'hi' }], () => {}), (e) => /ended before the reply was complete/.test(e.message) && e.partial === 'truncated', id);
+    globalThis.fetch = async () => sse([]);
+    await assert.rejects(streamChat(id, env, [{ role: 'user', content: 'hi' }], () => {}), (e) => e.partial === '', `${id} empty`);
+  }
+});
+
+// Review b87fff3 P2: Mistral error envelopes inside a 200 stream were ignored.
+test('Mistral in-stream errors fail the reply, also when [DONE] follows', async () => {
+  const err = `data: ${JSON.stringify({ error: { message: 'overloaded ' + KEY_M, type: 'server_error' } })}\n\n`;
+  const part = `data: ${JSON.stringify({ choices: [{ delta: { content: 'part' } }] })}\n\n`;
+  for (const events of [[err], [part, err, 'data: [DONE]\n\n'], [`data: ${JSON.stringify({ object: 'error', type: 'invalid_request', message: 'x' })}\n\n`, 'data: [DONE]\n\n']]) {
+    globalThis.fetch = async () => sse(events);
+    await assert.rejects(streamChat('mistral', env, [{ role: 'user', content: 'hi' }], () => {}),
+      (e) => /^Mistral reported an error/.test(e.message) && !e.message.includes(KEY_M) && e.partial === (events.length === 3 ? 'part' : ''));
+  }
+});

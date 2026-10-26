@@ -78,16 +78,25 @@ function request(id, c, messages, env) {
     body: { model: c.model, stream: true, messages } };
 }
 
+// Upstream error text never reaches the browser: only these known type names are passed on (anything else,
+// which could echo a key or its prefix, becomes no detail at all).
+const ERROR_TYPES = new Set(['invalid_request_error', 'authentication_error', 'permission_error', 'not_found_error', 'request_too_large',
+  'rate_limit_error', 'api_error', 'overloaded_error', 'server_error', 'invalid_request', 'unauthorized', 'rate_limited', 'service_unavailable']);
+const safeType = (t) => (typeof t === 'string' && ERROR_TYPES.has(t) ? t : '');
+const errorText = (label, t) => `${label} reported an error${safeType(t) ? ` (${safeType(t)})` : ''}`;
+
 // One SSE data payload -> { delta } | { done } | { error } | null
-function parseEvent(id, data) {
+function parseEvent(id, data, label) {
   if (id === 'mistral') {
     if (data === '[DONE]') return { done: true };
-    try { const j = JSON.parse(data); return { delta: j.choices?.[0]?.delta?.content || '' }; } catch { return null; }
+    let j; try { j = JSON.parse(data); } catch { return null; }
+    if (j && (j.error || j.object === 'error')) return { error: errorText(label, j.error?.type || j.type) };
+    return { delta: j.choices?.[0]?.delta?.content || '' };
   }
   let j; try { j = JSON.parse(data); } catch { return null; }
   if (j.type === 'content_block_delta' && j.delta?.type === 'text_delta') return { delta: j.delta.text || '' };
   if (j.type === 'message_stop') return { done: true };
-  if (j.type === 'error') return { error: `provider error: ${String(j.error?.type || 'unknown').slice(0, 60)}` };
+  if (j.type === 'error') return { error: errorText(label, j.error?.type) };
   return null;
 }
 
@@ -110,16 +119,19 @@ export async function streamChat(id, env, messages, onDelta, { signal = new Abor
     const res = await fetch(r.url, { method: 'POST', headers: r.headers, body: JSON.stringify(r.body), signal: both });
     if (!res.ok) {
       let type = '';
-      try { const j = await res.json(); type = String(j?.error?.type || j?.type || '').slice(0, 60); } catch { /* body is not JSON */ }
+      try { const j = await res.json(); type = safeType(j?.error?.type) || safeType(j?.type); } catch { /* body is not JSON */ }
       throw new Error(`HTTP ${res.status} from ${p.label}${type ? ` (${type})` : ''}`);
     }
+    let complete = false;
     for await (const data of sseData(res.body, both)) {
-      const ev = parseEvent(id, data);
+      const ev = parseEvent(id, data, p.label);
       if (!ev) continue;
       if (ev.error) throw new Error(ev.error);
       if (ev.delta) { tick(); text += emit(ev.delta); }
-      if (ev.done) break;
+      if (ev.done) { complete = true; break; }
     }
+    // A body that ends without the provider's end marker is a cut-off reply, not a complete one.
+    if (!complete) throw new Error(`${p.label} stream ended before the reply was complete`);
     text += emit('', true);
     return { text, model: c.model, firstTokenMs };
   } catch (err) {

@@ -98,6 +98,12 @@ test('key-like chat input is refused before it is stored or sent', async () => {
   }
   assert.equal(provider.calls.length, calls);
   assert.equal((await getJson(`/api/conversations/${c.id}`)).messages.length, 0);
+  // Review b87fff3 P2: titles went to storage unchecked.
+  for (const title of [KEYS.ANTHROPIC_API_KEY, `x ${KEYS.MISTRAL_API_KEY}`, 'sk-proj-abcdefghijklmnop']) {
+    const r = await post('/api/conversations', { title });
+    assert.equal(r.status, 400); noKeys(await r.text(), 'title refusal');
+  }
+  noKeys(JSON.stringify(await getJson('/api/conversations')), 'conversation list');
 });
 
 test('cross-origin and non-JSON writes are refused', async () => {

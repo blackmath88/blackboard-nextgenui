@@ -68,7 +68,9 @@ export class Workspace extends DurableObject {
     if (parts.length === 1 && request.method === 'GET') return json(200, { conversations: this.listConversations() });
     if (parts.length === 1 && request.method === 'POST') {
       const body = await request.json().catch(() => ({}));
-      const c = this.createConversation(typeof body.title === 'string' ? body.title : '');
+      const title = typeof body?.title === 'string' ? body.title : '';
+      if (this.keyLike(title)) return json(400, { error: KEY_HINT });
+      const c = this.createConversation(title);
       return c ? json(201, { conversation: c }) : json(409, { error: `conversation limit (${MAX_CONVERSATIONS}) reached` });
     }
     const c = parts[1] ? this.conversation(parts[1]) : null;
@@ -78,12 +80,15 @@ export class Workspace extends DurableObject {
     return json(405, { error: 'method not allowed' });
   }
 
+  // Every user-supplied string that is stored or sent: refuse key-looking text and any configured key, also inside text.
+  keyLike(text) { return !!text && (looksLikeKey(text) || configuredKeys(this.env).some((k) => text.includes(k))); }
+
   chat(c, body) {
     const text = typeof body?.text === 'string' ? body.text.trim() : '';
     const provider = typeof body?.provider === 'string' ? body.provider : '';
     if (!text) return json(400, { error: 'empty message' });
     if (text.length > MAX_TEXT) return json(400, { error: `message longer than ${MAX_TEXT} characters` });
-    if (looksLikeKey(text) || configuredKeys(this.env).some((k) => text.includes(k))) return json(400, { error: KEY_HINT });
+    if (this.keyLike(text)) return json(400, { error: KEY_HINT });
     if (!PROVIDERS[provider]) return json(400, { error: 'unknown provider' });
     if (!providerStatus(this.env).find((p) => p.id === provider).configured) return json(409, { error: `${PROVIDERS[provider].label} is not configured on the server` });
     if (this.busy.has(c.id)) return json(409, { error: 'a reply is still streaming in this conversation' });
