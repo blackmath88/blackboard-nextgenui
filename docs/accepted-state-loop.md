@@ -89,7 +89,8 @@ the latest attempted request body for each provider in that role and chat, inclu
 failed fallback attempts. Attempt bodies live only in server memory: at most 30
 role/chat/provider entries, each displayed up to 100,000 characters
 with explicit truncation. They contain no authorization headers and disappear on
-restart. Metrics retain request hashes and board revision/token metadata. A failed
+restart. Metrics retain request hashes, initiating chat IDs and board revision/token
+metadata; each chat-context event names the originating user message. A failed
 attempt means delivery was not confirmed; it does not prove the provider received nothing.
 
 ## Recovery contract
@@ -111,6 +112,7 @@ attempt means delivery was not confirmed; it does not prove the provider receive
 | A provenance lookup matches duplicate message IDs | The lookup refuses to guess and preserves the transcript for repair. |
 | Recovery finds duplicate source/reply IDs | Retry is disabled and refused before any provider call. An ambiguous reply cannot be dismissed under a shared ID. |
 | Original turn changes while extraction is queued/running | The stale proposal batch is discarded with a visible error. Explicit retry uses the current original turn. |
+| Model-selection file is broken at restart | No provider is selected or called until repair. While an already running server has a valid prior selection, it retains that selection and reports the broken file. |
 
 State, audit and note writes use a short-lived redo journal and atomic, synced file
 replacement. The journal's destinations are fixed. This is a local single-writer

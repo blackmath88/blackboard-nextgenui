@@ -282,6 +282,7 @@ function readContext() {
 }
 function contextSummary(chat = activeChat()) {
   const d = readContext();
+  const pins = readRolePins(), selectionError = pins.doc ? null : pins.error;
   const c = roleConfig('chat').candidates.find(c => c.name === activeName('chat'));
   const recipient = role => {
     const rc = roleConfig(role), candidate = rc.candidates.find(c => c.name === activeName(role));
@@ -303,15 +304,15 @@ function contextSummary(chat = activeChat()) {
   const snapshot = d.share.board ? knowledge.boardSnapshot(acceptedState) : null;
   const nextMessage = snapshot?.message || null;
   const history = readTranscript().filter(l => ['user', 'assistant'].includes(l.role) && chatOf(l) === chat).slice(-(HISTORY - 1)).map(l => ({ role: l.role, content: l.text }));
-  return { ...d, status: !d.share.board ? 'conversation-only' : !snapshot ? 'board sharing on; no usable accepted records to send' : !c ? 'board sharing on; no chat provider configured' : `board is sent to ${c.name}${c.local !== true ? ' (cloud)' : ' (local)'}`, nextMessage,
+  return { ...d, status: selectionError ? 'model selection unavailable; no provider calls' : !d.share.board ? 'conversation-only' : !snapshot ? 'board sharing on; no usable accepted records to send' : !c ? 'board sharing on; no chat provider configured' : `board is sent to ${c.name}${c.local !== true ? ' (cloud)' : ' (local)'}`, nextMessage,
     board: snapshot ? { rev: snapshot.rev, items: snapshot.items, omitted: snapshot.omitted, truncated: snapshot.truncated } : null,
     roles: {
-      chat: { ...recipient('chat'), sends: `up to ${HISTORY - 1} prior user/assistant messages from this chat + your next message` + (snapshot ? ` + ${snapshot.items} accepted records at revision ${snapshot.rev} (${snapshot.omitted} omitted)` : ''), skipReason: !c ? 'no chat provider configured' : null, extraSystemMessage: nextMessage, messagesTemplate: [...history, ...(nextMessage ? [nextMessage] : []), { role: 'user', content: '<next user message>' }] },
-      extract: { ...recipient('extract'), sends: 'current user + assistant turn, extraction instructions/schema; accepted item titles only when board sharing is on; dedupe also runs server-side', skipReason: !extract.candidates.length ? 'no extraction provider configured' : acceptedState.error || null, everyNTurns: Math.max(1, Number(extract.everyNTurns) || 1),
-        messagesTemplate: extract.candidates.length && !acceptedState.error ? extractionMessages(user, assistant, snapshot?.records || [], maxItems) : null },
+      chat: { ...recipient('chat'), sends: `up to ${HISTORY - 1} prior user/assistant messages from this chat + your next message` + (snapshot ? ` + ${snapshot.items} accepted records at revision ${snapshot.rev} (${snapshot.omitted} omitted)` : ''), skipReason: selectionError || (!c ? 'no chat provider configured' : null), extraSystemMessage: selectionError ? null : nextMessage, messagesTemplate: selectionError ? null : [...history, ...(nextMessage ? [nextMessage] : []), { role: 'user', content: '<next user message>' }] },
+      extract: { ...recipient('extract'), sends: 'current user + assistant turn, extraction instructions/schema; accepted item titles only when board sharing is on; dedupe also runs server-side', skipReason: selectionError || (!extract.candidates.length ? 'no extraction provider configured' : acceptedState.error || null), everyNTurns: Math.max(1, Number(extract.everyNTurns) || 1),
+        messagesTemplate: !selectionError && extract.candidates.length && !acceptedState.error ? extractionMessages(user, assistant, snapshot?.records || [], maxItems) : null },
       frame: { ...recipient('frame'), sends: frameEnabled ? 'current turn + shown pane item titles and applied frames; instructions/schema' : 'nothing',
-        skipReason: !d.share.board ? 'board sharing is off' : !flagsSummary().frameProposals ? 'frame experiment is off' : !roleConfig('frame').candidates.length ? 'no frame provider configured' : !panes.length || ctx.error ? 'no usable panes' : currentFrames.error || null,
-        messagesTemplate: frameEnabled && roleConfig('frame').candidates.length ? frameMessages(user, assistant, panes, ctx.items, currentFrames.applied) : null },
+        skipReason: selectionError || (!d.share.board ? 'board sharing is off' : !flagsSummary().frameProposals ? 'frame experiment is off' : !roleConfig('frame').candidates.length ? 'no frame provider configured' : !panes.length || ctx.error ? 'no usable panes' : currentFrames.error || null),
+        messagesTemplate: !selectionError && frameEnabled && roleConfig('frame').candidates.length ? frameMessages(user, assistant, panes, ctx.items, currentFrames.applied) : null },
     } };
 
 }
@@ -574,14 +575,30 @@ function roleConfig(role) {
 // The pinned candidate for a role, or null. An explicit `/model <role> <name>` pins; `/model <role> auto` unpins.
 // A saved name that no longer exists in the config is ignored.
 // A broken roles.json keeps its last good pins (losing a pin silently could send a private chat to the cloud).
+let lastGoodRolePins = null;
+function readRolePins() {
+  try {
+    const doc = readJson(ROLES, {});
+    const record = value => value && typeof value === 'object' && !Array.isArray(value);
+    if (!record(doc) || (doc.rev !== undefined && (!Number.isSafeInteger(doc.rev) || doc.rev < 0)) ||
+        (doc.active !== undefined && (!record(doc.active) || !Object.values(doc.active).every(value => typeof value === 'string')))) {
+      throw new Error('expected a revision and an object of model selections');
+    }
+    lastGoodRolePins = doc;
+    return { doc };
+  } catch (error) {
+    return { doc: lastGoodRolePins, error: error instanceof SyntaxError ? `roles.json is not valid JSON: ${error.message}` : `roles.json: ${error.message}` };
+  }
+}
 function pinnedName(role) {
   const names = roleConfig(role).candidates.map((c) => c.name);
-  const doc = readJsonGood(ROLES, {}).doc;
+  const doc = readRolePins().doc;
   const saved = doc && doc.active ? doc.active[role] : null;
   return names.includes(saved) ? saved : null;
 }
 
 function activeName(role) {
+  if (!readRolePins().doc) return null;
   return pinnedName(role) || (roleConfig(role).candidates[0] || {}).name || null;
 }
 
@@ -702,31 +719,34 @@ async function callCandidate(candidate, messages, onDelta, signal, extraBody, on
 // candidate (`local: true`) failed, non-local candidates are skipped unless the role sets `allowCloudFallback: true`;
 // a missing `local` counts as non-local. Resolves {text, candidate}; on failure throws with err.partial / err.candidate.
 async function callRole(role, messages, onDelta, signal, extraBody, context) {
+  const pins = readRolePins();
+  if (!pins.doc) throw new Error(`model selection unavailable; no provider was called. ${pins.error}`);
   const order = attemptOrder(role);
   const rc = roleConfig(role);
+  const chat = activeChat();
   if (!order.length) throw new Error(`no candidate configured for role "${role}"`);
   let streamed = '', lastErr, failedLocal = null;
   for (let i = 0; i < order.length; i++) {
     const c = order[i];
     if (lastErr && failedLocal && c.local !== true && rc.allowCloudFallback !== true) {
-      await metric('fallback_blocked', { role, from: lastErr.candidate.name, to: c.name, reason: `${failedLocal.name} is local` });
+      await metric('fallback_blocked', { role, chat, from: lastErr.candidate.name, to: c.name, reason: `${failedLocal.name} is local` });
       await appendLine('system', `fallback to ${c.name} blocked: ${failedLocal.name} is local`, null, 'blocked');
       continue;
     }
-    if (lastErr) await metric('fallback', { role, from: lastErr.candidate.name, to: c.name, reason: lastErr.reason });
+    if (lastErr) await metric('fallback', { role, chat, from: lastErr.candidate.name, to: c.name, reason: lastErr.reason });
     const t0 = Date.now();
     let receipt = null;
     try {
-      const text = await callCandidate(c, messages, (d) => { streamed += d; onDelta(d); }, signal, extraBody, body => { receipt = requestDisclosures.begin(role, activeChat(), c, body); });
+      const text = await callCandidate(c, messages, (d) => { streamed += d; onDelta(d); }, signal, extraBody, body => { receipt = requestDisclosures.begin(role, chat, c, body); });
       if (receipt) receipt.status = 'completed';
-      await metric('model_call', { role, candidate: c.name, model: c.model, ...(receipt ? { requestHash: receipt.hash } : {}), ...(role === 'chat' ? { context } : {}), ok: true, latencyMs: Date.now() - t0, chars: text.length });
+      await metric('model_call', { role, chat, candidate: c.name, model: c.model, ...(receipt ? { requestHash: receipt.hash } : {}), ...(role === 'chat' ? { context } : {}), ok: true, latencyMs: Date.now() - t0, chars: text.length });
       lastUsed[role] = c.name;
       return { text, candidate: c };
     } catch (err) {
       if (receipt) receipt.status = signal.aborted ? 'cancelled' : 'failed';
       const msg = String((err && err.message) || err);
-      await metric('model_call', { role, candidate: c.name, model: c.model, ...(receipt ? { requestHash: receipt.hash } : {}), ...(role === 'chat' ? { context } : {}), ok: false, latencyMs: Date.now() - t0, error: msg });
-      if (err && err.stall) await metric('stall', { role, candidate: c.name, stallMs: err.stallMs, chars: streamed.length, latencyMs: Date.now() - t0 });
+      await metric('model_call', { role, chat, candidate: c.name, model: c.model, ...(receipt ? { requestHash: receipt.hash } : {}), ...(role === 'chat' ? { context } : {}), ok: false, latencyMs: Date.now() - t0, error: msg });
+      if (err && err.stall) await metric('stall', { role, chat, candidate: c.name, stallMs: err.stallMs, chars: streamed.length, latencyMs: Date.now() - t0 });
       lastErr = new Error(`${c.name}: ${msg}`);
       lastErr.candidate = c; lastErr.partial = streamed; lastErr.reason = msg; lastErr.stall = !!(err && err.stall);
       if (c.local === true) failedLocal = c;
@@ -897,7 +917,7 @@ async function runExtraction(userLine, replyLine) {
   let out;
   try { out = await callRole('extract', extractionMessages(userLine, replyLine, readContext().share.board ? knowledge.boardSnapshot(before)?.records || [] : [], maxItems), () => {}, new AbortController().signal, structured); }
   catch (err) { await metric('extract_error', { reason: err.stall ? 'stall' : 'model', error: String(err.message || err), fromMessage: replyLine.id }); return; }
-  const base = { candidate: out.candidate.name, model: out.candidate.model, fromMessage: replyLine.id };
+  const base = { candidate: out.candidate.name, model: out.candidate.model, chat: chatOf(userLine), fromMessage: replyLine.id };
   const parsed = parseExtraction(out.text);
   if (parsed.error) { await metric('extract_error', { ...base, reason: parsed.reason, error: parsed.error, chars: out.text.length }); return; }
 
@@ -1353,7 +1373,7 @@ function statePayload(only, chat) {
   if (want('state.json')) { st = readState(); Object.assign(out, { items: stats.withProvenance(st.items, metricsEvents()), stateRev: st.rev, stateToken: st.token, stateError: st.error || null }); }
   // a broken hand-editable file: the page says "file X is not valid JSON, showing last good version" until fixed
   const fileErrors = {};
-  for (const [f, e] of [['state.json', (st || readState()).error], ['modules.json', (m || readModules()).error], ['roles.json', readJsonGood(ROLES, {}).error], ['flags.json', readFlags().error], ['frames.json', readFrames().error], ['context.json', readContext().error], ['chats.json', readChats().error]]) if (e) fileErrors[f] = e;
+  for (const [f, e] of [['state.json', (st || readState()).error], ['modules.json', (m || readModules()).error], ['roles.json', readRolePins().error], ['flags.json', readFlags().error], ['frames.json', readFrames().error], ['context.json', readContext().error], ['chats.json', readChats().error]]) if (e) fileErrors[f] = e;
   out.fileErrors = fileErrors;
   return out;
 }
@@ -1431,7 +1451,7 @@ function boardSnapshot() { return knowledge.boardSnapshot(readState()); }
 
 async function handleChat(req, res) {
   let text, chat;
-  try { const b = JSON.parse(await readBody(req)); text = String(b.text || '').trim(); chat = b.chat === undefined ? DEFAULT_CHAT : b.chat; } catch { return sendJson(res, 400, { error: 'expected JSON {text, chat?}' }); }
+  try { const b = JSON.parse(await readBody(req)); text = String(b.text || '').trim(); chat = b.chat === undefined ? (req.headers['x-pilot-chat'] ? decodeURIComponent(String(req.headers['x-pilot-chat'])) : DEFAULT_CHAT) : b.chat; } catch { return sendJson(res, 400, { error: 'expected JSON {text, chat?} and a valid chat header' }); }
   if (!text) return sendJson(res, 400, { error: 'empty message' });
   if (secrets.looksLikeKey(text) || /^\/key\b/.test(text)) return sendJson(res, 400, { error: KEY_HINT });
   if (!chatExists(chat)) return sendJson(res, 400, { error: `no chat "${chat}"` });
@@ -1444,7 +1464,7 @@ async function handleChat(req, res) {
   const snapshot = readContext().share.board ? boardSnapshot() : null;
   const board = snapshot?.message;
   const context = { board: !!board, items: snapshot?.items || 0, ...(snapshot ? { rev: snapshot.rev, token: snapshot.token, omitted: snapshot.omitted, truncated: snapshot.truncated } : {}) };
-  await metric('chat_context', { context });
+  await metric('chat_context', { chat, fromMessage: userLine.id, context });
   // Ported from 4c2dd98: keep board constraints adjacent to the newest request.
   if (board) history.splice(history.length - 1, 0, board);
 
@@ -1516,6 +1536,8 @@ async function runCommand(input) {
   if (cmd === '/help') return { ok: true, lines: HELP };
   if (cmd === '/theme') return { ok: true, lines: ['/theme is handled in the page (it changes only this browser)'] };
   if (cmd === '/model') {
+    const pins = readRolePins();
+    if (args.length && pins.error) return { ok: false, lines: [pins.error + '; preserve and repair roles.json before changing selections'] };
     const summary = modelsSummary();
     if (!args.length) {
       return { ok: true, lines: Object.entries(summary).map(([role, m]) =>
@@ -1531,6 +1553,7 @@ async function runCommand(input) {
         delete saved.active[role];
         atomicWrite(ROLES, JSON.stringify(saved, null, 2) + '\n');
         lastGood['roles.json'] = saved;
+        lastGoodRolePins = saved;
       });
       delete lastUsed[role];
       const first = activeName(role);
@@ -1545,6 +1568,7 @@ async function runCommand(input) {
       saved.active = { ...saved.active, [role]: name };
       atomicWrite(ROLES, JSON.stringify(saved, null, 2) + '\n');
       lastGood['roles.json'] = saved;
+      lastGoodRolePins = saved;
     });
     delete lastUsed[role];
     await appendLine('system', `model for ${role} switched to ${name} (pinned)`, null);

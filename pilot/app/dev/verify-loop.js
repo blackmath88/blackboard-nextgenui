@@ -89,6 +89,23 @@ const pass = text => console.log('PASS ' + text);
     const transcript = fs.readFileSync(path.join(data, 'transcript.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
     assert.equal(transcript.filter(l => l.text.startsWith('board sharing on')).at(-1).chat, 'c-1');
     pass('concurrent chats keep audit/conversation notes attached to their initiating request');
+    await req('/command', { text: '/context share board off' });
+    const parallelTurns = [['c-1', 'First chat request attribution'], [second, 'Second chat request attribution']];
+    await Promise.all(parallelTurns.map(([chat, text]) => req('/chat', { text }, chat))); await idle();
+    for (const [chat, text] of parallelTurns) {
+      const actual = chatCalls().find(call => call.body.messages.at(-1).content === text); assert(actual);
+      assert(!actual.body.messages.some(message => parallelTurns.some(([otherChat, otherText]) => otherChat !== chat && message.content === otherText)), 'parallel request history must stay in its own chat');
+      const requestHash = require('crypto').createHash('sha256').update(JSON.stringify(actual.body)).digest('hex');
+      const receipt = events().find(event => event.event === 'model_call' && event.role === 'chat' && event.requestHash === requestHash);
+      assert.equal(receipt?.chat, chat, 'request audit must identify the initiating chat despite interleaving');
+      const user = fs.readFileSync(path.join(data, 'transcript.jsonl'), 'utf8').trim().split('\n').map(JSON.parse).find(line => line.role === 'user' && line.text === text);
+      assert(events().some(event => event.event === 'chat_context' && event.chat === chat && event.fromMessage === user.id));
+    }
+    pass('parallel model requests retain chat and originating message attribution in hash-based audit receipts without storing prompt copies');
+    const beforeInvalidChat = calls().length;
+    for (const invalid of ['missing-chat', '%invalid']) assert.equal((await req('/chat', { text: 'Do not route an invalid chat header' }, invalid)).status, 400);
+    assert.equal(calls().length, beforeInvalidChat);
+    assert(!fs.readFileSync(path.join(data, 'transcript.jsonl'), 'utf8').includes('Do not route an invalid chat header'));
     // A process crash during extraction leaves an explicit recoverable turn.
     await stop(fake); fake = start([path.join(app, 'dev/fake-model.js'), '5864', 'loop', '--board-aware', '--extract-delay=5000']); await ready('http://127.0.0.1:5864');
     await req('/chat', { text: 'Task: recover the interrupted review.' });

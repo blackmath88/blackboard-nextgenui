@@ -140,7 +140,7 @@ function updatePlaceholder() {
 // Shared notice stays visible from Conversation and Knowledge, including narrow screens.
 function renderNotice() {
   const lines = Object.entries(state.fileErrors || {}).map(([f, error]) => f === 'context.json' ? 'file context.json is invalid; board sharing is off'
-    : /not valid JSON/.test(error) ? `file ${f} is not valid JSON, showing last good version` : `file ${f}: ${error}`);
+    : /not valid JSON/.test(error) ? `file ${f} is not valid JSON; fix it before saving changes` : `file ${f}: ${error}`);
   if (flash) lines.push(flash);
   notice.textContent = lines.join('\n');
   notice.title = Object.values(state.fileErrors || {}).join('\n');

@@ -99,6 +99,7 @@ module.exports = async function loop(page, { url, dir, root, check, stop, startS
   await shot('06-conversation-375');
   await page.eval(`document.getElementById('show-knowledge').click(); document.querySelector('${card} .why').click()`);
   check('loop narrow why action reveals its explanation in the conversation', await wait(`document.body.dataset.surface === 'conversation' && document.getElementById('pane-chat').getBoundingClientRect().width > 0 && [...document.querySelectorAll('.why-line')].some(el => el.textContent.includes('edited by you'))`));
+  await wait(`document.getElementById('notice').hidden`);
   await shot('09-provenance-explanation-375');
   await page.eval(`document.getElementById('show-knowledge').click(); document.querySelector('#overview .item.proposed').focus()`); await page.key('r');
   check('loop narrow final rejection keeps focus on a visible knowledge control', await wait(`!document.querySelector('#overview .item.proposed') && document.activeElement.getBoundingClientRect().width > 0 && document.body.dataset.surface === 'knowledge'`));

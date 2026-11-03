@@ -18,6 +18,9 @@
 - Recovery refuses ambiguous transcript identities and stale extraction evidence;
   explanations identify ambiguous origins instead of choosing one. Reopened drafts
   stay saveable, and offline sources can retain an absent URL during title edits.
+- Interleaved requests keep their chat/message audit attribution. A broken model
+  selection file at restart blocks calls until repair, preserving the privacy
+  boundary of a previously saved local selection.
 - `npm run demo -- loop` and `--resume` exercise the loop with local fakes.
   Linux/macOS browser discovery and aggregate verdicts distinguish skips from passes.
 
