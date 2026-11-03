@@ -168,6 +168,7 @@ function itemCard(it) {
   el.className = `item ${status} ${byModel ? 'by-model' : 'by-user'}`;
   if (status === 'proposed') el.dataset.proposed = '1';
   el.dataset.id = it.id;
+  el.dataset.reviewRev = state.stateRev; el.dataset.reviewToken = state.stateToken || '';
   el.tabIndex = 0;
   if (it.quote) el.title = `"${it.quote}"`;
   const text = document.createElement('span');
@@ -178,6 +179,10 @@ function itemCard(it) {
     text.append(a);
   } else text.textContent = it.text;
   el.append(whyButton(it.id, `why is ${it.id} here?`), text, itemMeta(it, status, byModel));
+  if (status === 'confirmed') {
+    const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'item-edit'; edit.textContent = 'Edit'; edit.setAttribute('aria-label', `Edit ${it.id}`);
+    edit.addEventListener('click', e => { e.stopPropagation(); openItemEditor(it.id, el); }); el.append(edit);
+  }
   if (status === 'proposed') {
     const keys = document.createElement('span');
     keys.className = 'keys';
@@ -218,12 +223,14 @@ function itemMeta(it, status, byModel) {
   const tag = document.createElement('span');
   tag.className = `tag ${status}`; tag.textContent = status;
   meta.append(`${it.id} · `, byModel ? chip('model', `model · ${it.model || 'unknown'}`) : chip('you', prov && prov.added ? 'you (file edit)' : 'you'), ' · ', tag);
+  if (it.kind === 'task') meta.append(` · stage: ${it.column || 'todo'}`);
   if (byModel && prov && prov.added) meta.append(' · added by ', chip('you', 'you (file edit)'));
   if (status !== 'proposed') {
     const byFile = fields.includes('status') || (!it.decidedBy && !(prov && prov.added && !byModel));
     if (byFile) meta.append(` · ${status} by `, chip('you', 'you (file edit)'));
     else if (it.decidedBy) meta.append(` · ${status} by `, chip('you', it.decidedBy === 'user' ? 'you' : it.decidedBy), ...(it.decidedAt ? [' ', when(it.decidedAt)] : []));
   }
+  if (it.editedBy) meta.append(' · edited by ', chip('you', it.editedBy === 'user' ? 'you' : it.editedBy), ...(it.editedAt ? [' ', when(it.editedAt)] : []));
   if (it.movedBy) meta.append(' · moved by ', chip('you', it.movedBy === 'user' ? 'you' : it.movedBy), ...(it.movedAt ? [' ', when(it.movedAt)] : []));
   const edited = fields.filter((f) => !['status', 'decidedAt', 'decidedBy', 'movedAt', 'movedBy'].includes(f));
   if (edited.length) meta.append(' · edited by ', chip('you', 'you (file edit)'), `: ${edited.join(', ')}`);
@@ -378,22 +385,22 @@ function renderKanban(body) {
 const COLS = ['todo', 'doing', 'done'];
 let dragging = null;
 let moveChain = Promise.resolve();   // moves go one after another, each with the rev the previous one produced
-function moveTask(id, col) {
+function moveTask(id, col, surface = '#bench') {
   const it = (state.items || []).find((i) => i.id === id);
   if (!it || (it.column || 'todo') === col) return;
   const before = it.column;
   it.column = col; renderPanes(true);   // the card moves at once
-  moveChain = moveChain.then(() => sendMove(id, col, before)).catch((err) => addLine('system', `error: ${err.message}`));
+  moveChain = moveChain.then(() => sendMove(id, col, before, surface)).catch((err) => addLine('system', `error: ${err.message}`));
 }
-async function sendMove(id, col, before) {
+async function sendMove(id, col, before, surface) {
   const undo = () => { const cur = (state.items || []).find((i) => i.id === id); if (cur) { cur.column = before; renderPanes(true); } };
   try {
-    const res = await fetch('/move', { method: 'POST', headers: hdrs(), body: JSON.stringify({ itemId: id, column: col, rev: state.stateRev }) });
+    const res = await fetch('/move', { method: 'POST', headers: hdrs(), body: JSON.stringify({ itemId: id, column: col, rev: state.stateRev, token: state.stateToken }) });
     if (!res.ok) { undo(); await writeFailed(res); }
     else { const b = await res.json().catch(() => ({})); if (Number.isInteger(b.rev)) state.stateRev = b.rev; }
   } catch (err) { undo(); throw err; }
   await loadState();
-  const card = bench.querySelector(`#pane-kanban .item[data-id="${CSS.escape(id)}"]`);
+  const card = document.querySelector(`${surface} .item[data-id="${CSS.escape(id)}"]`);
   if (card) { restoring = true; card.focus({ preventScroll: true }); restoring = false; card.scrollIntoView({ block: 'nearest' }); }
 }
 
@@ -420,16 +427,32 @@ async function writeFailed(res) {
   addLine('out', body.error || `HTTP ${res.status}`).p.classList.add('err');
 }
 
+const decisionRequests = new Map(), decisionsInFlight = new Set();
 async function sendDecision(id, word, fromCard) {
+  if (decisionsInFlight.has(id)) return;
+  decisionsInFlight.add(id);
   const inOverview = !!fromCard?.closest('#overview');
-  const res = await fetch('/answer', { method: 'POST', headers: hdrs(), body: JSON.stringify({ itemId: id, decision: word, rev: fromCard?.dataset.reviewRev !== undefined ? Number(fromCard.dataset.reviewRev) : state.stateRev }) });
-  if (!res.ok) await writeFailed(res);
-  else if (selected === id) selected = null;
-  await loadState();
-  // focus stays in the pane: the next proposal, else the card just decided (Escape returns to the input)
-  const next = fromCard && (visibleProposals().find((c) => c.dataset.id === selected) || bench.querySelector(`.item[data-id="${CSS.escape(id)}"]`));
-  const overviewCard = inOverview && document.querySelector(`#overview .item[data-id="${CSS.escape(id)}"]`);
-  (overviewCard || next || input).focus();
+  let request = decisionRequests.get(id);
+  if (!request || request.decision !== word) {
+    request = { itemId: id, decision: word, rev: fromCard?.dataset.reviewRev !== undefined ? Number(fromCard.dataset.reviewRev) : state.stateRev, token: fromCard?.dataset.reviewToken || state.stateToken, operationId: crypto.randomUUID() };
+    decisionRequests.set(id, request);
+  }
+  try {
+    const res = await fetch('/answer', { method: 'POST', headers: hdrs(), body: JSON.stringify(request) });
+    decisionRequests.delete(id); // a known outcome; network failures retain the retry key
+    if (!res.ok) await writeFailed(res);
+    else if (selected === id) selected = null;
+    await loadState();
+    // Focus stays in the review surface, even if rejection removed its last card.
+    const next = fromCard && (visibleProposals().find((c) => c.dataset.id === selected) || bench.querySelector(`.item[data-id="${CSS.escape(id)}"]`));
+    const overviewCard = inOverview && document.querySelector(`#overview .item[data-id="${CSS.escape(id)}"]`);
+    const overviewNext = inOverview && document.querySelector('#overview .item[data-proposed]');
+    const fallback = inOverview ? document.querySelector('[data-knowledge-view][aria-current="page"]') : input;
+    (overviewCard || overviewNext || (!inOverview && next) || fallback).focus();
+  } catch (error) {
+    showFlash(`Decision not confirmed: ${error.message}. Retry the same decision to check its saved outcome.`);
+    await loadState().catch(() => {});
+  } finally { decisionsInFlight.delete(id); }
 }
 
 function firstSentence(text) {
@@ -461,6 +484,7 @@ function jumpTo(id) {
   scrollToMsg(id);
 }
 function scrollToMsg(id) {
+  if (typeof showSurface === 'function') showSurface('conversation');
   const el = $(`msg-${id}`);
   if (!el) return false;
   el.scrollIntoView({ block: 'center', behavior: reducedMotion.matches ? 'auto' : 'smooth' });
@@ -690,7 +714,7 @@ newChatBtn.addEventListener('click', () => newChat().catch((err) => addLine('sys
 // /state parts per file (GET /state?only=<files>). Every request gets a generation; a part is applied only if its
 // response is newer than the one that last set it, so an older full load can never overwrite a newer partial one.
 const PARTS = { 'transcript.jsonl': ['transcript', 'total'], 'modules.json': ['panes', 'pending', 'answers', 'modulesRev', 'models'],
-  'roles.json': ['models'], 'state.json': ['items', 'stateRev', 'stateError'] };
+  'roles.json': ['models'], 'state.json': ['items', 'stateRev', 'stateToken', 'stateError'] };
 PARTS['modules.json'].push('paneInfo', 'pendingKind', 'removals', 'faded');   // pilot-v0.6, pilot-v0.8
 PARTS['transcript.jsonl'].push('turn');                                       // pilot-v0.8
 PARTS['context.json'] = ['context'];
@@ -714,11 +738,17 @@ async function loadState(files) {
   const gen = ++reqGen;
   const list = files ? files.filter((f) => PARTS[f]) : Object.keys(PARTS);
   if (files && !list.length) return;
+  const requestedChat = activeChat;
   const chatQ = activeChat ? `chat=${encodeURIComponent(activeChat)}` : '';   // pilot-ui: the open chat's own tail
   const next = await (await fetch(files ? `/state?only=${encodeURIComponent(list.join(','))}${chatQ ? `&${chatQ}` : ''}` : `/state${chatQ ? `?${chatQ}` : ''}`)).json();
+  if (requestedChat !== activeChat) return; // an older chat response cannot replace this chat's context
   const initialModules = !appliedGen['modules.json'] && list.includes('modules.json') && Array.isArray(next.panes);
-  if (next.context) state.context = next.context;
-  if ('project' in next) state.project = next.project;
+  if (gen > (appliedGen.context || 0)) {
+    appliedGen.context = gen;
+    if (next.context) state.context = next.context;
+    if ('project' in next) state.project = next.project;
+    if (next.extractions) state.extractions = next.extractions;
+  }
   for (const f of list) {
     if (gen <= (appliedGen[f] || 0)) continue;
     appliedGen[f] = gen;
@@ -900,18 +930,19 @@ input.addEventListener('keydown', (e) => {
 // card, arrows move between cards and Escape returns to the input. Same guards as the consent keys.
 document.addEventListener('keydown', (e) => {
   if (e.isComposing || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.matches('textarea, select, [contenteditable="true"]') || (e.target.tagName === 'INPUT' && e.target !== input)) return;
   const card = e.target && e.target.closest ? e.target.closest('.item') : null;
   const emptyInput = e.target === input && input.value === '';
   if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && card && e.target === card && card.classList.contains('movable')) {
     const it = (state.items || []).find((i) => i.id === card.dataset.id);
     const to = it && COLS[COLS.indexOf(it.column || 'todo') + (e.key === 'ArrowRight' ? 1 : -1)];
     e.preventDefault();
-    if (to) moveTask(it.id, to);
+    if (to) moveTask(it.id, to, card.closest('#overview') ? '#overview' : '#bench');
     return;
   }
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     if (card) {
-      const all = [...bench.querySelectorAll('.item')];
+      const all = [...(card.closest('#overview') || bench).querySelectorAll('.item')];
       const to = all[all.indexOf(card) + (e.key === 'ArrowDown' ? 1 : -1)];
       if (to) { e.preventDefault(); to.focus(); }
     } else if (emptyInput && selected) {
@@ -920,7 +951,7 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
-  if (e.key === 'Escape' && (card || (e.target.closest && e.target.closest('.frame-note')))) { e.preventDefault(); input.focus(); return; }
+  if (e.key === 'Escape' && (card || (e.target.closest && e.target.closest('.frame-note')))) { e.preventDefault(); if (typeof showSurface === 'function') showSurface('conversation'); input.focus(); return; }
   // pilot-v0.10: f applies the open frame proposal of the pane that has focus (a card, the note or the pane body; not a
   // button, never the chat input)
   if (e.key === 'f') {

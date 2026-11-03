@@ -1,0 +1,17 @@
+{
+  "fakes": [
+    { "name": "local-demo", "port": 5871, "args": ["--board-aware"] },
+    { "name": "local-extractor", "port": 5872 }
+  ],
+  "try": [
+    "Open {url}. This demo uses deterministic local providers; no key or model spend.",
+    "Send: Decision: keep evidence local. Task: review the release notes. Task: discard the archive.",
+    "In Workspace knowledge, confirm the release-notes task and reject the archive task. Leave the decision pending.",
+    "Edit the accepted task to Publish reviewed release notes, then choose Kanban and move its Stage to done.",
+    "Switch between Summary, Index and Kanban: the same record, evidence and stage stay attached.",
+    "Enable Share project board, expand chat under Context sent to models, then ask: What is the latest accepted task?",
+    "The deterministic reply names the edited title and done stage. Switch sharing off and ask again to see conversation-only behaviour.",
+    "Stop with Ctrl+C, then run npm run demo -- loop --resume to keep accepted records, edits, pending proposals and chat history (use the same demo directory and port shift).",
+    "Running npm run demo -- loop again resets this marked throwaway demo. Ctrl+C stops all demo processes."
+  ]
+}

@@ -1,14 +1,60 @@
 'use strict';
-let overviewSig = '', workspaceKeysLoaded = false;
+let overviewSig = '', contextSig = '', recoverySig = '', workspaceKeysLoaded = false;
+function showSurface(surface, focus = false) {
+  document.body.dataset.surface = surface;
+  document.getElementById('show-conversation').setAttribute('aria-pressed', String(surface === 'conversation'));
+  document.getElementById('show-knowledge').setAttribute('aria-pressed', String(surface === 'knowledge'));
+  if (focus) (surface === 'conversation' ? input : document.querySelector('[data-knowledge-view][aria-current="page"]')).focus({ preventScroll: true });
+}
+function renderExtractionRecovery() {
+  const data = state.extractions || { jobs: [] }, sig = JSON.stringify(data);
+  if (sig === recoverySig) return;
+  recoverySig = sig;
+  const section = document.getElementById('extraction-recovery');
+  const focused = section.contains(document.activeElement) ? document.activeElement.dataset.job : null;
+  section.textContent = ''; section.hidden = !data.jobs.length;
+  if (section.hidden) {
+    if (focused) document.querySelector('[data-knowledge-view][aria-current="page"]')?.focus({ preventScroll: true });
+    return;
+  }
+  const heading = document.createElement('h3'); heading.textContent = 'Proposal extraction'; section.append(heading);
+  for (const job of data.jobs) {
+    const row = document.createElement('div'), label = document.createElement('p');
+    label.textContent = `${job.status}: ${job.title}${job.error ? ' — ' + job.error : ''}`; row.append(label);
+    if (!['running', 'queued'].includes(job.status)) {
+      for (const [action, title] of [['retry', 'Retry extraction'], ['dismiss', 'Dismiss']]) {
+        const button = document.createElement('button'); button.type = 'button'; button.textContent = title; button.dataset.job = job.id;
+        button.disabled = action === 'retry' && !job.retryable;
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          try {
+            const res = await fetch('/extraction', { method: 'POST', headers: hdrs(), body: JSON.stringify({ id: job.id, action }) });
+            if (!res.ok) await writeFailed(res);
+            await loadState();
+          } catch (error) { showFlash(error.message); }
+          finally { button.disabled = false; }
+        }); row.append(button);
+      }
+    }
+    section.append(row);
+  }
+  const note = document.createElement('p');
+  note.textContent = 'Retry uses the current extraction provider and sharing setting. Restarting alone sends nothing.' + (data.omitted ? ` ${data.omitted} older unfinished turns remain; resolve these to see them.` : '');
+  section.append(note);
+  if (focused) (section.querySelector(`[data-job="${CSS.escape(focused)}"]:not(:disabled)`) || document.querySelector('[data-knowledge-view][aria-current="page"]'))?.focus({ preventScroll: true });
+}
 function renderWorkspace() {
+  renderExtractionRecovery();
   const panel = document.getElementById('overview-items');
   const view = location.hash.match(/^#knowledge-(summary|index|kanban)$/)?.[1] || 'index';
-  const sig = JSON.stringify([state.items, state.stateRev, view]);
+  const sig = JSON.stringify([state.items, state.stateRev, state.stateToken, view]);
   if (sig !== overviewSig) {
     const focused = panel.contains(document.activeElement) ? document.activeElement.closest('[data-id]')?.dataset.id : null;
+    const focusedControl = focused && document.activeElement.matches('select') ? 'select' : null;
     overviewSig = sig; panel.textContent = '';
     const accepted = (state.items || []).filter(i => statusOf(i) === 'confirmed');
     const proposed = (state.items || []).filter(i => statusOf(i) === 'proposed');
+    document.getElementById('review-count').textContent = proposed.length ? `(${proposed.length} to review)` : '';
     document.querySelectorAll('[data-knowledge-view]').forEach(a => a.setAttribute('aria-current', a.dataset.knowledgeView === view ? 'page' : 'false'));
     const note = document.createElement('p');
     note.textContent = `${accepted.length} accepted · ${proposed.length} awaiting review · revision ${state.stateRev ?? 0}`;
@@ -22,17 +68,21 @@ function renderWorkspace() {
         if (item.quote) {
           const quote = document.createElement('blockquote'); quote.textContent = item.quote; card.append(quote);
         }
+        if (item.fromMessage) {
+          const origin = document.createElement('button'); origin.type = 'button'; origin.className = 'item-origin'; origin.textContent = 'Show in conversation';
+          origin.addEventListener('click', e => { e.stopPropagation(); showSurface('conversation'); showMsg(item.fromMessage).catch(error => showFlash(error.message)); }); card.append(origin);
+        }
         if (moves) {
           const label = document.createElement('label'); label.textContent = 'Stage ';
           const select = document.createElement('select'); select.setAttribute('aria-label', `Stage for ${item.id}`);
           for (const col of COLS) { const option = document.createElement('option'); option.value = col; option.textContent = col; select.append(option); }
           select.value = item.column || 'todo';
-          const rev = state.stateRev;
+          const rev = state.stateRev, token = state.stateToken;
           select.addEventListener('click', e => e.stopPropagation());
           select.addEventListener('change', async () => {
             select.disabled = true;
             try {
-              const res = await fetch('/move', { method: 'POST', headers: hdrs(), body: JSON.stringify({ itemId: item.id, column: select.value, rev }) });
+              const res = await fetch('/move', { method: 'POST', headers: hdrs(), body: JSON.stringify({ itemId: item.id, column: select.value, rev, token }) });
               if (!res.ok) await writeFailed(res);
               await loadState();
             } catch (e) { showFlash(e.message); }
@@ -50,7 +100,8 @@ function renderWorkspace() {
       summary.textContent = ['decision', 'task', 'source'].map(kind => `${accepted.filter(i => i.kind === kind).length} ${kind}(s)`).join(' · ');
       panel.append(summary);
       section('Accepted decisions', accepted.filter(i => i.kind === 'decision'));
-      section('Open tasks', accepted.filter(i => i.kind === 'task' && i.column !== 'done'), true);
+      section('Tasks', accepted.filter(i => i.kind === 'task'), true);
+      section('Sources', accepted.filter(i => i.kind === 'source'));
     } else if (view === 'kanban') {
       for (const col of COLS) section(col, accepted.filter(i => i.kind === 'task' && (i.column || 'todo') === col), true);
       section('Decisions and sources', accepted.filter(i => i.kind !== 'task'));
@@ -58,11 +109,30 @@ function renderWorkspace() {
       for (const [kind, title] of [['decision', 'Accepted decisions'], ['task', 'Accepted tasks'], ['source', 'Accepted sources']]) section(title, accepted.filter(i => i.kind === kind));
     }
     section('Review — proposals, not accepted knowledge', proposed);
-    if (focused) panel.querySelector(`[data-id="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
+    if (focused) panel.querySelector(`[data-id="${CSS.escape(focused)}"]${focusedControl ? ' ' + focusedControl : ''}`)?.focus({ preventScroll: true });
   }
-  const block = document.getElementById('context-roles'); block.textContent = '';
-  for (const [name, role] of Object.entries(state.context?.roles || {})) {
-    const p = document.createElement('p'); p.textContent = `${name}: ${role.candidate || 'none'}${role.location ? ` (${role.location})` : ''} — ${role.skipReason || role.sends}`; block.append(p);
+  const nextContextSig = JSON.stringify(state.context?.roles || {});
+  if (nextContextSig !== contextSig) {
+    const block = document.getElementById('context-roles');
+    const opened = new Set([...block.querySelectorAll('details[open]')].map(d => d.dataset.role));
+    const focusedRole = block.contains(document.activeElement) ? document.activeElement.closest('details')?.dataset.role : null;
+    contextSig = nextContextSig; block.textContent = '';
+    for (const [name, role] of Object.entries(state.context?.roles || {})) {
+      const detail = document.createElement('details'), title = document.createElement('summary'), explanation = document.createElement('p'), payload = document.createElement('pre');
+      detail.dataset.role = name; detail.open = opened.has(name);
+      title.textContent = `${name}: ${role.candidate || 'none'}${role.location ? ` (${role.location})` : ''}`;
+      explanation.textContent = `${role.skipReason || role.sends}. Allowed recipients: ${(role.candidates || []).filter(c => !c.blocked).map(c => `${c.name} (${c.location}${c.model ? ', ' + c.model : ''})`).join(', ') || 'none'}.${(role.candidates || []).some(c => c.blocked) ? ' Local-to-cloud fallback is blocked.' : ''}`;
+      const heading = document.createElement('p'); heading.textContent = 'Preview of the next request (placeholders show the next turn):';
+      payload.textContent = JSON.stringify(role.messagesTemplate || role.extraSystemMessage || null, null, 2);
+      detail.append(title, explanation, heading, payload);
+      if (role.lastRequest) {
+        const sent = role.lastRequest, label = document.createElement('p'), actual = document.createElement('pre');
+        label.textContent = `Last attempted request in this server session: ${sent.candidate} / ${sent.model} (${sent.location}, ${sent.endpoint}) · ${sent.status} · ${sent.at}${sent.truncated ? ' · display shortened to 100,000 characters' : ''}`;
+        actual.className = 'last-request'; actual.textContent = sent.payload; detail.append(label, actual);
+      }
+      block.append(detail);
+    }
+    if (focusedRole) block.querySelector(`[data-role="${CSS.escape(focusedRole)}"] summary`)?.focus({ preventScroll: true });
   }
   const toggle = document.getElementById('share-board'); toggle.checked = !!state.context?.share?.board;
   document.getElementById('files-section').hidden = !state.project;
@@ -97,4 +167,7 @@ document.getElementById('overview-settings').addEventListener('click', openSetti
 document.getElementById('settings').addEventListener('close', () => refreshWorkspaceKeys().catch(() => {}));
 document.getElementById('share-board').addEventListener('change', async e => { await runCommand('/context share board ' + (e.target.checked ? 'on' : 'off')); });
 
-window.addEventListener('hashchange', renderWorkspace);
+document.getElementById('show-conversation').addEventListener('click', () => showSurface('conversation', true));
+document.getElementById('show-knowledge').addEventListener('click', () => showSurface('knowledge', true));
+window.addEventListener('hashchange', () => { showSurface('knowledge'); renderWorkspace(); });
+showSurface(location.hash.startsWith('#knowledge-') ? 'knowledge' : 'conversation');

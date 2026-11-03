@@ -1,0 +1,7 @@
+{
+  "port": 4870,
+  "roles": {
+    "chat": { "candidates": [{ "name": "local-demo", "model": "deterministic", "local": true, "baseUrl": "http://127.0.0.1:5871/v1" }] },
+    "extract": { "candidates": [{ "name": "local-extractor", "model": "deterministic", "local": true, "baseUrl": "http://127.0.0.1:5872/v1" }] }
+  }
+}

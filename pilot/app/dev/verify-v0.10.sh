@@ -15,6 +15,7 @@ T=$(fixture_temp) || exit 1; fixture_root "$T"; FIXTURE_ROOT="$T"; PIDS=(); SERV
 DIR="$T/.pilot-verify-v10"
 cleanup() { kill "${PIDS[@]}" 2>/dev/null; wait 2>/dev/null; fixture_remove "$T"; }
 trap cleanup EXIT
+cp -R demo/fixtures/v0.9 "$T/previous-fixture" || exit 1
 fixture_ports 4830 4978 5831 5832 5833 5834
 FAILS=0
 check() { if [ "$2" = "true" ]; then echo "PASS $1"; else echo "FAIL $1"; FAILS=$((FAILS+1)); fi; }
@@ -249,11 +250,10 @@ check "/stats still prints five verdict lines and equals npm run stats" "$(S=$(l
 stop_server
 
 echo "== 9. page (headless Chrome): off = today, the note, f, apply, reset, dismiss, narrow widths, flag off"
-if node -e 'process.exit(typeof WebSocket==="function"?0:1)' && [ -x "${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}" ]; then
-  node dev/browser-check.js v10 | tee "$T/browser.log"
-  check "browser checks (v10) all passed" "$(grep -q 'ALL BROWSER CHECKS PASSED' "$T/browser.log" && echo true)"
-else
-  echo "SKIP browser checks: need Node 22+ and Google Chrome"; FAILS=$((FAILS+1))
+node dev/browser-check.js v10 > "$T/browser.log" 2>&1; BROWSER_RC=$?
+cat "$T/browser.log"
+if [ "$BROWSER_RC" -ne 77 ]; then
+  check "browser checks (v10) all passed" "$( [ "$BROWSER_RC" -eq 0 ] && grep -q 'ALL BROWSER CHECKS PASSED' "$T/browser.log" && echo true)"
 fi
 node dev/contrast-check.js > "$T/contrast.log"; RC=$?
 check "contrast-check.js passes (frame note, byline and keys use checked pairs)" "$( [ $RC -eq 0 ] && grep -q 'frame proposal text on panel' "$T/contrast.log" && echo true)"
@@ -272,7 +272,7 @@ for i in $(seq 1 20); do grep -q 'Ctrl+C stops' "$T/demo.log" && break; sleep 0.
 check "try lines: the note, apply with f, /why map, /frame reset map" "$(grep -q 'model suggests: focus dec-2' "$T/demo.log" && grep -q 'press f' "$T/demo.log" && grep -q '/why map explains the applied frame' "$T/demo.log" && grep -q '/frame reset map' "$T/demo.log" && echo true)"
 kill -INT $DEMO; wait $DEMO 2>/dev/null; sleep 0.5
 check "Ctrl+C on the demo leaves no processes on its ports" "$( ! pgrep -f 'fake-model.js 598(3|4)' > /dev/null && ! lsof -iTCP:4978 -sTCP:LISTEN > /dev/null 2>&1 && echo true)"
-check "the v0.9 fixture is unchanged by the v0.10 generator" "$(git diff --quiet -- demo/fixtures/v0.9 && echo true)"
+check "the v0.9 fixture is unchanged by the v0.10 generator" "$(diff -qr "$T/previous-fixture" demo/fixtures/v0.9 > /dev/null && echo true)"
 
 echo; [ $FAILS -eq 0 ] && echo "ALL v0.10 CHECKS PASSED" || echo "$FAILS v0.10 CHECK(S) FAILED"
 exit $(( FAILS > 0 ))

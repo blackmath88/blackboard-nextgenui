@@ -33,7 +33,10 @@ function readJsonlNumbered(file) {
   const rows = [];
   r.raw.split('\n').forEach((l, i) => {
     if (!l.trim()) return;
-    try { rows.push({ n: i + 1, obj: JSON.parse(l) }); } catch { /* a broken hand-edited line is skipped */ }
+    try {
+      const obj = JSON.parse(l);
+      if (obj && typeof obj === 'object' && !Array.isArray(obj)) rows.push({ n: i + 1, obj });
+    } catch { /* a broken hand-edited line is skipped */ }
   });
   return { rows, missing: !!r.missing };
 }
@@ -98,7 +101,7 @@ function load(dir) {
   const ctx = { dir, raw: {} };
   const tr = readJsonlNumbered(path.join(dir, 'transcript.jsonl'));
   const me = readJsonlNumbered(path.join(dir, 'metrics.jsonl'));
-  ctx.lines = tr.rows; ctx.events = me.rows;
+  ctx.lines = tr.rows.filter(r => typeof r.obj.role === 'string' && typeof r.obj.text === 'string'); ctx.events = me.rows;
   for (const [key, file] of [['modules', 'modules.json'], ['state', 'state.json'], ['rules', 'rules.json'], ['frames', 'frames.json']]) {
     const r = readJsonDoc(path.join(dir, file));
     ctx.raw[file] = r.raw;
@@ -401,6 +404,10 @@ function explainItem(ctx, it) {
   }
 
   // other fields changed by hand
+  for (const row of ev(ctx, e => ['edit', 'move'].includes(e.event) && e.itemId === it.id)) {
+    const e = row.obj;
+    out.push({ text: e.event === 'edit' ? `edited by you at ${e.ts}: ${(e.fields || []).join(', ')} (revision ${e.rev}); original evidence retained` : `moved by you from ${e.from} to ${e.to} at ${e.ts} (revision ${e.rev})`, cite: [jl('metrics.jsonl', row, `${e.event} ${it.id}`)] });
+  }
   for (const f of fields.filter((x) => !['status', 'decidedAt', 'decidedBy'].includes(x))) {
     const fe = fileEditFor(ctx, it.id, (e) => (e.fields || []).includes(f));
     const was = last ? `the server wrote ${fmt(last.obj.item[f])}, ` : '';

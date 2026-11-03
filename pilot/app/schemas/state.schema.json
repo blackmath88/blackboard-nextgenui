@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "pilot state.json (pilot/app copy; pilot-v0.4 adds decidedBy)",
+  "title": "Pilot canonical knowledge state",
   "type": "object",
   "required": ["rev", "items"],
   "additionalProperties": false,
@@ -21,9 +21,14 @@
           "model": { "type": "string", "description": "required when author is model" },
           "quote": { "type": "string", "description": "the words in the turn the proposal rests on" },
           "fromMessage": { "type": "string" },
+          "fromChat": { "type": "string", "description": "chat containing the originating conversation turn" },
           "createdAt": { "type": "string", "format": "date-time" },
           "decidedAt": { "type": "string", "format": "date-time" },
           "decidedBy": { "enum": ["user"], "description": "who confirmed or rejected the item (pilot-v0.4 extension; only the user decides)" },
+          "editedAt": { "type": "string", "format": "date-time" },
+          "editedBy": { "enum": ["user"] },
+          "movedAt": { "type": "string", "format": "date-time" },
+          "movedBy": { "enum": ["user"] },
           "column": { "enum": ["todo", "doing", "done"], "description": "tasks only" },
           "url": { "type": "string", "description": "sources only" }
         },

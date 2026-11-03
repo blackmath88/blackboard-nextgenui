@@ -20,8 +20,9 @@ const APP = path.join(__dirname, '..');
 const FIX = path.join(APP, 'demo', 'fixtures');
 const versions = () => (fs.existsSync(FIX) ? fs.readdirSync(FIX).filter((d) => fs.existsSync(path.join(FIX, d, 'demo.json'))).sort((a, b) => a.localeCompare(b, 'en', { numeric: true })) : []);
 const version = process.argv[2];
-if (!version || !versions().includes(version)) {
-  console.error(`${version ? `unknown demo version "${version}". ` : ''}usage: npm run demo -- <version>\navailable: ${versions().join(', ') || 'none'}`);
+const extra = process.argv.slice(3), resume = extra.length === 1 && extra[0] === '--resume';
+if (!version || !versions().includes(version) || (extra.length && !resume)) {
+  console.error(`${version && !versions().includes(version) ? `unknown demo version "${version}". ` : ''}usage: npm run demo -- <version> [--resume]\navailable: ${versions().join(', ') || 'none'}`);
   process.exit(2);
 }
 const dirName = process.env.PILOT_DEMO_DIR || '.pilot-demo';
@@ -42,13 +43,6 @@ try {
 // Refuse occupied ports before seeding or starting children.
 require('child_process').execFileSync(process.execPath, [path.join(APP, 'dev/lib/safe-dir.js'), 'ports', String(JSON.parse(fs.readFileSync(path.join(src, 'pilot.config.json'), 'utf8')).port + shift), ...(demo.fakes || []).map((f) => String(f.port + shift))], { stdio: 'inherit' });
 
-// ---- seed the throwaway dir ----
-if (fixtureRoot) safety.remove(DIR, fixtureRoot); else safety.removeDemo(DIR);
-safety.mark(DIR);
-for (const f of fs.readdirSync(src)) {
-  if (f === 'demo.json' || f === 'pilot.config.json') continue;
-  fs.copyFileSync(path.join(src, f), path.join(DIR, f));
-}
 // The config lives in the throwaway dir too, with ports shifted if asked.
 const config = JSON.parse(fs.readFileSync(path.join(src, 'pilot.config.json'), 'utf8'));
 const mapPort = (p) => p + shift;
@@ -57,7 +51,40 @@ for (const r of Object.values(config.roles || {})) for (const c of r.candidates 
   c.baseUrl = c.baseUrl.replace(/:(\d+)\//, (_, p) => `:${mapPort(Number(p))}/`);
 }
 const configFile = path.join(DIR, 'demo.config.json');
-fs.writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n');
+// Own the demo run separately from the child server. Even a different port
+// shift must not reset data belonging to a possibly-live demo/server.
+const { acquireWorkspace } = require('../workspace-lock');
+let releaseRunner;
+try { releaseRunner = acquireWorkspace(path.dirname(DIR), path.basename(DIR) + '.runner-lock'); }
+catch (error) { console.error('REFUSE demo: ' + error.message); process.exit(2); }
+process.on('exit', releaseRunner);
+if (resume) {
+  // A resume never reseeds data or adopts arbitrary provider configuration.
+  // Same marked demo, fixture version, and port shift are required.
+  let matches = false;
+  try { matches = fs.readFileSync(path.join(DIR, '.demo-version'), 'utf8').trim() === version && require('util').isDeepStrictEqual(JSON.parse(fs.readFileSync(configFile)), config); } catch { /* refuse below */ }
+  if (!matches) { console.error('REFUSE resume: no matching saved demo. Use the same version, PILOT_DEMO_DIR and DEMO_PORT_SHIFT as the original run; a changed provider config is not resumed.'); process.exit(2); }
+  try { acquireWorkspace(DIR)(); } catch (error) { console.error('REFUSE resume: ' + error.message); process.exit(2); }
+} else {
+  if (!fs.existsSync(DIR)) safety.mark(DIR);
+  let releaseSeed;
+  try { releaseSeed = acquireWorkspace(DIR); }
+  catch (error) { console.error('REFUSE demo reset: ' + error.message); process.exit(2); }
+  try {
+    // Keep the writer lock throughout seeding, so a standalone server cannot
+    // start between deletion and recreation of the demo directory.
+    for (const name of fs.readdirSync(DIR)) if (name !== '.server-lock') fs.rmSync(path.join(DIR, name), { recursive: true, force: true });
+    safety.mark(DIR);
+    for (const f of fs.readdirSync(src)) {
+      if (f === 'demo.json' || f === 'pilot.config.json') continue;
+      fs.copyFileSync(path.join(src, f), path.join(DIR, f));
+    }
+    fs.writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n');
+    fs.writeFileSync(path.join(DIR, '.demo-version'), version + '\n');
+  } finally {
+    releaseSeed();
+  }
+}
 const URL = `http://127.0.0.1:${config.port}`;
 
 // ---- children ----
@@ -96,7 +123,7 @@ process.on('SIGTERM', () => stopAll(0));
 process.on('SIGHUP', () => stopAll(0));
 
 for (const f of demo.fakes || []) launch(f.name, fakeArgs(f));
-console.log(`[demo] ${version}: seeded ${dirName}/ from demo/fixtures/${version}/ (PILOT_DIR=${dirName})`);
+console.log(`[demo] ${version}: ${resume ? 'resumed' : 'seeded'} ${dirName}/ ${resume ? 'without resetting records' : `from demo/fixtures/${version}/`} (PILOT_DIR=${dirName})`);
 launch('server', ['server.js'], { PILOT_DIR: dirName, PILOT_CONFIG: path.relative(APP, configFile) });
 
 (async () => {

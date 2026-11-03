@@ -7,9 +7,8 @@ T=$(fixture_temp) || exit 1; fixture_root "$T"; FIXTURE_ROOT="$T"
 trap 'fixture_remove "$T"' EXIT
 fixture_ports 4840 5841
 node dev/verify-m1.js "$T"
-if [ -x "${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}" ]; then
-  node dev/browser-check.js m1
+if node dev/browser-check.js m1; then :
 else
-  echo 'SKIP M1 browser (set CHROME=/usr/bin/chromium)'
+  rc=$?; [ "$rc" -eq 77 ] || exit "$rc"
 fi
 echo 'ALL M1 CHECKS PASSED'

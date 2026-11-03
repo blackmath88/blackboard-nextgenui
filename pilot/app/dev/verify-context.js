@@ -1,0 +1,17 @@
+'use strict';
+const assert = require('assert/strict');
+const { boardSnapshot, MAX_CHARS } = require('../knowledge-context');
+const task = { id: 'task-1', kind: 'task', text: 'Updated accepted task', status: 'confirmed', column: 'done', author: 'model', quote: 'original proposal', fromMessage: 'm-1', decidedBy: 'user', editedBy: 'user' };
+const state = { rev: 8, token: 'fixture-token', items: [task, { ...task, id: 'pending', status: 'proposed' }, { ...task, id: 'rejected', status: 'rejected' }] };
+let out = boardSnapshot(state);
+assert.equal(out.items, 1); assert.equal(out.rev, 8); assert.equal(out.token, 'fixture-token');
+assert.equal(out.records[0].stage, 'done'); assert.equal(out.records[0].text, task.text); assert.equal(out.records[0].quote, task.quote);
+assert(!out.message.content.includes('"id":"rejected"')); assert(!out.message.content.includes('"id":"pending"'));
+assert.equal(boardSnapshot({ ...state, error: 'invalid state' }), null);
+const many = Array.from({ length: 40 }, (_, n) => ({ ...task, id: `task-${n}`, text: 'x'.repeat(3000), createdAt: new Date(n * 1000).toISOString() }));
+many[0].editedAt = '2026-11-03T16:00:00Z';
+out = boardSnapshot({ ...state, items: many });
+assert.equal(out.records[0].id, 'task-0'); assert(out.message.content.length <= MAX_CHARS); assert(out.omitted > 0); assert(out.truncated > 0);
+assert.equal(out.items + out.omitted, 40);
+console.log('PASS bounded accepted context includes latest edits, completed stages and provenance; excludes proposals, rejections and unreadable state');
+console.log('ALL CONTEXT CHECKS PASSED');

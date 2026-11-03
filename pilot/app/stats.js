@@ -15,7 +15,10 @@ function readJsonl(file) {
   const out = [];
   for (const l of raw.split('\n')) {
     if (!l.trim()) continue;
-    try { out.push(JSON.parse(l)); } catch { /* a broken hand-edited line is skipped */ }
+    try {
+      const row = JSON.parse(l);
+      if (row && typeof row === 'object' && !Array.isArray(row)) out.push(row);
+    } catch { /* a broken hand-edited line is skipped without rewriting the file */ }
   }
   return out;
 }
