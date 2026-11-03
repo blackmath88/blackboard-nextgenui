@@ -417,8 +417,7 @@ async function v04(page) {
 }
 
 // pilot-v0.5: live files. Two tabs stay in sync; a hand edit shows within 1 s (measured hand edit -> DOM); a stale
-// write is rejected and the page reloads with a notice; a broken file shows "not valid JSON, showing last good
-// version"; reconnect after a server restart; fallback without EventSource; c/r only on a focused card.
+// write is rejected and the page reloads with a notice; a broken file shows "not valid JSON; fix it before saving changes"; reconnect after a server restart; fallback without EventSource; c/r only on a focused card.
 const timings = {};
 async function v05(page) {
   const at = (m) => new Date(Date.UTC(2026, 9, 17, 9, m)).toISOString();
@@ -495,8 +494,8 @@ async function v05(page) {
   // broken hand edits: the last good version stays visible with a notice, until the file is fixed
   const good = fs.readFileSync(file('state.json'), 'utf8');
   fs.writeFileSync(file('state.json'), good + 'oops');
-  const brokenMs = await waitFor(page, `${notice}.includes('file state.json is not valid JSON, showing last good version')`);
-  check('broken state.json: notice "file state.json is not valid JSON, showing last good version" within 1 s; cards still shown', brokenMs !== null && brokenMs < 1000 && await page.eval(`${tagOf('dec-5')} === 'confirmed' && !!document.querySelector('.item[data-id="dec-6"]')`), `${brokenMs} ms`);
+  const brokenMs = await waitFor(page, `${notice}.includes('file state.json is not valid JSON; fix it before saving changes')`);
+  check('broken state.json: notice "file state.json is not valid JSON; fix it before saving changes" within 1 s; cards still shown', brokenMs !== null && brokenMs < 1000 && await page.eval(`${tagOf('dec-5')} === 'confirmed' && !!document.querySelector('.item[data-id="dec-6"]')`), `${brokenMs} ms`);
   await page.eval(`document.querySelector('.item[data-id="dec-6"] .key[data-decision="confirm"]').click()`); await sleep(500);
   check('confirm while state.json is broken: error line, file untouched', fs.readFileSync(file('state.json'), 'utf8') === good + 'oops' && await page.eval(`[...document.querySelectorAll('.ln.out.err')].some(l => /not valid JSON/.test(l.textContent))`));
   fs.writeFileSync(file('state.json'), good);
@@ -504,7 +503,7 @@ async function v05(page) {
   check('fixing state.json removes the notice', fixedMs !== null, `${fixedMs} ms`);
   const mods = fs.readFileSync(file('modules.json'), 'utf8');
   fs.writeFileSync(file('modules.json'), '{"rev": 1, "panes": [');
-  const mMs = await waitFor(page, `${notice}.includes('file modules.json is not valid JSON, showing last good version')`);
+  const mMs = await waitFor(page, `${notice}.includes('file modules.json is not valid JSON; fix it before saving changes')`);
   check('broken modules.json: notice, the map pane stays (last good version)', mMs !== null && await page.eval(`!!document.getElementById('pane-map')`), `${mMs} ms`);
   fs.writeFileSync(file('modules.json'), mods);
   check('fixing modules.json removes the notice', (await waitFor(page, `${notice} === ''`)) !== null);
