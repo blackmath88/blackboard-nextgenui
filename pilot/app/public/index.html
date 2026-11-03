@@ -30,7 +30,12 @@
  </div>
  </div>
  <aside id="overview" aria-label="Project overview">
-  <h2>Project overview</h2><div id="overview-items"></div>
+  <h2>Workspace knowledge</h2>
+  <nav aria-label="Knowledge views" class="knowledge-views">
+   <a href="#knowledge-summary" data-knowledge-view="summary">Summary</a>
+   <a href="#knowledge-index" data-knowledge-view="index">Index</a>
+   <a href="#knowledge-kanban" data-knowledge-view="kanban">Kanban</a>
+  </nav><div id="overview-items"></div>
   <section class="context-block"><h3>Context sent to models</h3><label><input type="checkbox" id="share-board"> Share project board</label><div id="context-roles"></div></section>
   <section><h3>API keys</h3><p id="workspace-keys"></p><button id="overview-settings" type="button">Settings</button></section>
  </aside>
