@@ -421,13 +421,15 @@ async function writeFailed(res) {
 }
 
 async function sendDecision(id, word, fromCard) {
-  const res = await fetch('/answer', { method: 'POST', headers: hdrs(), body: JSON.stringify({ itemId: id, decision: word, rev: state.stateRev }) });
+  const inOverview = !!fromCard?.closest('#overview');
+  const res = await fetch('/answer', { method: 'POST', headers: hdrs(), body: JSON.stringify({ itemId: id, decision: word, rev: fromCard?.dataset.reviewRev !== undefined ? Number(fromCard.dataset.reviewRev) : state.stateRev }) });
   if (!res.ok) await writeFailed(res);
   else if (selected === id) selected = null;
   await loadState();
   // focus stays in the pane: the next proposal, else the card just decided (Escape returns to the input)
   const next = fromCard && (visibleProposals().find((c) => c.dataset.id === selected) || bench.querySelector(`.item[data-id="${CSS.escape(id)}"]`));
-  (next || input).focus();
+  const overviewCard = inOverview && document.querySelector(`#overview .item[data-id="${CSS.escape(id)}"]`);
+  (overviewCard || next || input).focus();
 }
 
 function firstSentence(text) {

@@ -580,3 +580,12 @@ Hardening, pastel palette, iteration infrastructure.
 - No proposals, extraction or live file updates (v0.4, v0.5). The `.proposal` style exists but is unused.
 - No change to the explainers or to anything outside `pilot/app/` except the "Pilot iterations" list in the
   root `index.html`.
+
+## Local knowledge slice (packet bb)
+
+Workspace overview now offers URL-addressable Summary, Index and Kanban views of
+accepted records, with proposals kept in a separate Review section. Quotes and
+existing provenance remain visible; accepted tasks have explicit stage controls.
+Overview acceptance and movement use the rendered revision. No storage migration,
+provider, protocol dependency or change to board-sharing consent. See
+`../next/evidence/KNOWLEDGE-SLICE.md` for demo paths and verification limitations.
