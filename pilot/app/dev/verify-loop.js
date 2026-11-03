@@ -103,6 +103,21 @@ const pass = text => console.log('PASS ' + text);
     assert.equal(interrupted.status, 'interrupted'); assert.equal(interrupted.retryable, true); assert.equal(s.extracting, false);
     assert.equal(calls().length, callsBeforeRestart, 'restart must not call a provider');
     assert.equal(s.context.roles.chat.lastRequest, null, 'private request previews are not duplicated to disk');
+    const interruptedTranscript = fs.readFileSync(path.join(data, 'transcript.jsonl'), 'utf8');
+    const interruptedLines = interruptedTranscript.trim().split('\n').map(JSON.parse);
+    const originalReply = interruptedLines.find(line => line.id === interrupted.id);
+    const originalUser = interruptedLines.find(line => line.id === originalReply.replyTo);
+    for (const original of [originalUser, originalReply]) {
+      fs.writeFileSync(path.join(data, 'transcript.jsonl'), interruptedTranscript + JSON.stringify({ ...original, text: 'Ambiguous alternate evidence' }) + '\n');
+      const ambiguous = (await state()).extractions.jobs.filter(j => j.id === interrupted.id);
+      assert.equal(ambiguous.length, 1); assert.equal(ambiguous[0].retryable, false); assert.match(ambiguous[0].error, /ambiguous/i);
+      const refused = await req('/extraction', { id: interrupted.id, action: 'retry' });
+      assert.equal(refused.status, 409); assert.match(refused.json.error, /ambiguous/i);
+      assert.equal(calls().length, callsBeforeRestart);
+      assert.equal(fs.readFileSync(path.join(data, 'transcript.jsonl'), 'utf8'), interruptedTranscript + JSON.stringify({ ...original, text: 'Ambiguous alternate evidence' }) + '\n');
+    }
+    fs.writeFileSync(path.join(data, 'transcript.jsonl'), interruptedTranscript);
+    pass('ambiguous recovery identities refuse extraction without choosing evidence, calling a provider or rewriting the transcript');
     await req('/command', { text: '/context share board off' });
     const retries = await Promise.all(Array.from({ length: 5 }, () => req('/extraction', { id: interrupted.id, action: 'retry' })));
     assert.equal(retries.filter(r => r.status === 202).length, 1);
@@ -114,6 +129,22 @@ const pass = text => console.log('PASS ' + text);
     assert.equal((await req('/extraction', { id: interrupted.id, action: 'retry' })).json.settled, true);
     assert.equal(calls().length, callsBeforeRestart + 1);
     pass('SIGKILL during extraction recovers a visible paused turn; startup sends nothing; concurrent retries create one request and one proposal batch');
+
+    await stop(fake); fake = start([path.join(app, 'dev/fake-model.js'), '5864', 'loop', '--board-aware', '--extract-delay=1200']); await ready('http://127.0.0.1:5864');
+    const beforeChangedEvidence = (await state()).items;
+    await req('/chat', { text: 'Task: preserve the evidence used by extraction.' });
+    const changingJob = (await state()).extractions.jobs.find(j => j.title.includes('evidence used by extraction'));
+    assert(changingJob);
+    const changingLines = fs.readFileSync(path.join(data, 'transcript.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    changingLines.find(line => line.id === changingJob.userId).text = 'Task: review the changed original evidence.';
+    fs.writeFileSync(path.join(data, 'transcript.jsonl'), changingLines.map(line => JSON.stringify(line) + '\n').join(''));
+    await idle();
+    s = await state(); assert.deepEqual(s.items, beforeChangedEvidence);
+    assert.match(s.extractions.jobs.find(j => j.id === changingJob.id).error, /changed.*extraction/i);
+    assert.equal((await req('/extraction', { id: changingJob.id, action: 'retry' })).status, 202); await idle();
+    s = await state(); assert(s.items.some(i => i.text === 'review the changed original evidence' && i.fromMessage === changingJob.userId));
+    assert(!s.items.some(i => i.text === 'preserve the evidence used by extraction'));
+    pass('source text changed during extraction rejects the stale proposal batch; explicit retry uses current original evidence');
 
     await stop(fake); fake = start([path.join(app, 'dev/fake-model.js'), '5864', 'loop', '--board-aware', '--extract=malformed']); await ready('http://127.0.0.1:5864');
     const countBeforeMalformed = s.items.length;

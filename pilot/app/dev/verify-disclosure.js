@@ -32,5 +32,10 @@ assert.equal(extractionJobs(lines, [], new Map(), 'c-2').length, 0);
 assert.equal(extractionJobs(lines, [{ event: 'extract', fromMessage: 'r' }, { event: 'extract_error', fromMessage: 'r', error: 'later controller failure' }]).length, 0);
 assert.equal(extractionJobs(lines, [{ event: 'extract_dismissed', fromMessage: 'r' }]).length, 0);
 assert.equal(extractionJobs(lines.slice(1), [])[0].retryable, false);
-console.log('PASS extraction recovery excludes legacy/partial/completed/dismissed turns and never retries a missing or cross-chat source');
+for (const original of lines.slice(0, 2)) {
+  const ambiguous = extractionJobs([...lines, { ...original, text: 'Conflicting evidence' }], []);
+  assert.equal(ambiguous.length, 1); assert.equal(ambiguous[0].retryable, false); assert.match(ambiguous[0].error, /ambiguous/);
+  assert.equal(ambiguous[0].dismissible, original.role === 'user');
+}
+console.log('PASS extraction recovery excludes legacy/partial/completed/dismissed turns and never retries missing, cross-chat or ambiguous evidence');
 console.log('ALL DISCLOSURE AND RECOVERY CHECKS PASSED');

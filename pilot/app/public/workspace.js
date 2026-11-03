@@ -24,7 +24,7 @@ function renderExtractionRecovery() {
     if (!['running', 'queued'].includes(job.status)) {
       for (const [action, title] of [['retry', 'Retry extraction'], ['dismiss', 'Dismiss']]) {
         const button = document.createElement('button'); button.type = 'button'; button.textContent = title; button.dataset.job = job.id;
-        button.disabled = action === 'retry' && !job.retryable;
+        button.disabled = action === 'retry' ? !job.retryable : job.dismissible === false;
         button.addEventListener('click', async () => {
           button.disabled = true;
           try {

@@ -30,7 +30,7 @@ const fade = require('./fade.js');
 const frame = require('./frame.js');
 const secrets = require('./secrets.js');
 const knowledge = require('./knowledge-context.js');
-const { extractionJobs } = require('./extraction-recovery.js');
+const { extractionJobs, extractionTurn } = require('./extraction-recovery.js');
 const { stateStore, hash: stateHash, atomic: durableWrite } = require('./state-store.js');
 const { AsyncLocalStorage } = require('async_hooks');
 const requestContext = new AsyncLocalStorage();
@@ -854,20 +854,31 @@ function retryExtraction(body) {
     if (!body || typeof body.id !== 'string' || !['retry', 'dismiss'].includes(body.action)) return { code: 400, body: { error: 'expected extraction id and retry/dismiss action' } };
     const st = readState();
     if (st.error) return { code: 409, body: { error: st.error } };
-    const lines = readTranscript(), reply = lines.find(l => l.id === body.id && l.role === 'assistant' && l.extractionPlanned === true);
-    if (!reply || chatOf(reply) !== activeChat()) return { code: 404, body: { error: 'no recoverable extraction in this chat' } };
+    const lines = readTranscript();
+    if (!lines.some(l => l.id === body.id && l.role === 'assistant' && l.extractionPlanned === true && chatOf(l) === activeChat())) return { code: 404, body: { error: 'no recoverable extraction in this chat' } };
+    const turn = extractionTurn(lines, body.id), { reply, user } = turn;
+    if (!reply) return { code: 409, body: { error: turn.error } };
     if (completedExtraction(reply.id)) return { code: 200, body: { ok: true, settled: true } };
     if (activeExtractions.has(reply.id)) return { code: 200, body: { ok: true, running: true } };
     if (body.action === 'dismiss') {
       appendJsonl(METRICS, { ts: new Date().toISOString(), event: 'extract_dismissed', fromMessage: reply.id, chat: chatOf(reply), by: 'user' });
       return { code: 200, body: { ok: true, dismissed: true } };
     }
-    const user = lines.find(l => l.id === reply.replyTo && l.role === 'user' && chatOf(l) === chatOf(reply));
-    if (!user) return { code: 409, body: { error: 'original user message is unavailable; preserve the transcript before repair' } };
+    if (turn.error) return { code: 409, body: { error: turn.error } };
     if (!roleConfig('extract').candidates.length) return { code: 409, body: { error: 'no extraction provider configured' } };
     queueExtraction(user, reply);
     return { code: 202, body: { ok: true, queued: true } };
   });
+}
+
+function extractionEvidenceError(userLine, replyLine) {
+  const turn = extractionTurn(readTranscript(), replyLine.id);
+  if (turn.error) return turn.error;
+  if (turn.user.id !== userLine.id || turn.user.text !== userLine.text || turn.reply.text !== replyLine.text ||
+      chatOf(turn.user) !== chatOf(userLine) || chatOf(turn.reply) !== chatOf(replyLine)) {
+    return 'The original conversation changed during extraction; review it before retrying.';
+  }
+  return null;
 }
 
 async function runExtraction(userLine, replyLine) {
@@ -876,6 +887,8 @@ async function runExtraction(userLine, replyLine) {
   const maxItems = Math.max(1, Math.min(schemaMax, Number(rc.maxItems) || schemaMax));
   const before = readState();
   if (before.error) { await metric('extract_error', { reason: 'state', error: before.error, fromMessage: replyLine.id }); return; }
+  const evidenceError = extractionEvidenceError(userLine, replyLine);
+  if (evidenceError) { await metric('extract_error', { reason: 'provenance', error: evidenceError, fromMessage: replyLine.id }); return; }
   const schema = JSON.parse(JSON.stringify(EXTRACTION_SCHEMA));
   schema.properties.items.maxItems = maxItems;
   delete schema.$schema;
@@ -895,6 +908,8 @@ async function runExtraction(userLine, replyLine) {
     const ts = new Date().toISOString();
     const drop = (reason, it, extra = {}) => appendJsonl(METRICS, { ts, event: 'extract_drop', ...base, reason, kind: it.kind, text: it.text, ...extra });
     if (st.error) { appendJsonl(METRICS, { ts, event: 'extract_error', ...base, reason: 'state', error: st.error }); return; }
+    const changedEvidence = extractionEvidenceError(userLine, replyLine);
+    if (changedEvidence) { appendJsonl(METRICS, { ts, event: 'extract_error', ...base, reason: 'provenance', error: changedEvidence }); return; }
     const live = st.items.filter((i) => i.status !== 'rejected');
     const kept = [];
     for (const it of parsed.items) {

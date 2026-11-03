@@ -41,6 +41,22 @@ For a persistent project instead of a throwaway demo, use the existing
 with your explicitly chosen provider configuration. No provider is provisioned by
 this change. Application runtime: Node 20.3+. Browser checks: Node 22+ and Chromium.
 
+### Browser evidence
+
+These captures use the deterministic local demo and synthetic text. The desktop
+view keeps the conversation beside the accepted record: the next response names
+the same edited title and completed stage.
+
+![Edited task and completed stage used by the next response](screenshots/accepted-state-loop/shared-response-desktop.png)
+
+A stale save preserves the draft and requires an explicit review of the current
+record. At phone width, interrupted extraction remains visible in Knowledge with
+retry and dismiss controls; restarting alone sends nothing.
+
+| Stale edit review | Recovery at 375 px |
+| --- | --- |
+| ![Stale draft preserved with current record shown](screenshots/accepted-state-loop/stale-edit-preserves-draft.png) | ![Interrupted extraction and explicit recovery controls](screenshots/accepted-state-loop/interrupted-extraction-375.png) |
+
 ## Canonical state and disclosure
 
 `state.json` remains the canonical record store. Acceptance changes status;
@@ -86,14 +102,19 @@ attempt means delivery was not confirmed; it does not prove the provider receive
 | Model stream ends without a completion marker | Partial evidence is retained with a failure; no proposal extraction runs. |
 | Transcript/audit contains malformed or non-record JSONL rows | Readers skip unusable rows without deleting or rewriting the original evidence. |
 | A provenance lookup matches duplicate message IDs | The lookup refuses to guess and preserves the transcript for repair. |
+| Recovery finds duplicate source/reply IDs | Retry is disabled and refused before any provider call. An ambiguous reply cannot be dismissed under a shared ID. |
+| Original turn changes while extraction is queued/running | The stale proposal batch is discarded with a visible error. Explicit retry uses the current original turn. |
 
 State, audit and note writes use a short-lived redo journal and atomic, synced file
 replacement. The journal's destinations are fixed. This is a local single-writer
 contract, not a distributed database or a lock that arbitrary text editors obey.
 Keep a backup before repairing a conflicting journal or an unknown lock owner.
 Do not remove a lock merely because a request is slow. Preserve the entire `.pilot`
-directory, stop the owning server, and inspect the saved before/after state and audit
-before deciding how to resolve a conflict.
+directory, stop the owning server, and inspect the current state, the journal's
+proposed after-state and expected before-hash, and the audit before deciding how
+to resolve a conflict. The journal is a redo record; it does not store a full
+before-state for automatic rollback. A crash before journal promotion may leave
+an unused `.tmp` file; recovery does not mistake it for an accepted transaction.
 
 This increment makes canonical item writes transactional. Existing pane/module,
 frame and sharing actions retain their own file/audit paths; they are not covered
