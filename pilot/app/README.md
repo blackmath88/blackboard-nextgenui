@@ -21,7 +21,8 @@ Turn on **Share project board**, expand the chat context disclosure, and ask
 `What is the latest accepted task?` The deterministic local response names the edited title
 and `done` stage. Turn sharing off and ask again: no board snapshot is added. Existing text
 in the conversation remains in its history. The context section shows allowed providers,
-the next request template and the last attempted request for each role in this server session.
+the next request template and each provider's last attempted request per role in this
+server session, including failed fallback attempts.
 
 Stop with Ctrl+C. `npm run demo -- loop --resume` restarts the same saved demo; retain the
 same `PILOT_DEMO_DIR` and `DEMO_PORT_SHIFT` if you set them. Running without `--resume`
@@ -56,7 +57,8 @@ is shared. The overview shows proposals and authorship; focus a proposed card
 and press **c** to confirm or **r** to reject. Board sharing starts **off** for
 all model roles; the context block shows recipients and lets you opt in. Files
 are read-only text previews (200 KB limit, 200 names, depth 3); dot entries,
-node_modules and symlinks are excluded. Narrow screens stack the side panels.
+node_modules and symlinks are excluded. Narrow screens switch between Conversation
+and Knowledge; chat and file navigation reveal their content without losing board state.
 
 
 **Quick look (no key, no model, 30 s):** `cd pilot/app && npm run demo -- v0.10` (experiment: after a turn the model may

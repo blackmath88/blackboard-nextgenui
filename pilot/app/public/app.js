@@ -137,9 +137,10 @@ function updatePlaceholder() {
   input.placeholder = parts.length ? `Empty input: ${parts.join(' · ')}` : PLACEHOLDER;
 }
 
-// Notice above the log: a broken hand-edited file (until it is fixed) and, for a few seconds, a stale-write message.
+// Shared notice stays visible from Conversation and Knowledge, including narrow screens.
 function renderNotice() {
-  const lines = Object.keys(state.fileErrors || {}).map((f) => f === 'context.json' ? 'file context.json is invalid; board sharing is off' : `file ${f} is not valid JSON, showing last good version`);
+  const lines = Object.entries(state.fileErrors || {}).map(([f, error]) => f === 'context.json' ? 'file context.json is invalid; board sharing is off'
+    : /not valid JSON/.test(error) ? `file ${f} is not valid JSON, showing last good version` : `file ${f}: ${error}`);
   if (flash) lines.push(flash);
   notice.textContent = lines.join('\n');
   notice.title = Object.values(state.fileErrors || {}).join('\n');
@@ -424,7 +425,9 @@ function markSelected() {
 async function writeFailed(res) {
   const body = await res.json().catch(() => ({}));
   if (body.stale) { showFlash(body.error || `${body.file} changed meanwhile; reloaded, try again`); return; }
-  addLine('out', body.error || `HTTP ${res.status}`).p.classList.add('err');
+  const message = body.error || `HTTP ${res.status}`;
+  addLine('out', message).p.classList.add('err');
+  if (!Object.keys(state.fileErrors || {}).length) showFlash(message);
 }
 
 const decisionRequests = new Map(), decisionsInFlight = new Set();
@@ -492,13 +495,31 @@ function scrollToMsg(id) {
   return true;
 }
 
-// pilot-ui: a message in another chat: open that chat first, then scroll to it
+// Follow provenance across chats and beyond the bounded live conversation tail.
+let messageLookup = 0;
+const sourceMessage = document.getElementById('source-message');
+document.getElementById('source-message-close').addEventListener('click', () => sourceMessage.close());
+sourceMessage.addEventListener('close', () => input.focus({ preventScroll: true }));
 async function showMsg(id) {
+  const lookup = ++messageLookup;
   if (scrollToMsg(id)) return;
   const res = await fetch('/chats', { method: 'POST', headers: hdrs(), body: JSON.stringify({ action: 'find', msg: id }) });
   const out = await res.json().catch(() => ({}));
-  if (res.ok && out.chat && out.chat !== activeChat) { await switchChat(out.chat, false); if (scrollToMsg(id)) return; }
-  addLine('out', `${id} is not among the lines shown`).p.classList.add('err');
+  if (lookup !== messageLookup) return;
+  if (!res.ok) { showFlash(out.error || `Could not find ${id}`); return; }
+  if (out.chat && out.chat !== activeChat) {
+    if (streaming) { showFlash('Wait for this reply to finish before opening another conversation.'); return; }
+    await switchChat(out.chat, false);
+  }
+  if (lookup !== messageLookup || document.querySelector('dialog[open]')) return;
+  if (scrollToMsg(id)) return;
+  if (!out.message) { showFlash(`${id} is not among the lines shown`); return; }
+  const message = out.message;
+  document.getElementById('source-message-meta').textContent = `${message.id} · ${WHO[message.role] || message.role}${message.model ? ' · ' + message.model : ''}${message.ts ? ' · ' + clock(message.ts) : ''}`;
+  document.getElementById('source-message-text').textContent = message.text;
+  const limit = document.getElementById('source-message-limit'); limit.hidden = !message.truncated;
+  limit.textContent = message.truncated ? `Showing the first 20,000 of ${message.characters} characters. The complete message remains in transcript.jsonl.` : '';
+  sourceMessage.showModal(); document.getElementById('source-message-close').focus();
 }
 
 // pilot-v0.7: "why?" on a pane bar or a card runs the same /why command as typing it. A real button, so Tab reaches it
@@ -680,14 +701,21 @@ function switchChat(id, focus = true) {
   try { localStorage.setItem('pilot-chat', id); } catch { /* not kept */ }
   fetch('/chats', { method: 'POST', headers: hdrs(), body: JSON.stringify({ action: 'open', id }) }).catch(() => {});
   renderChats(); updatePlaceholder();
-  if (focus) input.focus();
-  return changed ? loadState(['transcript.jsonl']).then(() => renderPanes(true)) : Promise.resolve();
+  if (focus) {
+    messageLookup++;
+    if (typeof showSurface === 'function') showSurface('conversation');
+    document.getElementById('file-view').hidden = true;
+    input.focus();
+  }
+  // A response for the previous chat may have been dropped; refresh shared state too.
+  return changed ? loadState().then(() => renderPanes(true)) : Promise.resolve();
 }
 async function newChat() {
   if (streaming) return;
+  messageLookup++;
   const res = await fetch('/chats', { method: 'POST', headers: hdrs(), body: JSON.stringify({ action: 'new' }) });
   const out = await res.json().catch(() => ({}));
-  if (!res.ok) { addLine('out', out.error || `HTTP ${res.status}`).p.classList.add('err'); return; }
+  if (!res.ok) { showFlash(out.error || `HTTP ${res.status}`); return; }
   await loadState(['chats.json']);
   switchChat(out.chat);
 }
@@ -709,7 +737,7 @@ function renameChat(li, c) {
   inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
   inp.addEventListener('blur', () => finish(true));
 }
-newChatBtn.addEventListener('click', () => newChat().catch((err) => addLine('system', `error: ${err.message}`)));
+newChatBtn.addEventListener('click', () => newChat().catch((err) => showFlash(`Could not open a new chat: ${err.message}`)));
 
 // /state parts per file (GET /state?only=<files>). Every request gets a generation; a part is applied only if its
 // response is newer than the one that last set it, so an older full load can never overwrite a newer partial one.
@@ -717,7 +745,10 @@ const PARTS = { 'transcript.jsonl': ['transcript', 'total'], 'modules.json': ['p
   'roles.json': ['models'], 'state.json': ['items', 'stateRev', 'stateToken', 'stateError'] };
 PARTS['modules.json'].push('paneInfo', 'pendingKind', 'removals', 'faded');   // pilot-v0.6, pilot-v0.8
 PARTS['transcript.jsonl'].push('turn');                                       // pilot-v0.8
-PARTS['context.json'] = ['context'];
+// Context/recovery are on every response and have one shared generation guard.
+// Do not assign context again through a file-specific guard.
+PARTS['context.json'] = [];
+PARTS['metrics.jsonl'] = []; // request outcomes / failed extraction can change without a state write
 PARTS['flags.json'] = ['flags'];                                              // pilot-v0.9
 PARTS['frames.json'] = ['frames'];                                            // pilot-v0.10
 PARTS['transcript.jsonl'].push('chats', 'chatsRev', 'defaultChat');           // pilot-ui

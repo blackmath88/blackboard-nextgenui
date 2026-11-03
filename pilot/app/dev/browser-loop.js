@@ -45,15 +45,25 @@ module.exports = async function loop(page, { url, dir, root, check, stop, startS
   }
   await page.eval(`document.getElementById('share-board').click()`);
   check('loop sharing preview includes current stage and excludes rejected/pending records', await wait(`(() => { const messages = JSON.parse(document.querySelector('#context-roles [data-role="chat"] pre').textContent); const board = messages.find(m => m.role === 'system'); return board && board.content.includes('"stage":"done"') && !board.content.includes('discard the archive') && !board.content.includes('keep evidence local'); })()`));
+  check('loop sharing checkbox keeps detailed request payloads out of the conversation', await wait(`!document.getElementById('share-board').disabled`) && await page.eval(`![...document.querySelectorAll('#log .ln.out')].some(e => e.textContent.includes('PILOT-EXTRACT') || e.textContent.includes('preview [{'))`));
   await page.eval(`document.querySelector('#context-roles [data-role="chat"]').open = true`);
   await page.submit('What is the latest accepted task and its stage?', 100);
   check('loop next fake response uses edited title and done stage', await wait(`!document.getElementById('input').disabled && [...document.querySelectorAll('.ln.assistant .text')].at(-1).textContent.includes('task-1 [done]: Publish reviewed release notes')`));
   check('loop live context refresh preserves disclosure expansion', await page.eval(`document.querySelector('#context-roles [data-role="chat"]').open`));
+  await wait(`document.getElementById('extraction-recovery').hidden && document.getElementById('notice').hidden`);
   await shot('03-shared-response-desktop');
   await page.eval(`document.getElementById('share-board').click()`);
   await wait(`document.getElementById('models').textContent.includes('conversation-only')`);
   await page.submit('What context is shared now?', 100);
   check('loop sharing off sends no accepted board on the next turn', await wait(`!document.getElementById('input').disabled && [...document.querySelectorAll('.ln.assistant .text')].at(-1).textContent.includes('no accepted board')`));
+  // Hold an older context-only response, then deliver a newer full snapshot.
+  await page.eval(`(() => { es.close(); const realFetch = window.fetch; window.__contextHeld = false; window.fetch = async (...args) => { const res = await realFetch(...args); if (String(args[0]).startsWith('/state?only=context.json')) { window.fetch = realFetch; window.__contextHeld = true; await new Promise(resolve => { window.__releaseContext = resolve; }); } return res; }; window.__oldContext = loadState(['context.json']); })()`);
+  await wait(`window.__contextHeld`);
+  await page.eval(`fetch('/command', { method: 'POST', headers: hdrs(), body: JSON.stringify({ text: '/context share board on' }) }).then(() => loadState(['state.json']))`);
+  await page.eval(`window.__releaseContext(); window.__oldContext`);
+  check('loop delayed context response cannot overwrite newer sharing disclosure', await page.eval(`document.getElementById('share-board').checked && state.context.share.board && !!state.context.nextMessage`));
+  await page.eval(`connectEvents()`);
+  await page.eval(`runCommand('/context share board off')`);
   await page.eval(`document.querySelector('${card} .item-edit').click(); document.getElementById('item-edit-text').value = 'My unsaved draft'`);
   const saved = JSON.parse(fs.readFileSync(path.join(dir, 'state.json')));
   saved.items.find(i => i.id === 'task-1').text = 'Changed in another editor';
@@ -76,6 +86,13 @@ module.exports = async function loop(page, { url, dir, root, check, stop, startS
     check(`loop ${width}px knowledge has no horizontal overflow`, await page.eval(`document.documentElement.scrollWidth <= innerWidth`));
     await shot(`05-knowledge-${width}`);
   }
+  // A real stale move must report failure on the visible Knowledge surface.
+  await page.eval(`(() => { const realFetch = window.fetch; window.__moveHeld = false; window.fetch = async (...args) => { if (args[0] === '/move') { window.fetch = realFetch; window.__moveHeld = true; await new Promise(resolve => { window.__releaseMove = resolve; }); } return realFetch(...args); }; document.querySelector('${card} select').value = 'doing'; document.querySelector('${card} select').dispatchEvent(new Event('change')); })()`);
+  await wait(`window.__moveHeld`);
+  const movedElsewhere = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'))); movedElsewhere.rev++;
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify(movedElsewhere));
+  await page.eval(`window.__releaseMove()`);
+  check('loop narrow stale move shows a visible notice and retains saved stage', await wait(`document.getElementById('notice').textContent.includes('changed since') && document.getElementById('notice').getBoundingClientRect().width > 0 && document.querySelector('${card} select').value === 'done'`));
   await page.eval(`document.querySelector('${card} .item-origin').click()`);
   check('loop narrow origin link restores visible conversation and source message', await wait(`document.body.dataset.surface === 'conversation' && !!document.querySelector('.ln.flash') && document.getElementById('pane-chat').getBoundingClientRect().width > 0`));
   await shot('06-conversation-375');
@@ -83,8 +100,8 @@ module.exports = async function loop(page, { url, dir, root, check, stop, startS
   check('loop narrow final rejection keeps focus on a visible knowledge control', await wait(`!document.querySelector('#overview .item.proposed') && document.activeElement.getBoundingClientRect().width > 0 && document.body.dataset.surface === 'knowledge'`));
   await page.eval(`document.querySelector('${card}').focus()`); await page.key('Escape');
   check('loop Escape returns to visible conversation input at narrow width', await page.eval(`document.activeElement.id === 'input' && document.body.dataset.surface === 'conversation' && document.activeElement.getBoundingClientRect().width > 0`));
-  await page.eval(`document.getElementById('new-chat').click()`);
-  check('loop new chat starts a clean conversation while retaining shared knowledge', await wait(`document.querySelectorAll('.ln.user').length === 0 && document.querySelector('${card}')`));
+  await page.eval(`document.getElementById('show-knowledge').click(); document.getElementById('new-chat').click()`);
+  check('loop new chat from Knowledge reveals its input while retaining shared knowledge', await wait(`document.querySelectorAll('.ln.user').length === 0 && document.querySelector('${card}') && document.body.dataset.surface === 'conversation' && document.getElementById('input').getBoundingClientRect().width > 0`));
   await page.eval(`document.getElementById('show-knowledge').click(); document.querySelector('${card} .item-origin').click()`);
   check('loop provenance jump finds the originating chat across conversations', await wait(`document.querySelectorAll('.ln.user').length > 0 && !!document.querySelector('.ln.flash')`));
 
@@ -92,7 +109,9 @@ module.exports = async function loop(page, { url, dir, root, check, stop, startS
   await page.submit('Task: restore the interrupted browser review.', 100);
   check('loop page reports a queued extraction after the reply', await wait(`!document.getElementById('input').disabled && !document.getElementById('extraction-recovery').hidden`));
   await stop('server'); await setExtractor(); await startServer(); await page.goto(url + '#knowledge-kanban');
-  check('loop interrupted extraction is visible after restart', await wait(`document.getElementById('extraction-recovery').textContent.includes('interrupted: Task: restore')`));
+  await page.eval(`document.getElementById('show-knowledge').click()`);
+  check('loop interrupted extraction is visible after restart', await wait(`document.getElementById('extraction-recovery').textContent.includes('interrupted: Task: restore') && document.querySelector('#extraction-recovery button').getBoundingClientRect().width > 0`));
+  await wait(`document.getElementById('notice').hidden`);
   await shot('07-interrupted-extraction-375');
   await page.eval(`document.querySelector('#extraction-recovery button').click()`);
   check('loop Retry extraction recovers one proposed task through the page', await wait(`document.getElementById('extraction-recovery').hidden && [...document.querySelectorAll('#overview .item.proposed .text')].filter(el => el.textContent === 'restore the interrupted browser review').length === 1`));
@@ -104,4 +123,23 @@ module.exports = async function loop(page, { url, dir, root, check, stop, startS
   check('loop delayed save cannot close or overwrite a newly opened draft', await page.eval(`document.getElementById('item-editor').open && document.getElementById('item-edit-text').value === 'New unsaved draft'`));
   await page.eval(`document.getElementById('item-edit-cancel').click()`);
   check('loop closed editor still commits its acknowledged canonical edit', (await state()).items.find(i => i.id === 'task-1').text === 'Saved while closing the editor');
+
+  // A retained record can outlive the 500-line conversation tail.
+  const sourceItem = (await state()).items.find(i => i.id === 'task-1');
+  const history = Array.from({ length: 510 }, (_, n) => ({ id: `history-fixture-${n}`, ts: new Date().toISOString(), role: 'assistant', text: `Later conversation ${n}`, chat: sourceItem.fromChat, model: 'fixture' }));
+  fs.appendFileSync(path.join(dir, 'transcript.jsonl'), history.map(line => JSON.stringify(line) + '\n').join(''));
+  await wait(`!document.getElementById('msg-${sourceItem.fromMessage}') && document.getElementById('log').textContent.includes('Later conversation 509')`);
+  await page.eval(`document.getElementById('show-knowledge').click(); document.querySelector('${card} .item-origin').click()`);
+  check('loop older source message remains reachable beyond the visible conversation tail', await wait(`document.getElementById('source-message')?.open && document.getElementById('source-message-text').textContent.includes('Task: review the release notes.') && document.getElementById('source-message').getBoundingClientRect().width > 0`));
+  if (await page.eval(`!!document.getElementById('source-message')?.open`)) {
+    await shot('08-older-source-375');
+    await page.key('Escape');
+    check('loop closing original evidence preserves latest conversation and visible input', await wait(`!document.getElementById('source-message').open && document.getElementById('log').textContent.includes('Later conversation 509') && document.activeElement.id === 'input' && document.getElementById('input').getBoundingClientRect().width > 0`));
+    await page.eval(`(() => { const realFetch = window.fetch; window.__sourceHeld = false; window.fetch = async (...args) => { const res = await realFetch(...args); if (args[0] === '/chats' && JSON.parse(args[1].body).action === 'find') { window.fetch = realFetch; window.__sourceHeld = true; await new Promise(resolve => { window.__releaseSource = resolve; }); } return res; }; document.getElementById('show-knowledge').click(); document.querySelector('${card} .item-origin').click(); })()`);
+    await wait(`window.__sourceHeld`);
+    await page.eval(`document.getElementById('new-chat').click()`);
+    await wait(`document.querySelectorAll('.ln.user, .ln.assistant').length === 0`);
+    await page.eval(`window.__releaseSource()`); await pause(100);
+    check('loop delayed source lookup cannot reopen evidence after navigating to a new chat', await page.eval(`!document.getElementById('source-message').open && document.querySelectorAll('.ln.user, .ln.assistant').length === 0`));
+  }
 };

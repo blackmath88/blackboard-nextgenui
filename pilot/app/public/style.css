@@ -113,7 +113,7 @@ body { margin: 0; background: var(--base); color: var(--text); font: 400 15px/1.
 .key:hover { background: var(--lavender); color: var(--onfill); }
 .key kbd { font: inherit; font-weight: 600; }
 /* pilot-v0.5: notice above the log (broken hand-edited file, stale write); text colour only, so contrast stays AA */
-.notice { margin: 0; padding: 4px 10px; color: var(--text); border-left: 2px solid var(--rose); white-space: pre-line; font-size: 13px; }
+.notice { flex: none; max-height: 6rem; overflow: auto; overflow-wrap: anywhere; margin: 0; padding: 4px 10px; color: var(--text); border-left: 2px solid var(--rose); white-space: pre-line; font-size: 13px; }
 .notice[hidden] { display: none; }
 .ln.flash { outline: 1px solid var(--focus); outline-offset: 2px; }
 /* Items in the map and kanban panes (pilot-v0.4). Status shows as the border (pastels are borders/fills only,
@@ -324,6 +324,9 @@ dialog::backdrop { background: var(--base); opacity: .65; }
 .surface-nav { display: none; }
 .knowledge-hint { color: var(--muted); }
 .item-origin { display: block; margin: 8px 0; }
+#source-message { width: min(38rem, calc(100vw - 32px)); max-height: 90dvh; overflow: auto; }
+#source-message p { font-size: 13px; overflow-wrap: anywhere; }
+#source-message-text { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; max-height: 45dvh; overflow: auto; border-left: 2px solid var(--line); padding-left: 10px; }
 @media (min-width: 1101px) {
  .app { grid-template-columns: 150px minmax(0, 1fr) minmax(340px, 36%); }
 }

@@ -1,12 +1,42 @@
 # CHECKS
 
+## Current accepted-state loop
+
+The current reproducible commands and recovery contract are in
+[accepted-state-loop.md](../../docs/accepted-state-loop.md). Historical results below
+describe their original iterations; they are not evidence for the current branch.
+
+At integration checkpoint `0b37096`, `PILOT_REQUIRE_BROWSER=1 npm run verify`
+completed on macOS (Node v25.9.0, Chrome) and Linux (Node v26.8.1, Chromium 154):
+**19 groups passed, 0 partial, 0 failed, 0 skipped** on each platform. The groups
+include the new foundation, full-loop API/browser and resumable-demo checks, plus
+I1, M1, P0–P2, knowledge views, v0.3–v0.10 and W0 fixture safety.
+
+An earlier macOS source snapshot inside the generated Codex scratch directory
+failed W0 because readonly sentinel-directory modes changed. A no-server probe
+reproduced those changes in that location; the same probe in the Orca worktree
+remained unchanged. The complete gate above ran directly in the isolated Orca
+worktree and passed W0 without weakening its checks. The external actor changing
+permissions was not identified.
+
+All provider calls used deterministic local fakes. No paid model, merge or
+deployment is included. Review status: self-review only. Later changes require
+their own verification evidence; the checkpoint result is not a blanket approval.
+
+Subsequent self-review replaced P0's diagnostic-only script and the harness's
+provider-output shortcut with real assertions: response shape, terminated SSE,
+static-file protection, persisted authorship/history, restart, fallback audit and
+settled ports/lock/temp files. P0 now requires an explicit completion marker like
+the other groups; merely printing an assistant response is a failure.
+
 # P0 Skeleton
 
 All checks ran against `dev/fake-model.js` (two instances, ports 5701 and 5702) with
 `PILOT_CONFIG=pilot.config.dev.json`. No real model endpoint was contacted. Node v25.9.0 locally;
 requires Node >= 20.3 (`AbortSignal.any`; also `fetch`, `AbortSignal.timeout`).
 
-Reproduce everything with `bash pilot/app/dev/verify-p0.sh` (wipes `.pilot/` first).
+Reproduce with `bash pilot/app/dev/verify-p0.sh` (now uses its own marked fixture;
+the original version wiped `.pilot/`).
 
 ## Done when
 

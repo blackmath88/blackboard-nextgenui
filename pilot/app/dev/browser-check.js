@@ -182,6 +182,7 @@ async function p1(page) {
   await page.submit('frontier is down now');
   s = await page.status();
   check('status bar shows frontier→morrow after a fallback', /chat: frontier→morrow/.test(s), s);
+  check('context disclosure shows both failed and successful fallback recipients', await page.eval(`(() => { const labels = [...document.querySelectorAll('#context-roles [data-role="chat"] .request-recipient')].map(e => e.textContent); return labels.some(s => s.includes('frontier') && s.includes('failed')) && labels.some(s => s.includes('morrow') && s.includes('completed')); })()`));
 
   await stop('server'); await startServer(); await page.goto(URL);
   s = await page.status();
@@ -1127,6 +1128,13 @@ async function v10(page) {
     && doneAfter.split(',')[0] === 'task-2' && doneAfter.split(',').sort().join() === doneBefore.split(',').sort().join() && (await col('todo')).split(',').sort().join() === todoBefore.split(',').sort().join(), `done ${doneBefore} -> ${doneAfter}; todo ${todoBefore} -> ${await col('todo')}`);
   check('the map tab stayed a tab (a frame never brings a pane back)', await page.eval(`!!document.querySelector('#pane-map.faded')`));
   check('no frame write touched state.json items or modules.json panes', events().filter((e) => e.event === 'item_write').length === writes0 && JSON.parse(fs.readFileSync(file('modules.json'), 'utf8')).panes.length === 3);
+
+  // A no-suggestion frame writes only metrics. Its disclosure must still settle
+  // after the extraction/state events have already reached the page.
+  await stop('f2'); start('f2', ['dev/fake-model.js', String(ENV.fakes[1]), 'morrow', '--frame=none', '--delay=400']);
+  await waitHttp(`http://127.0.0.1:${ENV.fakes[1]}`);
+  await page.submit('Inspect the frame receipt after no suggestion.', 100);
+  check('frame request disclosure updates after a metrics-only completion', (await waitFor(`(() => { const d = document.querySelector('#context-roles [data-role="frame"]'); return d && [...d.querySelectorAll('.request-recipient')].some(e => e.textContent.includes('completed')) && [...d.querySelectorAll('.last-request')].some(e => e.textContent.includes('Inspect the frame receipt after no suggestion.')); })()`, 6000)) !== null);
 }
 
 async function m1(page) {
@@ -1187,6 +1195,8 @@ async function i1(page) {
   await page.eval(`document.getElementById('file-close').click()`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false }); await sleep(100); await shot('11-narrow');
   check('I1 narrow workspace has no horizontal overflow', await page.eval(`document.documentElement.scrollWidth <= innerWidth`));
+  await page.eval(`document.getElementById('show-knowledge').click(); document.querySelector('#file-list button').click()`);
+  check('I1 file navigation from narrow Knowledge reveals its read-only content', await waitFor(`!document.getElementById('file-view').hidden && document.getElementById('file-view').getBoundingClientRect().width > 0 && document.getElementById('file-text').textContent.includes('Read-only project note')`));
 }
 
 const SCENARIOS = { loop: page => require('./browser-loop')(page, { url: URL, dir: ENV.dir, root: ROOT, check, stop, startServer,

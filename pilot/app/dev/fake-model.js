@@ -185,7 +185,7 @@ function respond(req, res, body, isExtract, isFrame) {
     if (reflect.startsWith('prefix-')) {
       const prefix = key.slice(0, -1);
       if (reflect === 'prefix-nonstream') { res.end(JSON.stringify({ choices: [{ message: { content: prefix } }] })); return; }
-      res.write('data: ' + JSON.stringify({ choices: [{ delta: { content: 'safe text ' + prefix } }] }) + '\n\n');
+      res.write('data: ' + JSON.stringify({ choices: [{ delta: { content: (reflect === 'prefix-only-stall' ? '' : 'safe text ') + prefix } }] }) + '\n\n');
       if (reflect === 'prefix-done') res.end('data: [DONE]\n\n');
       else if (reflect === 'prefix-eof') res.end();
       return;

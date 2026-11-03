@@ -132,7 +132,7 @@ async function run(args, cwd, env) {
     for (const name of ['p0', 'p1', 'p2']) {
       const r = await run(['bash', `dev/verify-${name}.sh`], layout);
       fs.writeFileSync(path.join(root, `${name}.log`), r.stdout + r.stderr);
-      const ok = r.status === 0 && (name === 'p0' ? r.stdout.includes('"role":"assistant"') : /ALL .*PASSED/.test(r.stdout)) && !/^FAIL/m.test(r.stdout);
+      const ok = r.status === 0 && /^ALL .*PASSED/m.test(r.stdout) && !/^FAIL/m.test(r.stdout);
       if (!ok) {
         console.error(`== ${name} failure log\n${r.stdout}${r.stderr}`);
         const port = /REFUSE port (\d+): already in use/.exec(r.stderr);

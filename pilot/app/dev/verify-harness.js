@@ -15,7 +15,7 @@ assert.equal(verdict('check', 0, 'FAIL assertion\nALL CHECKS PASSED').status, 'F
 assert.equal(verdict('check', 0, 'SKIP browser\nALL CHECKS PASSED').status, 'PARTIAL');
 assert.equal(verdict('check', 77, 'SKIP browser').status, 'SKIP');
 assert.equal(verdict('check', 0, 'unfinished output').status, 'FAIL');
-assert.equal(verdict('verify-p0.sh', 0, '{"role":"assistant"}').status, 'PASS');
+assert.equal(verdict('verify-p0.sh', 0, '{"role":"assistant"}').status, 'FAIL');
 assert.equal(verdict('verify-p0.sh', 1, '{"role":"assistant"}').status, 'FAIL');
 console.log('PASS Linux/macOS browser discovery; invalid overrides fail; skips, incomplete runs and nonzero exits stay distinct');
 console.log('ALL HARNESS CHECKS PASSED');

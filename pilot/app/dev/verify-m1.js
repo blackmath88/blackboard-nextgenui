@@ -101,9 +101,14 @@ async function main() {
     await request('/chat', { text: 'reflected streaming credential' });
     await stop(fake); fake = start(['dev/fake-model.js', '5841', 'mistral', '--reflect-key=error'], { PILOT_FAKE_CAPTURE: capture }); await ready('http://127.0.0.1:5841');
     await request('/chat', { text: 'reflected error credential' });
+    const attempts = (await request('/state')).json.context.roles.chat.providerRequests;
+    assert.deepEqual(attempts.map(r => r.candidate), ['fallback-must-not-run-after-token', 'mistral-test']);
+    assert(attempts.every(r => r.status === 'failed'));
+    for (const [n, attempt] of attempts.entries()) assert.deepEqual(JSON.parse(attempt.payload), chatCalls().at(-1 - n).body);
+    pass('each fallback provider retains its own exact last attempted request and failed delivery status');
     await stop(fake); fake = start(['dev/fake-model.js', '5841', 'mistral'], { PILOT_FAKE_CAPTURE: capture }); await ready('http://127.0.0.1:5841');
     pass('provider error-body and split streaming credential reflections cannot escape');
-    await stop(fake); fake = start(['dev/fake-model.js', '5841', 'mistral', '--reflect-key=prefix-stall'], { PILOT_FAKE_CAPTURE: capture }); await ready('http://127.0.0.1:5841');
+    await stop(fake); fake = start(['dev/fake-model.js', '5841', 'mistral', '--reflect-key=prefix-only-stall'], { PILOT_FAKE_CAPTURE: capture }); await ready('http://127.0.0.1:5841');
     const prefixCalls = calls().length;
     await request('/chat', { text: 'withheld prefix stalls' });
     assert.equal(calls().length, prefixCalls + 1, 'a withheld credential prefix must not enable fallback');

@@ -185,6 +185,20 @@ const pass = text => console.log('PASS ' + text);
     assert(!terminal.text.includes('chat failed')); assert((await state()).items.some(i => i.text === 'accept an explicit terminal response'));
     pass('early stream EOF and invalid JSON response retain failure/partial evidence without extraction; explicit finish events complete normally');
 
+    const origin = await req('/chats', { action: 'find', msg: task.fromMessage });
+    assert.equal(origin.status, 200); assert.equal(origin.json.chat, 'c-1'); assert(origin.json.message.text.includes('prepare the launch notes'));
+    const longEvidence = { id: 'long-history-evidence', role: 'user', chat: second, text: 'Original evidence ' + '界'.repeat(25000), ts: new Date().toISOString() };
+    fs.appendFileSync(path.join(data, 'transcript.jsonl'), JSON.stringify(longEvidence) + '\n');
+    const longResult = await req('/chats', { action: 'find', msg: longEvidence.id });
+    assert.equal(longResult.status, 200); assert.equal(longResult.json.chat, second);
+    assert.equal(longResult.json.message.text.length, 20000); assert.equal(longResult.json.message.characters, longEvidence.text.length); assert.equal(longResult.json.message.truncated, true);
+    fs.appendFileSync(path.join(data, 'transcript.jsonl'), JSON.stringify({ ...longEvidence, text: 'Ambiguous hand-edited duplicate' }) + '\n');
+    const transcriptBeforeLookup = fs.readFileSync(path.join(data, 'transcript.jsonl'), 'utf8');
+    assert.equal((await req('/chats', { action: 'find', msg: longEvidence.id })).status, 409);
+    assert.equal((await req('/chats', { action: 'find', msg: 'absent-message' })).status, 404);
+    assert.equal(fs.readFileSync(path.join(data, 'transcript.jsonl'), 'utf8'), transcriptBeforeLookup);
+    pass('provenance lookup returns one bounded original message across chats, labels truncation, and refuses ambiguous ids without rewriting history');
+
     const invalidRows = 'null\n[]\n"hand-edited fragment"\n{"role":"assistant","text":null}\n{unfinished\n';
     for (const name of ['transcript.jsonl', 'metrics.jsonl']) fs.appendFileSync(path.join(data, name), invalidRows);
     s = await state(); assert(Array.isArray(s.transcript)); assert(s.transcript.every(l => typeof l.text === 'string'));

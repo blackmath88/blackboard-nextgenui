@@ -1,6 +1,8 @@
 .pilot/
 .pilot-demo/
 .pilot-demo-*/
+.pilot-demo*.runner-lock
+.pilot-demo*.runner-lock.recovery/
 .pilot-verify-*/
 node_modules/
 .pilot-mistral/

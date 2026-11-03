@@ -12,6 +12,7 @@
   <button type="button" id="show-conversation" aria-pressed="true">Conversation</button>
   <button type="button" id="show-knowledge" aria-pressed="false">Knowledge <span id="review-count"></span></button>
  </nav>
+ <p class="notice" id="notice" role="status" hidden></p>
  <div class="app">
  <nav class="chats" id="chats" aria-label="Chats">
    <div class="bar"><span>chats</span><button type="button" class="key" id="new-chat" title="Start a new chat. All chats share one board (map, kanban).">+ new</button></div>
@@ -24,7 +25,6 @@
  <div class="bench n1" id="bench">
   <section class="pane term" id="pane-chat" aria-label="Terminal">
     <div class="bar"><span id="brand">pilot</span><button type="button" id="settings-open">Settings</button><small id="meta">connecting…</small></div>
-    <p class="notice" id="notice" role="status" hidden></p>
     <div class="body" id="log" role="log" aria-live="polite"></div>
     <form class="prompt" id="form" autocomplete="off">
       <label for="input">&gt;</label>
@@ -67,6 +67,14 @@
   <button id="item-edit-reload" type="button" hidden>Load latest record</button>
   <div class="editor-actions"><button id="item-edit-save" type="submit">Save changes</button><button id="item-edit-cancel" type="button">Cancel</button></div>
  </form>
+</dialog>
+<dialog id="source-message" aria-labelledby="source-message-title">
+ <h2 id="source-message-title">Earlier conversation message</h2>
+ <p id="source-message-meta"></p>
+ <p>This original evidence is outside the latest conversation view. Your next message continues the latest conversation.</p>
+ <pre id="source-message-text"></pre>
+ <p id="source-message-limit" hidden></p>
+ <button id="source-message-close" type="button">Back to conversation</button>
 </dialog>
 <script src="pixel.js"></script>
 <script src="settle.js"></script>

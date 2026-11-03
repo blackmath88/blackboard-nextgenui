@@ -24,6 +24,10 @@ on ports 5871 and 5872. It needs no API key and makes no paid model call.
 4. Choose Kanban and move its Stage to `done`. Arrow keys also move a focused task.
 5. Switch among Summary, Index and Kanban. The title, stage and provenance belong
    to the same record. “Show in conversation” finds its originating chat/message.
+   If that message is older than the latest 500 displayed lines, a read-only
+   evidence dialog opens without replacing the current conversation. It displays
+   up to 20,000 characters and explicitly labels longer messages; the full original
+   remains in `transcript.jsonl`.
 6. Enable Share project board and inspect the chat disclosure. Ask
    `What is the latest accepted task?` The fake response names the edited title
    and completed stage. Pending and rejected records are absent from the board payload.
@@ -58,8 +62,9 @@ is available. Broken sharing configuration defaults to off.
 
 Each role disclosure names configured candidates, locality, models and blocked
 local-to-cloud fallbacks. It shows a next-request template with placeholders, and
-the latest attempted request body for that role and chat. Attempt bodies live only
-in server memory: at most 30 role/chat entries, each displayed up to 100,000 characters
+the latest attempted request body for each provider in that role and chat, including
+failed fallback attempts. Attempt bodies live only in server memory: at most 30
+role/chat/provider entries, each displayed up to 100,000 characters
 with explicit truncation. They contain no authorization headers and disappear on
 restart. Metrics retain request hashes and board revision/token metadata. A failed
 attempt means delivery was not confirmed; it does not prove the provider received nothing.
@@ -78,6 +83,9 @@ attempt means delivery was not confirmed; it does not prove the provider receive
 | Several retries arrive together | One extraction is queued. A committed extraction event prevents another batch or provider call. |
 | Retry after changing sharing/provider settings | The original turn is extracted using current settings. Prior conversation text remains part of that turn. |
 | Old/partial reply has no extraction intent | It is not automatically replayed. |
+| Model stream ends without a completion marker | Partial evidence is retained with a failure; no proposal extraction runs. |
+| Transcript/audit contains malformed or non-record JSONL rows | Readers skip unusable rows without deleting or rewriting the original evidence. |
+| A provenance lookup matches duplicate message IDs | The lookup refuses to guess and preserves the transcript for repair. |
 
 State, audit and note writes use a short-lived redo journal and atomic, synced file
 replacement. The journal's destinations are fixed. This is a local single-writer
@@ -106,7 +114,8 @@ CHROME=/usr/bin/chromium SHOT_DIR=/absolute/output/path node dev/browser-check.j
 ```
 
 The harness distinguishes PASS, FAIL, PARTIAL and SKIP using both exit status and
-assertions. Missing optional browser support is not a pass; required-browser mode
+assertions. P0 now asserts its original contract and requires an explicit completion
+marker; provider-looking diagnostic output cannot count as a pass. Missing optional browser support is not a pass; required-browser mode
 fails instead. Fixtures are marked, isolated, and refuse occupied ports. Linux and
 macOS use the same browser discovery. Fixture preservation checks compare the actual
 before/after files and work in source archives without Git metadata.
@@ -116,7 +125,18 @@ tokens, provenance, concurrent chats, server restarts, interrupted extraction,
 concurrent retries and acceptance killed between state and audit writes. Browser
 checks exercise review/edit/move keys, all three views, stale drafts, restart,
 cross-chat origin links, narrow layouts, extraction retry, and a delayed editor
-response. Browser exceptions and off-origin page requests fail the scenario.
+response. A delayed context-only response cannot replace a newer sharing preview.
+Write notices stay visible in both surfaces; new chats and file previews reveal
+their content at narrow widths. Browser exceptions and off-origin page requests
+fail the scenario. Older evidence remains reachable beyond the visible tail,
+and delayed evidence lookups cannot reverse a newer chat navigation. Screenshots
+are checked visually as well as captured.
+
+The missing capabilities addressed here were accepted-state continuity, explicit
+recovery, trustworthy disclosure and connected navigation. Existing HTTP commands
+and SSE snapshots support those capabilities, so no protocol adapter was needed.
+AG-UI remains deferred until a specific remaining transport requirement justifies
+a removable adapter.
 
 Review is self-review unless a separate reviewer is explicitly recorded. No
 independent approval, real-model validation, merge or deployment is implied.

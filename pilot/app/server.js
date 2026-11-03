@@ -158,8 +158,6 @@ function chatTail(lines, chat) {
   if (m.pending) lines.forEach((l, i) => { if (l.role === 'controller' && l.module === m.pending && (l.question === 'remove') === remove) q = i; });
   return lines.filter((l, i) => chatOf(l) === chat || i === q);
 }
-// Which chat a message is in (for "show m-…" links to another chat); null when there is no such message.
-function chatOfMessage(id) { const l = readTranscript().find((x) => x.id === id); return l ? chatOf(l) : null; }
 const chatExists = (id) => typeof id === 'string' && chatsSummary(readTranscript()).some((c) => c.id === id);
 
 // POST /chats {action: "new", title?} | {action: "open", id} | {action: "rename", id, title}
@@ -168,8 +166,16 @@ function chatAction(body) {
   return serial(() => {
     const r = readChats();
     if (action === 'find') {
-      const c = typeof body.msg === 'string' ? chatOfMessage(body.msg) : null;
-      return c ? { code: 200, body: { ok: true, chat: c } } : { code: 404, body: { error: `no message "${body.msg}"` } };
+      const found = typeof body.msg === 'string' ? readTranscript().filter(l => l.id === body.msg) : [];
+      if (!found.length) return { code: 404, body: { error: `no message "${body.msg}"` } };
+      if (found.length > 1) return { code: 409, body: { error: 'message id is ambiguous; preserve and repair the transcript before following its provenance' } };
+      const line = found[0], chat = chatOf(line);
+      // One bounded, read-only evidence message; never expand the model history
+      // or replace the current 500-line conversation tail to follow an old card.
+      const message = { id: line.id, role: line.role, chat, ts: typeof line.ts === 'string' ? line.ts : '',
+        model: typeof line.model === 'string' ? line.model : null, text: line.text.slice(0, 20000),
+        characters: line.text.length, truncated: line.text.length > 20000 };
+      return { code: 200, body: { ok: true, chat, message } };
     }
     if (action === 'open') {
       if (!chatExists(body.id)) return { code: 404, body: { error: `no chat "${body.id}"` } };
@@ -285,7 +291,7 @@ function contextSummary(chat = activeChat()) {
       if (c.local === true) localBefore = true;
       return { name: c.name, model: c.model, location: c.local === true ? 'local' : 'cloud', blocked };
     });
-    return { lastRequest: requestDisclosures.latest(role, chat), candidate: candidate?.name || null, model: candidate?.model || null, location: candidate ? candidate.local === true ? 'local' : 'cloud' : null,
+    return { lastRequest: requestDisclosures.latest(role, chat), providerRequests: requestDisclosures.attempts(role, chat), candidate: candidate?.name || null, model: candidate?.model || null, location: candidate ? candidate.local === true ? 'local' : 'cloud' : null,
       policy: pinnedName(role) ? 'pinned' : rc.policy, candidates, allowCloudFallback: rc.allowCloudFallback === true };
   };
   const extract = roleConfig('extract');

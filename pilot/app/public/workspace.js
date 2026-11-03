@@ -125,9 +125,10 @@ function renderWorkspace() {
       const heading = document.createElement('p'); heading.textContent = 'Preview of the next request (placeholders show the next turn):';
       payload.textContent = JSON.stringify(role.messagesTemplate || role.extraSystemMessage || null, null, 2);
       detail.append(title, explanation, heading, payload);
-      if (role.lastRequest) {
-        const sent = role.lastRequest, label = document.createElement('p'), actual = document.createElement('pre');
-        label.textContent = `Last attempted request in this server session: ${sent.candidate} / ${sent.model} (${sent.location}, ${sent.endpoint}) · ${sent.status} · ${sent.at}${sent.truncated ? ' · display shortened to 100,000 characters' : ''}`;
+      for (const sent of role.providerRequests || (role.lastRequest ? [role.lastRequest] : [])) {
+        const label = document.createElement('p'), actual = document.createElement('pre');
+        label.textContent = `Last attempted request to ${sent.candidate} in this server session: ${sent.model} (${sent.location}, ${sent.endpoint}) · ${sent.status} · ${sent.at}${sent.truncated ? ' · display shortened to 100,000 characters' : ''}`;
+        label.className = 'request-recipient';
         actual.className = 'last-request'; actual.textContent = sent.payload; detail.append(label, actual);
       }
       block.append(detail);
@@ -159,13 +160,28 @@ async function openFile(name) {
   try {
     const res = await fetch('/files/read?path=' + encodeURIComponent(name)), out = await res.json(); if (!res.ok) throw new Error(out.error);
     document.getElementById('file-title').textContent = out.name; document.getElementById('file-text').textContent = out.text;
+    showSurface('conversation');
     document.getElementById('file-view').hidden = false; document.getElementById('file-close').focus();
   } catch (e) { showFlash(e.message); }
 }
 document.getElementById('file-close').addEventListener('click', () => { document.getElementById('file-view').hidden = true; input.focus(); });
 document.getElementById('overview-settings').addEventListener('click', openSettings);
 document.getElementById('settings').addEventListener('close', () => refreshWorkspaceKeys().catch(() => {}));
-document.getElementById('share-board').addEventListener('change', async e => { await runCommand('/context share board ' + (e.target.checked ? 'on' : 'off')); });
+document.getElementById('share-board').addEventListener('change', async e => {
+  const toggle = e.target, enabled = toggle.checked;
+  toggle.disabled = true;
+  try {
+    const res = await fetch('/command', { method: 'POST', headers: hdrs(), body: JSON.stringify({ text: '/context share board ' + (enabled ? 'on' : 'off') }) });
+    const out = await res.json();
+    if (!res.ok || !out.ok) throw new Error(out.error || out.lines?.join('\n') || `HTTP ${res.status}`);
+    // The server's concise saved-state note belongs in chat. Detailed payloads
+    // remain in the context disclosure (or the explicitly typed /context command).
+    await loadState();
+  } catch (error) {
+    toggle.checked = !!state.context?.share?.board;
+    showFlash(`Sharing change not confirmed: ${error.message}. Reconnect to check the saved setting.`);
+  } finally { toggle.disabled = false; }
+});
 
 document.getElementById('show-conversation').addEventListener('click', () => showSurface('conversation', true));
 document.getElementById('show-knowledge').addEventListener('click', () => showSurface('knowledge', true));

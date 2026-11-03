@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Accepted-state loop (on the v0.12 / knowledge-view foundation)
+
+- Summary, Index and Kanban share accepted records, including completed tasks.
+  Edit titles/source URLs without replacing identity, original evidence or acceptance.
+- With board sharing enabled, the next chat receives current accepted content and
+  stage; pending/rejected records stay outside that snapshot. Sharing off preserves
+  conversation-only requests. Role disclosures show request context and recipients.
+- Canonical item writes use a recoverable transaction for state, provenance, audit
+  and conversation notes. Raw-file tokens detect same-revision manual edits;
+  acceptance retries replay a durable operation outcome.
+- Interrupted/failed extraction is visible, explicitly retryable or dismissible,
+  and deduplicated. Restart sends nothing automatically. Incomplete model replies
+  cannot create proposals. A workspace lock prevents concurrent server writers.
+- Narrow Conversation/Knowledge navigation, keyboard edit/move, source-message
+  links across chats and preserved stale drafts keep knowledge connected to chat.
+- `npm run demo -- loop` and `--resume` exercise the loop with local fakes.
+  Linux/macOS browser discovery and aggregate verdicts distinguish skips from passes.
+
+See [design, limits and verification](../../docs/accepted-state-loop.md). This
+increment has deterministic verification and self-review, not independent approval.
+
 ## v0.12 integration
 
 - Integrated multi-chat from 22f9773 and acf9829 with M1 privacy/key/localhost rules.

@@ -9,11 +9,19 @@ let receipt = receipts.begin('chat', 'c-1', candidate, body);
 assert.equal(receipt.endpoint, 'http://127.0.0.1:5999'); assert.deepEqual(JSON.parse(receipt.payload), body);
 assert.equal(receipts.latest('chat', 'c-2'), null); assert.equal(receipts.latest('extract', 'c-1'), null);
 assert(!JSON.stringify(receipt).includes('password')); assert(!JSON.stringify(receipt).includes('not-a-real-key'));
+receipt.status = 'failed';
+const fallback = receipts.begin('chat', 'c-1', { ...candidate, name: 'fallback', model: 'other-fake' }, { ...body, model: 'other-fake' });
+fallback.status = 'completed';
+assert.deepEqual(receipts.attempts('chat', 'c-1').map(r => [r.candidate, r.status]), [['fallback', 'completed'], ['fixture', 'failed']]);
+assert.deepEqual(JSON.parse(receipts.attempts('chat', 'c-1')[1].payload), body);
+assert.equal(receipts.latest('chat', 'c-1'), fallback);
+receipts.begin('chat', 'c-1', candidate, body);
+assert.equal(receipts.attempts('chat', 'c-1').length, 2, 'keep only the latest attempt for each provider');
 receipt = receipts.begin('extract', 'c-1', candidate, { ...body, messages: [{ role: 'user', content: 'x'.repeat(150000) }] });
 assert.equal(receipt.payload.length, 100000); assert.equal(receipt.truncated, true); assert(receipt.chars > 100000);
 for (let n = 2; n < 35; n++) receipts.begin('chat', 'c-' + n, candidate, body);
 assert.equal(receipts.latest('chat', 'c-1'), null);
-console.log('PASS request disclosure separates chats/roles, strips endpoint credentials, bounds content and evicts old receipts');
+console.log('PASS request disclosure separates chats/roles/providers, preserves fallback attempts, strips endpoint credentials, bounds content and evicts old receipts');
 
 const lines = [{ id: 'u', role: 'user', chat: 'c-1', text: 'Task: recover evidence.' },
   { id: 'r', role: 'assistant', chat: 'c-1', text: 'Done', replyTo: 'u', extractionPlanned: true },
