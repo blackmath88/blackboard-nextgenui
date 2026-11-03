@@ -1197,6 +1197,8 @@ async function i1(page) {
   check('I1 narrow workspace has no horizontal overflow', await page.eval(`document.documentElement.scrollWidth <= innerWidth`));
   await page.eval(`document.getElementById('show-knowledge').click(); document.querySelector('#file-list button').click()`);
   check('I1 file navigation from narrow Knowledge reveals its read-only content', await waitFor(`!document.getElementById('file-view').hidden && document.getElementById('file-view').getBoundingClientRect().width > 0 && document.getElementById('file-text').textContent.includes('Read-only project note')`));
+  await page.eval(`document.getElementById('show-knowledge').click(); document.querySelector('#overview .item.confirmed .why').click()`);
+  check('I1 explanation from Knowledge closes the file overlay and reveals its conversation output', await waitFor(`document.body.dataset.surface === 'conversation' && document.getElementById('file-view').hidden && !!document.querySelector('.why-line') && document.getElementById('pane-chat').getBoundingClientRect().width > 0`));
 }
 
 const SCENARIOS = { loop: page => require('./browser-loop')(page, { url: URL, dir: ENV.dir, root: ROOT, check, stop, startServer,
@@ -1309,6 +1311,7 @@ const ENVS = {
 };
 
 (async () => {
+  if (process.argv.length > 3) { console.error('ERROR browser-check.js accepts one scenario per invocation; use all for p1 + p2, or run separate commands.'); process.exit(2); }
   const which = process.argv[2] || 'all';
   const list = which === 'all' ? ['p1', 'p2'] : [which];
   if (!list.every((n) => SCENARIOS[n])) { console.error(`unknown scenario "${which}". Use: ${Object.keys(SCENARIOS).join(', ')}, all`); process.exit(2); }

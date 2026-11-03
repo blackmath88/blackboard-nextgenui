@@ -122,7 +122,8 @@ function load(dir) {
 }
 
 const ev = (ctx, pred) => ctx.events.filter((r) => r.obj && pred(r.obj));
-const msgRow = (ctx, id) => ctx.lines.find((r) => r.obj && r.obj.id === id) || null;
+const msgRows = (ctx, id) => ctx.lines.filter((r) => r.obj && r.obj.id === id);
+const msgRow = (ctx, id) => { const rows = msgRows(ctx, id); return rows.length === 1 ? rows[0] : null; };
 const author = (line) => (line.role === 'assistant' ? `model${line.model ? ` · ${line.model}` : ''}` : WHO[line.role] || line.role);
 const norm = (t) => String(t).replace(/\s+/g, ' ').trim().toLowerCase();
 const shown = (ctx, mod) => ctx.panes.some((p) => p.module === mod) && ['yes', 'always'].includes((ctx.answers[mod] || {}).answer);
@@ -304,6 +305,8 @@ function frameOrigin(ctx, f, mod, section) {
     const m = f.fromMessage ? msgRow(ctx, f.fromMessage) : null;
     out.push({ text: `suggested by model ${f.model || prop.obj.candidate} (frame role, model id ${prop.obj.model}) at ${prop.obj.ts}, after message ${f.fromMessage || '?'} (turn ${prop.obj.turn ?? '?'}); allographic: written about your workbench by a model, not by you`,
       cite: [jl('metrics.jsonl', prop, `frame_propose ${f.id}`), ...(m ? [jl('transcript.jsonl', m, f.fromMessage)] : [])], ...(m ? { msg: f.fromMessage } : {}) });
+    const matches = f.fromMessage ? msgRows(ctx, f.fromMessage) : [];
+    if (matches.length > 1) out.push({ text: `source message ${f.fromMessage} is ambiguous (${matches.length} transcript records); no unique origin can be selected`, cite: matches.map(row => jl('transcript.jsonl', row, f.fromMessage)) });
   } else {
     out.push({ text: `the file says it was suggested by ${f.model || '(no model)'}${f.at ? ` at ${f.at}` : ''}, but no frame_propose event matches ${f.id || 'it'}: written by file edit, when is not recorded`,
       cite: [frameCite(ctx, section, mod), `metrics.jsonl (no frame_propose ${f.id || mod})`] });
@@ -374,8 +377,11 @@ function explainItem(ctx, it) {
 
   // the message it came from, and the quote
   if (it.fromMessage) {
-    const m = msgRow(ctx, it.fromMessage);
-    if (m) {
+    const matches = msgRows(ctx, it.fromMessage), m = matches.length === 1 ? matches[0] : null;
+    if (matches.length > 1) {
+      out.push({ text: `source message ${it.fromMessage} is ambiguous (${matches.length} transcript records); no unique origin can be selected`, cite: [itemCite(ctx, it.id), ...matches.map(row => jl('transcript.jsonl', row, it.fromMessage))] });
+      if (it.quote !== undefined) out.push({ text: `original recorded quote "${it.quote}"; source identity needs repair`, cite: [itemCite(ctx, it.id)] });
+    } else if (m) {
       out.push({ text: `from message ${it.fromMessage} by ${author(m.obj)} at ${m.obj.ts}`, cite: [jl('transcript.jsonl', m, it.fromMessage)], msg: it.fromMessage });
       if (it.quote !== undefined) {
         const found = norm(m.obj.text).includes(norm(it.quote));
@@ -492,6 +498,8 @@ function explain(dir, target, label) {
   if (!t) return { ok: true, statements: explainFrame(ctx) };
   const mod = Object.keys(TITLES).find((m) => m === t.toLowerCase() || TITLES[m] === t.toLowerCase());
   if (mod) return { ok: true, statements: explainPane(ctx, mod) };
+  const matches = (Array.isArray(ctx.state.doc?.items) ? ctx.state.doc.items : []).filter(item => item?.id === t);
+  if (matches.length > 1) return { ok: false, statements: [{ head: true, text: `cannot explain ${t}: duplicate record IDs make its identity ambiguous; preserve state.json before repair` }] };
   const it = ctx.items.find((i) => i.id === t);
   if (it) return { ok: true, statements: explainItem(ctx, it) };
   const ids = ctx.items.map((i) => i.id);

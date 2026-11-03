@@ -6,4 +6,5 @@ node dev/verify-context.js
 node dev/verify-store.js
 node dev/verify-lock.js
 node dev/verify-disclosure.js
+node dev/verify-provenance.js
 echo 'ALL FOUNDATION CHECKS PASSED'

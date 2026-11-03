@@ -15,6 +15,9 @@
   cannot create proposals. A workspace lock prevents concurrent server writers.
 - Narrow Conversation/Knowledge navigation, keyboard edit/move, source-message
   links across chats and preserved stale drafts keep knowledge connected to chat.
+- Recovery refuses ambiguous transcript identities and stale extraction evidence;
+  explanations identify ambiguous origins instead of choosing one. Reopened drafts
+  stay saveable, and offline sources can retain an absent URL during title edits.
 - `npm run demo -- loop` and `--resume` exercise the loop with local fakes.
   Linux/macOS browser discovery and aggregate verdicts distinguish skips from passes.
 

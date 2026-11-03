@@ -528,7 +528,11 @@ function whyButton(target, label) {
   const b = document.createElement('button');
   b.type = 'button'; b.className = 'why'; b.textContent = 'why?';
   b.dataset.why = target; b.setAttribute('aria-label', label); b.title = `/why ${target}`;
-  b.addEventListener('click', (e) => { e.stopPropagation(); runCommand(`/why ${target}`).catch((err) => addLine('system', `error: ${err.message}`)); });
+  b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (typeof showSurface === 'function') showSurface('conversation', true);
+    runCommand(`/why ${target}`).catch((err) => showFlash(`Could not explain ${target}: ${err.message}`));
+  });
   return b;
 }
 
@@ -867,6 +871,7 @@ async function sendAnswer(module, word) {
 
 // Command output is shown locally only; it never goes to a model and is not stored (except /model switches).
 async function runCommand(text) {
+  const commandChat = activeChat, navigation = messageLookup;
   const [cmd, arg] = text.trim().split(/\s+/);
   if (looksLikeKey(text) || (cmd === '/key' && arg && arg !== 'status')) { addLine('system', KEY_HINT); return; }
   if (cmd === '/key' && !arg) { await openSettings(); return; }
@@ -880,6 +885,7 @@ async function runCommand(text) {
   const res = await fetch('/command', { method: 'POST', headers: hdrs(), body: JSON.stringify({ text }) });
   const out = await res.json();
   await loadState();                             // picks up a /model system line and the new status bar
+  if (commandChat !== activeChat || navigation !== messageLookup) return;
   addLine('out', text).p.classList.add('cmd');
   if (cmd === '/why' && Array.isArray(out.why)) return renderWhy(out.why, out.ok);
   for (const l of out.lines || []) {

@@ -6,8 +6,8 @@ The current reproducible commands and recovery contract are in
 [accepted-state-loop.md](../../docs/accepted-state-loop.md). Historical results below
 describe their original iterations; they are not evidence for the current branch.
 
-At integration checkpoint `0b37096`, `PILOT_REQUIRE_BROWSER=1 npm run verify`
-completed on macOS (Node v25.9.0, Chrome) and Linux (Node v26.8.1, Chromium 154):
+At integration checkpoint `9a636df`, `PILOT_REQUIRE_BROWSER=1 npm run verify`
+completed on macOS (Node v25.9.0, Chrome 156) and Linux (Node v26.8.1, Chromium 154):
 **19 groups passed, 0 partial, 0 failed, 0 skipped** on each platform. The groups
 include the new foundation, full-loop API/browser and resumable-demo checks, plus
 I1, M1, P0–P2, knowledge views, v0.3–v0.10 and W0 fixture safety.

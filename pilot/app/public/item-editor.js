@@ -10,6 +10,7 @@ const editSave = document.getElementById('item-edit-save');
 
 function setEditSnapshot(item) {
   editingItem.rev = state.stateRev; editingItem.token = state.stateToken;
+  editingItem.url = item.url || '';
   editText.value = item.text; editURL.value = item.url || '';
   document.getElementById('item-edit-url-label').hidden = item.kind !== 'source';
   document.getElementById('item-edit-origin').textContent = item.quote ? `Original evidence: “${item.quote}”` : 'No original quote was recorded.';
@@ -33,7 +34,8 @@ document.getElementById('item-edit-form').addEventListener('submit', async event
   const current = editingItem;
   const stillOpen = () => editingItem === current && editDialog.open;
   try {
-    const res = await fetch('/edit', { method: 'POST', headers: hdrs(), body: JSON.stringify({ itemId: current.id, text: editText.value, ...(document.getElementById('item-edit-url-label').hidden ? {} : { url: editURL.value }), rev: current.rev, token: current.token }) });
+    const changedURL = !document.getElementById('item-edit-url-label').hidden && editURL.value !== current.url;
+    const res = await fetch('/edit', { method: 'POST', headers: hdrs(), body: JSON.stringify({ itemId: current.id, text: editText.value, ...(changedURL ? { url: editURL.value } : {}), rev: current.rev, token: current.token }) });
     const result = await res.json();
     if (!res.ok) {
       if (!stillOpen()) { showFlash(result.error || `Save failed (HTTP ${res.status}).`); return; }
@@ -60,6 +62,7 @@ document.getElementById('item-edit-form').addEventListener('submit', async event
 });
 document.getElementById('item-edit-cancel').addEventListener('click', () => editDialog.close());
 editDialog.addEventListener('close', () => {
+  if (editDialog.open) return; // a queued close event belongs to the previous draft
   const previous = editingItem; editingItem = null;
   const card = previous && document.querySelector(`${previous.surface} .item[data-id="${CSS.escape(previous.id)}"]`);
   (card || input).focus({ preventScroll: true });

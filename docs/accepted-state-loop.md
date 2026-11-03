@@ -61,13 +61,20 @@ retry and dismiss controls; restarting alone sends nothing.
 
 `state.json` remains the canonical record store. Acceptance changes status;
 editing changes title and, for a source, URL; moving changes a task's column.
+Existing offline sources can keep an absent URL when their title is edited.
 Identity, model author, original quote, source message/chat, creation and acceptance
 are retained. Edits and moves add their own user attribution and timestamp.
 `/why <id>` cites the edit/move audit entries as well as the original evidence.
+Its button reveals the explanation in the conversation at narrow widths. Duplicate
+message or record IDs are reported as ambiguous instead of choosing an origin.
 
 The browser sends a revision and SHA-256 token of the raw state file. A same-revision
 manual file edit still invalidates the token. A stale editor keeps its unsaved draft,
 shows the saved record, and requires an explicit “Load latest record” before saving.
+The existing acceptance/move endpoints still accept legacy callers without a
+revision/token; those callers do not gain the browser's stale-write protection.
+New clients should always send both. The edit endpoint requires both, and durable
+acceptance replay requires the same operation ID and original request.
 
 The next chat context uses current accepted records, including tasks in `done`.
 It is bounded to eight records per kind and 16,000 characters total. The most recent
@@ -134,6 +141,10 @@ PILOT_REQUIRE_BROWSER=1 npm run verify
 CHROME=/usr/bin/chromium SHOT_DIR=/absolute/output/path node dev/browser-check.js loop
 ```
 
+The browser runner takes one scenario per invocation; `all` is the legacy P1/P2
+pair. Extra arguments fail explicitly. `npm run verify` runs every scenario via
+its corresponding gate.
+
 The harness distinguishes PASS, FAIL, PARTIAL and SKIP using both exit status and
 assertions. P0 now asserts its original contract and requires an explicit completion
 marker; provider-looking diagnostic output cannot count as a pass. Missing optional browser support is not a pass; required-browser mode
@@ -152,6 +163,8 @@ their content at narrow widths. Browser exceptions and off-origin page requests
 fail the scenario. Older evidence remains reachable beyond the visible tail,
 and delayed evidence lookups cannot reverse a newer chat navigation. Screenshots
 are checked visually as well as captured.
+Focused browser checks also cover close/reopen editor events, title-only edits to
+offline sources and delayed command output after navigating to another chat.
 
 The missing capabilities addressed here were accepted-state continuity, explicit
 recovery, trustworthy disclosure and connected navigation. Existing HTTP commands

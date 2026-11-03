@@ -1,0 +1,30 @@
+'use strict';
+const fs = require('fs'), path = require('path'), assert = require('assert/strict');
+const safety = require('./lib/safe-dir'), why = require('../why');
+const root = safety.tempRoot();
+try {
+  const item = { id: 'task-1', kind: 'task', text: 'Accepted task', quote: 'Original evidence', fromMessage: 'origin', status: 'confirmed' };
+  const original = { id: 'origin', role: 'user', text: 'Original evidence', ts: '2026-11-03T00:00:00Z' };
+  const saveState = items => fs.writeFileSync(path.join(root, 'state.json'), JSON.stringify({ rev: 1, items }));
+  const saveLines = lines => fs.writeFileSync(path.join(root, 'transcript.jsonl'), lines.map(line => JSON.stringify(line) + '\n').join(''));
+  saveState([item]); saveLines([original]);
+  let out = why.explain(root, item.id);
+  assert.equal(out.ok, true); assert(out.statements.some(s => s.msg === original.id && s.text.includes('is in that message')));
+  saveLines([original, { ...original, role: 'assistant', text: 'Conflicting evidence', model: 'fixture' }]);
+  out = why.explain(root, item.id);
+  assert(out.statements.some(s => /ambiguous/i.test(s.text)), 'ambiguous source identity must be explicit');
+  assert(!out.statements.some(s => s.msg === original.id), 'ambiguous evidence cannot have a unique navigation target');
+  assert(!out.statements.some(s => /is in that message/.test(s.text)));
+  assert(out.statements.some(s => s.text.includes(item.quote)), 'the record retains its original quote without a false source claim');
+  fs.writeFileSync(path.join(root, 'frames.json'), JSON.stringify({ rev: 1, pending: { map: { id: 'fr-1', model: 'fixture', fromMessage: original.id, intent: { focus: item.id } } } }));
+  fs.writeFileSync(path.join(root, 'metrics.jsonl'), JSON.stringify({ event: 'frame_propose', id: 'fr-1', module: 'map', candidate: 'fixture', model: 'fake', turn: 1, ts: original.ts }) + '\n');
+  out = why.explain(root, 'map');
+  assert(out.statements.some(s => /ambiguous/i.test(s.text))); assert(!out.statements.some(s => s.msg === original.id));
+  saveState([item, { id: item.id, kind: 'task', text: null }]);
+  out = why.explain(root, item.id);
+  assert.equal(out.ok, false); assert(out.statements.some(s => /ambiguous|duplicate/i.test(s.text)));
+  const raw = fs.readFileSync(path.join(root, 'state.json'), 'utf8');
+  why.explain(root, item.id); assert.equal(fs.readFileSync(path.join(root, 'state.json'), 'utf8'), raw);
+  console.log('PASS explanations retain original evidence while refusing ambiguous message and record identities');
+  console.log('ALL PROVENANCE CHECKS PASSED');
+} finally { safety.remove(root, root); }

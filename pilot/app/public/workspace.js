@@ -2,6 +2,7 @@
 let overviewSig = '', contextSig = '', recoverySig = '', workspaceKeysLoaded = false;
 function showSurface(surface, focus = false) {
   document.body.dataset.surface = surface;
+  if (surface === 'conversation') document.getElementById('file-view').hidden = true;
   document.getElementById('show-conversation').setAttribute('aria-pressed', String(surface === 'conversation'));
   document.getElementById('show-knowledge').setAttribute('aria-pressed', String(surface === 'knowledge'));
   if (focus) (surface === 'conversation' ? input : document.querySelector('[data-knowledge-view][aria-current="page"]')).focus({ preventScroll: true });

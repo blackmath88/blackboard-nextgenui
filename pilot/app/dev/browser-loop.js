@@ -63,7 +63,8 @@ module.exports = async function loop(page, { url, dir, root, check, stop, startS
   await page.eval(`window.__releaseContext(); window.__oldContext`);
   check('loop delayed context response cannot overwrite newer sharing disclosure', await page.eval(`document.getElementById('share-board').checked && state.context.share.board && !!state.context.nextMessage`));
   await page.eval(`connectEvents()`);
-  await page.eval(`runCommand('/context share board off')`);
+  await page.eval(`document.getElementById('share-board').click()`);
+  await wait(`!document.getElementById('share-board').disabled && !state.context.share.board`);
   await page.eval(`document.querySelector('${card} .item-edit').click(); document.getElementById('item-edit-text').value = 'My unsaved draft'`);
   const saved = JSON.parse(fs.readFileSync(path.join(dir, 'state.json')));
   saved.items.find(i => i.id === 'task-1').text = 'Changed in another editor';
@@ -96,6 +97,9 @@ module.exports = async function loop(page, { url, dir, root, check, stop, startS
   await page.eval(`document.querySelector('${card} .item-origin').click()`);
   check('loop narrow origin link restores visible conversation and source message', await wait(`document.body.dataset.surface === 'conversation' && !!document.querySelector('.ln.flash') && document.getElementById('pane-chat').getBoundingClientRect().width > 0`));
   await shot('06-conversation-375');
+  await page.eval(`document.getElementById('show-knowledge').click(); document.querySelector('${card} .why').click()`);
+  check('loop narrow why action reveals its explanation in the conversation', await wait(`document.body.dataset.surface === 'conversation' && document.getElementById('pane-chat').getBoundingClientRect().width > 0 && [...document.querySelectorAll('.why-line')].some(el => el.textContent.includes('edited by you'))`));
+  await shot('09-provenance-explanation-375');
   await page.eval(`document.getElementById('show-knowledge').click(); document.querySelector('#overview .item.proposed').focus()`); await page.key('r');
   check('loop narrow final rejection keeps focus on a visible knowledge control', await wait(`!document.querySelector('#overview .item.proposed') && document.activeElement.getBoundingClientRect().width > 0 && document.body.dataset.surface === 'knowledge'`));
   await page.eval(`document.querySelector('${card}').focus()`); await page.key('Escape');
@@ -120,7 +124,7 @@ module.exports = async function loop(page, { url, dir, root, check, stop, startS
   // Delay delivery of its response, while allowing the real write to complete.
   await page.eval(`(() => { const realFetch = window.fetch; window.__editDelivered = false; window.fetch = async (...args) => { const res = await realFetch(...args); if (args[0] === '/edit') { window.fetch = realFetch; await new Promise(resolve => setTimeout(resolve, 600)); window.__editDelivered = true; } return res; }; document.querySelector('${card} .item-edit').click(); document.getElementById('item-edit-text').value = 'Saved while closing the editor'; document.getElementById('item-edit-save').click(); document.getElementById('item-edit-cancel').click(); document.querySelector('${card} .item-edit').click(); document.getElementById('item-edit-text').value = 'New unsaved draft'; })()`);
   await wait(`window.__editDelivered`);
-  check('loop delayed save cannot close or overwrite a newly opened draft', await page.eval(`document.getElementById('item-editor').open && document.getElementById('item-edit-text').value === 'New unsaved draft'`));
+  check('loop delayed save cannot close or overwrite a newly opened draft', await page.eval(`document.getElementById('item-editor').open && document.getElementById('item-edit-text').value === 'New unsaved draft' && editingItem?.id === 'task-1'`));
   await page.eval(`document.getElementById('item-edit-cancel').click()`);
   check('loop closed editor still commits its acknowledged canonical edit', (await state()).items.find(i => i.id === 'task-1').text === 'Saved while closing the editor');
 
@@ -142,4 +146,20 @@ module.exports = async function loop(page, { url, dir, root, check, stop, startS
     await page.eval(`window.__releaseSource()`); await pause(100);
     check('loop delayed source lookup cannot reopen evidence after navigating to a new chat', await page.eval(`!document.getElementById('source-message').open && document.querySelectorAll('.ln.user, .ln.assistant').length === 0`));
   }
+
+  const offline = JSON.parse(fs.readFileSync(path.join(dir, 'state.json')));
+  offline.rev++;
+  offline.items.push({ id: 'src-99', kind: 'source', text: 'Printed project notes', status: 'confirmed', author: 'user', createdAt: new Date().toISOString() });
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify(offline));
+  await page.eval(`document.getElementById('show-knowledge').click(); document.querySelector('[data-knowledge-view="index"]').click()`);
+  await wait(`document.querySelector('#overview .item[data-id="src-99"] .item-edit')`);
+  await page.eval(`document.querySelector('#overview .item[data-id="src-99"] .item-edit').click(); document.getElementById('item-edit-text').value = 'Reviewed printed project notes'; document.getElementById('item-edit-save').click()`);
+  check('loop existing offline source title can be edited without inventing a URL', await wait(`!document.getElementById('item-editor').open && document.querySelector('#overview .item[data-id="src-99"] .text').textContent === 'Reviewed printed project notes'`));
+  check('loop title-only edit preserves an absent source URL', !(await state()).items.find(i => i.id === 'src-99').url);
+  await page.eval(`(() => { const realFetch = window.fetch; window.__commandHeld = false; window.fetch = async (...args) => { const res = await realFetch(...args); if (args[0] === '/command' && JSON.parse(args[1].body).text === '/why src-99') { window.fetch = realFetch; window.__commandHeld = true; await new Promise(resolve => { window.__releaseCommand = resolve; }); } return res; }; window.__oldCommand = runCommand('/why src-99'); })()`);
+  await wait(`window.__commandHeld`);
+  await page.eval(`document.getElementById('new-chat').click()`);
+  await wait(`document.querySelectorAll('.ln.user, .ln.assistant').length === 0`);
+  await page.eval(`window.__releaseCommand(); window.__oldCommand`);
+  check('loop delayed explanation cannot appear in a newly opened conversation', await page.eval(`!document.querySelector('.why-line') && !document.getElementById('log').textContent.includes('/why src-99')`));
 };
