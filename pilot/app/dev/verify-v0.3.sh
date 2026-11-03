@@ -96,11 +96,10 @@ check "same stallMs 1000: a steady reply (40 ms/token, ~1.5 s in total) is not c
 stop_server; unfake 5761; unfake 5762
 
 echo "== 6. consent keys only on an empty input; pin in the status bar; palette (headless Chrome)"
-if node -e 'process.exit(typeof WebSocket==="function"?0:1)' && [ -x "${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}" ]; then
-  node dev/browser-check.js v03 | tee "$T/browser.log"
-  check "browser checks (v03) all passed" "$(grep -q 'ALL BROWSER CHECKS PASSED' "$T/browser.log" && echo true)"
-else
-  echo "SKIP browser checks: need Node 22+ and Google Chrome"; FAILS=$((FAILS+1))
+node dev/browser-check.js v03 > "$T/browser.log" 2>&1; BROWSER_RC=$?
+cat "$T/browser.log"
+if [ "$BROWSER_RC" -ne 77 ]; then
+  check "browser checks (v03) all passed" "$( [ "$BROWSER_RC" -eq 0 ] && grep -q 'ALL BROWSER CHECKS PASSED' "$T/browser.log" && echo true)"
 fi
 
 echo "== 7. contrast (WCAG AA) for every text/background pair, both themes"

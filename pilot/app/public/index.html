@@ -8,6 +8,11 @@
 </head>
 <body>
 <main class="shell">
+ <nav class="surface-nav" aria-label="Workspace navigation">
+  <button type="button" id="show-conversation" aria-pressed="true">Conversation</button>
+  <button type="button" id="show-knowledge" aria-pressed="false">Knowledge <span id="review-count"></span></button>
+ </nav>
+ <p class="notice" id="notice" role="status" hidden></p>
  <div class="app">
  <nav class="chats" id="chats" aria-label="Chats">
    <div class="bar"><span>chats</span><button type="button" class="key" id="new-chat" title="Start a new chat. All chats share one board (map, kanban).">+ new</button></div>
@@ -20,7 +25,6 @@
  <div class="bench n1" id="bench">
   <section class="pane term" id="pane-chat" aria-label="Terminal">
     <div class="bar"><span id="brand">pilot</span><button type="button" id="settings-open">Settings</button><small id="meta">connecting…</small></div>
-    <p class="notice" id="notice" role="status" hidden></p>
     <div class="body" id="log" role="log" aria-live="polite"></div>
     <form class="prompt" id="form" autocomplete="off">
       <label for="input">&gt;</label>
@@ -31,12 +35,14 @@
  </div>
  <aside id="overview" aria-label="Project overview">
   <h2>Workspace knowledge</h2>
+  <p class="knowledge-hint">One shared record, several views. Accept proposals here; edits stay connected to the conversation.</p>
+  <section id="extraction-recovery" hidden aria-label="Proposal extraction recovery"></section>
   <nav aria-label="Knowledge views" class="knowledge-views">
    <a href="#knowledge-summary" data-knowledge-view="summary">Summary</a>
    <a href="#knowledge-index" data-knowledge-view="index">Index</a>
    <a href="#knowledge-kanban" data-knowledge-view="kanban">Kanban</a>
   </nav><div id="overview-items"></div>
-  <section class="context-block"><h3>Context sent to models</h3><label><input type="checkbox" id="share-board"> Share project board</label><div id="context-roles"></div></section>
+  <section class="context-block"><h3>Context sent to models</h3><label><input type="checkbox" id="share-board"> Share project board</label><p>Off omits the board snapshot. Text already in the conversation stays in its history.</p><div id="context-roles"></div></section>
   <section><h3>API keys</h3><p id="workspace-keys"></p><button id="overview-settings" type="button">Settings</button></section>
  </aside>
  </div>
@@ -48,9 +54,32 @@
  <div id="key-fields"></div><p id="key-notice" role="status"></p>
  <button type="button" id="settings-close">Close</button>
 </dialog>
+<dialog id="item-editor" aria-labelledby="item-editor-title">
+ <form id="item-edit-form">
+  <h2 id="item-editor-title">Edit accepted record</h2>
+  <p>Your changes update the same record in every view. Its original evidence and acceptance stay attached.</p>
+  <label for="item-edit-text">Title</label>
+  <textarea id="item-edit-text" required minlength="3" maxlength="240" rows="4"></textarea>
+  <label id="item-edit-url-label" for="item-edit-url">Source URL<input id="item-edit-url" type="url" maxlength="2000"></label>
+  <p id="item-edit-origin"></p>
+  <p id="item-edit-notice" role="status"></p>
+  <p id="item-edit-latest" hidden></p>
+  <button id="item-edit-reload" type="button" hidden>Load latest record</button>
+  <div class="editor-actions"><button id="item-edit-save" type="submit">Save changes</button><button id="item-edit-cancel" type="button">Cancel</button></div>
+ </form>
+</dialog>
+<dialog id="source-message" aria-labelledby="source-message-title">
+ <h2 id="source-message-title">Earlier conversation message</h2>
+ <p id="source-message-meta"></p>
+ <p>This original evidence is outside the latest conversation view. Your next message continues the latest conversation.</p>
+ <pre id="source-message-text"></pre>
+ <p id="source-message-limit" hidden></p>
+ <button id="source-message-close" type="button">Back to conversation</button>
+</dialog>
 <script src="pixel.js"></script>
 <script src="settle.js"></script>
 <script src="app.js"></script>
 <script src="workspace.js"></script>
+<script src="item-editor.js"></script>
 </body>
 </html>

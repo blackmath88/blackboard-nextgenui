@@ -29,6 +29,12 @@ const why = require('./why.js');
 const fade = require('./fade.js');
 const frame = require('./frame.js');
 const secrets = require('./secrets.js');
+const knowledge = require('./knowledge-context.js');
+const { extractionJobs, extractionTurn } = require('./extraction-recovery.js');
+const { stateStore, hash: stateHash, atomic: durableWrite } = require('./state-store.js');
+const { AsyncLocalStorage } = require('async_hooks');
+const requestContext = new AsyncLocalStorage();
+const requestDisclosures = require('./request-disclosure.js').requestDisclosures();
 
 const APP = __dirname;
 const PUBLIC = path.join(APP, 'public');
@@ -59,17 +65,17 @@ const HISTORY = 40;    // user/assistant lines sent to the model
 
 if (!PROJECT && path.relative(APP, PILOT).startsWith('..')) throw new Error(`pilotDir must stay inside ${APP}`);
 fs.mkdirSync(PILOT, { recursive: true });
+const releaseWorkspace = require('./workspace-lock.js').acquireWorkspace(PILOT);
+process.on('exit', releaseWorkspace);
+for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) process.on(signal, () => process.exit(code));
+const store = stateStore(PILOT);
 if (!fs.existsSync(RULES)) atomicWrite(RULES, fs.readFileSync(path.join(APP, 'rules.example.json')));
 
 // ---- .pilot/ files: atomic writes (temp file in .pilot/, then rename), serialized ----
 let writeChain = Promise.resolve();
 function serial(fn) { const p = writeChain.then(fn); writeChain = p.catch(() => {}); return p; }
 
-function atomicWrite(file, data) {
-  const tmp = path.join(PILOT, `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);
-  fs.writeFileSync(tmp, data);
-  fs.renameSync(tmp, file);
-}
+function atomicWrite(file, data) { durableWrite(file, data); }
 
 function readTranscript() {
   let raw = '';
@@ -77,7 +83,10 @@ function readTranscript() {
   const lines = [];
   for (const l of raw.split('\n')) {
     if (!l.trim()) continue;
-    try { lines.push(JSON.parse(l)); } catch { /* skip a broken hand-edited line */ }
+    try {
+      const line = JSON.parse(l);
+      if (line && !Array.isArray(line) && typeof line.role === 'string' && typeof line.text === 'string') lines.push(line);
+    } catch { /* skip a broken hand-edited line without changing the source file */ }
   }
   return lines;
 }
@@ -93,14 +102,28 @@ function appendJsonl(file, obj) {
 // pilot-ui: several chats share one board. Every transcript line names its chat; user and assistant lines get the chat
 // they were sent in, controller and system lines the chat you were last in (the last message or chat switch).
 let currentChat = DEFAULT_CHAT;
+const activeChat = () => requestContext.getStore()?.chat || currentChat;
+function setCurrentChat(chat) { currentChat = chat; const ctx = requestContext.getStore(); if (ctx) ctx.chat = chat; }
 const chatOf = (l) => (l && typeof l.chat === 'string' && l.chat) || DEFAULT_CHAT;
-function appendTranscript(line) { if (!line.chat) line.chat = currentChat; return appendJsonl(TRANSCRIPT, line); }
+function appendTranscript(line) { if (!line.chat) line.chat = activeChat(); return appendJsonl(TRANSCRIPT, line); }
 
 function appendLine(role, text, model, kind, chat) {
   const line = { id: 'm-' + crypto.randomUUID().slice(0, 8), ts: new Date().toISOString(), role, text, model: model || null };
   if (kind) line.kind = kind;   // optional on system lines: blocked | stall | error (the page colours them)
-  line.chat = chat || currentChat;
+  line.chat = chat || activeChat();
   return serial(() => appendTranscript(line));
+}
+
+// Save the complete turn and its extraction intent together. Restart recovery
+// can find work even if the process stopped before queueExtraction was called.
+function appendCompleteReply(userLine, text, candidate) {
+  return serial(() => {
+    const rc = roleConfig('extract'), every = Math.max(1, Number(rc.everyNTurns) || 1);
+    const turn = readTranscript().filter(l => l.role === 'assistant').length + 1;
+    return appendTranscript({ id: lineId(), ts: new Date().toISOString(), role: 'assistant', text,
+      model: candidate.name, chat: userLine.chat, replyTo: userLine.id,
+      extractionPlanned: rc.candidates.length > 0 && turn % every === 0 });
+  });
 }
 
 // chats.json {rev, chats: [{id, title?, createdAt}]}. The list in /state also has every chat id found in the transcript
@@ -135,8 +158,6 @@ function chatTail(lines, chat) {
   if (m.pending) lines.forEach((l, i) => { if (l.role === 'controller' && l.module === m.pending && (l.question === 'remove') === remove) q = i; });
   return lines.filter((l, i) => chatOf(l) === chat || i === q);
 }
-// Which chat a message is in (for "show m-…" links to another chat); null when there is no such message.
-function chatOfMessage(id) { const l = readTranscript().find((x) => x.id === id); return l ? chatOf(l) : null; }
 const chatExists = (id) => typeof id === 'string' && chatsSummary(readTranscript()).some((c) => c.id === id);
 
 // POST /chats {action: "new", title?} | {action: "open", id} | {action: "rename", id, title}
@@ -145,12 +166,20 @@ function chatAction(body) {
   return serial(() => {
     const r = readChats();
     if (action === 'find') {
-      const c = typeof body.msg === 'string' ? chatOfMessage(body.msg) : null;
-      return c ? { code: 200, body: { ok: true, chat: c } } : { code: 404, body: { error: `no message "${body.msg}"` } };
+      const found = typeof body.msg === 'string' ? readTranscript().filter(l => l.id === body.msg) : [];
+      if (!found.length) return { code: 404, body: { error: `no message "${body.msg}"` } };
+      if (found.length > 1) return { code: 409, body: { error: 'message id is ambiguous; preserve and repair the transcript before following its provenance' } };
+      const line = found[0], chat = chatOf(line);
+      // One bounded, read-only evidence message; never expand the model history
+      // or replace the current 500-line conversation tail to follow an old card.
+      const message = { id: line.id, role: line.role, chat, ts: typeof line.ts === 'string' ? line.ts : '',
+        model: typeof line.model === 'string' ? line.model : null, text: line.text.slice(0, 20000),
+        characters: line.text.length, truncated: line.text.length > 20000 };
+      return { code: 200, body: { ok: true, chat, message } };
     }
     if (action === 'open') {
       if (!chatExists(body.id)) return { code: 404, body: { error: `no chat "${body.id}"` } };
-      currentChat = body.id;
+      setCurrentChat(body.id);
       return { code: 200, body: { ok: true, chat: body.id } };
     }
     if (action !== 'new' && action !== 'rename') return { code: 400, body: { error: 'action must be new, open, rename or find' } };
@@ -163,7 +192,7 @@ function chatAction(body) {
       let n = used.size + 1; while (used.has(`c-${n}`)) n++;
       id = `c-${n}`;
       doc.chats.push({ id, ...(title ? { title } : {}), createdAt: new Date().toISOString() });
-      currentChat = id;
+      setCurrentChat(id);
     } else {
       id = body.id;
       if (!chatExists(id)) return { code: 404, body: { error: `no chat "${id}"` } };
@@ -251,28 +280,39 @@ function readContext() {
     return { rev: d.rev, share: { board: d.share.board }, changedBy: d.changedBy, changedAt: d.changedAt };
   } catch { return { ...off, error: 'context.json is invalid or unreadable; board sharing is off' }; }
 }
-function contextSummary() {
+function contextSummary(chat = activeChat()) {
   const d = readContext();
+  const pins = readRolePins(), selectionError = pins.doc ? null : pins.error;
   const c = roleConfig('chat').candidates.find(c => c.name === activeName('chat'));
   const recipient = role => {
     const rc = roleConfig(role), candidate = rc.candidates.find(c => c.name === activeName(role));
-    return { candidate: candidate?.name || null, location: candidate ? candidate.local === true ? 'local' : 'cloud' : null,
-      policy: pinnedName(role) ? 'pinned' : rc.policy, candidates: attemptOrder(role).map(c => ({ name: c.name, location: c.local === true ? 'local' : 'cloud' })), allowCloudFallback: rc.allowCloudFallback === true };
+    let localBefore = false;
+    const candidates = attemptOrder(role).map(c => {
+      const blocked = localBefore && c.local !== true && rc.allowCloudFallback !== true;
+      if (c.local === true) localBefore = true;
+      return { name: c.name, model: c.model, location: c.local === true ? 'local' : 'cloud', blocked };
+    });
+    return { lastRequest: requestDisclosures.latest(role, chat), providerRequests: requestDisclosures.attempts(role, chat), candidate: candidate?.name || null, model: candidate?.model || null, location: candidate ? candidate.local === true ? 'local' : 'cloud' : null,
+      policy: pinnedName(role) ? 'pinned' : rc.policy, candidates, allowCloudFallback: rc.allowCloudFallback === true };
   };
   const extract = roleConfig('extract');
   const maxItems = Math.max(1, Math.min(EXTRACTION_SCHEMA.properties.items.maxItems, Number(extract.maxItems) || EXTRACTION_SCHEMA.properties.items.maxItems));
+  const acceptedState = readState(), currentFrames = readFrames();
   const ctx = frameContext(), panes = frame.FRAME_PANES.filter(p => ctx.visible.includes(p) && !ctx.faded.includes(p));
-  const frameEnabled = d.share.board && flagsSummary().frameProposals && panes.length && !ctx.error;
+  const frameEnabled = d.share.board && flagsSummary().frameProposals && panes.length && !ctx.error && !currentFrames.error;
   const user = { text: '<next user message>' }, assistant = { text: '<next assistant reply>' };
-  const nextMessage = d.share.board ? boardContext() : null;
-  return { ...d, status: d.share.board ? `board is sent to ${c ? c.name : 'no candidate'}${c && c.local !== true ? ' (cloud)' : ' (local)'}` : 'conversation-only', nextMessage,
+  const snapshot = d.share.board ? knowledge.boardSnapshot(acceptedState) : null;
+  const nextMessage = snapshot?.message || null;
+  const history = readTranscript().filter(l => ['user', 'assistant'].includes(l.role) && chatOf(l) === chat).slice(-(HISTORY - 1)).map(l => ({ role: l.role, content: l.text }));
+  return { ...d, status: selectionError ? 'model selection unavailable; no provider calls' : !d.share.board ? 'conversation-only' : !snapshot ? 'board sharing on; no usable accepted records to send' : !c ? 'board sharing on; no chat provider configured' : `board is sent to ${c.name}${c.local !== true ? ' (cloud)' : ' (local)'}`, nextMessage,
+    board: snapshot ? { rev: snapshot.rev, items: snapshot.items, omitted: snapshot.omitted, truncated: snapshot.truncated } : null,
     roles: {
-      chat: { ...recipient('chat'), sends: 'last 40 user/assistant messages', extraSystemMessage: nextMessage },
-      extract: { ...recipient('extract'), sends: 'current user + assistant turn, extraction instructions/schema; existing item titles only when board sharing is on; dedupe also runs server-side', everyNTurns: Math.max(1, Number(extract.everyNTurns) || 1),
-        messagesTemplate: extract.candidates.length ? extractionMessages(user, assistant, d.share.board ? readState().items : [], maxItems) : null },
+      chat: { ...recipient('chat'), sends: `up to ${HISTORY - 1} prior user/assistant messages from this chat + your next message` + (snapshot ? ` + ${snapshot.items} accepted records at revision ${snapshot.rev} (${snapshot.omitted} omitted)` : ''), skipReason: selectionError || (!c ? 'no chat provider configured' : null), extraSystemMessage: selectionError ? null : nextMessage, messagesTemplate: selectionError ? null : [...history, ...(nextMessage ? [nextMessage] : []), { role: 'user', content: '<next user message>' }] },
+      extract: { ...recipient('extract'), sends: 'current user + assistant turn, extraction instructions/schema; accepted item titles only when board sharing is on; dedupe also runs server-side', skipReason: selectionError || (!extract.candidates.length ? 'no extraction provider configured' : acceptedState.error || null), everyNTurns: Math.max(1, Number(extract.everyNTurns) || 1),
+        messagesTemplate: !selectionError && extract.candidates.length && !acceptedState.error ? extractionMessages(user, assistant, snapshot?.records || [], maxItems) : null },
       frame: { ...recipient('frame'), sends: frameEnabled ? 'current turn + shown pane item titles and applied frames; instructions/schema' : 'nothing',
-        skipReason: !d.share.board ? 'board sharing is off' : !flagsSummary().frameProposals ? 'frame experiment is off' : !panes.length || ctx.error ? 'no usable panes' : null,
-        messagesTemplate: frameEnabled && roleConfig('frame').candidates.length ? frameMessages(user, assistant, panes, ctx.items, readFrames().applied) : null },
+        skipReason: selectionError || (!d.share.board ? 'board sharing is off' : !flagsSummary().frameProposals ? 'frame experiment is off' : !roleConfig('frame').candidates.length ? 'no frame provider configured' : !panes.length || ctx.error ? 'no usable panes' : currentFrames.error || null),
+        messagesTemplate: !selectionError && frameEnabled && roleConfig('frame').candidates.length ? frameMessages(user, assistant, panes, ctx.items, currentFrames.applied) : null },
     } };
 
 }
@@ -535,14 +575,30 @@ function roleConfig(role) {
 // The pinned candidate for a role, or null. An explicit `/model <role> <name>` pins; `/model <role> auto` unpins.
 // A saved name that no longer exists in the config is ignored.
 // A broken roles.json keeps its last good pins (losing a pin silently could send a private chat to the cloud).
+let lastGoodRolePins = null;
+function readRolePins() {
+  try {
+    const doc = readJson(ROLES, {});
+    const record = value => value && typeof value === 'object' && !Array.isArray(value);
+    if (!record(doc) || (doc.rev !== undefined && (!Number.isSafeInteger(doc.rev) || doc.rev < 0)) ||
+        (doc.active !== undefined && (!record(doc.active) || !Object.values(doc.active).every(value => typeof value === 'string')))) {
+      throw new Error('expected a revision and an object of model selections');
+    }
+    lastGoodRolePins = doc;
+    return { doc };
+  } catch (error) {
+    return { doc: lastGoodRolePins, error: error instanceof SyntaxError ? `roles.json is not valid JSON: ${error.message}` : `roles.json: ${error.message}` };
+  }
+}
 function pinnedName(role) {
   const names = roleConfig(role).candidates.map((c) => c.name);
-  const doc = readJsonGood(ROLES, {}).doc;
+  const doc = readRolePins().doc;
   const saved = doc && doc.active ? doc.active[role] : null;
   return names.includes(saved) ? saved : null;
 }
 
 function activeName(role) {
+  if (!readRolePins().doc) return null;
   return pinnedName(role) || (roleConfig(role).candidates[0] || {}).name || null;
 }
 
@@ -570,7 +626,7 @@ function modelsSummary() {
 // One attempt against one candidate. Streams via onDelta; resolves with the full text.
 // timeoutMs covers the wait for the first delta (a long healthy reply is not cut off);
 // stallMs covers each gap between deltas after the first one (an endpoint that hangs mid-reply is cut off).
-async function callCandidate(candidate, messages, onDelta, signal, extraBody) {
+async function callCandidate(candidate, messages, onDelta, signal, extraBody, onRequest) {
   const headers = { 'content-type': 'application/json' };
   let key;
   if (candidate.keyEnv) {
@@ -601,9 +657,11 @@ async function callCandidate(candidate, messages, onDelta, signal, extraBody) {
     stallTimer = setTimeout(() => { const e = new Error(`no new token for ${stallMs} ms`); e.stall = true; e.stallMs = stallMs; stall.abort(e); }, stallMs);
   };
   try {
+    const body = { model: candidate.model, messages, stream: true, ...(extraBody ? extraBody(candidate) : {}) };
+    if (onRequest) onRequest(body);
     const res = await fetch(candidate.baseUrl.replace(/\/$/, '') + '/chat/completions', {
       method: 'POST', headers,
-      body: JSON.stringify({ model: candidate.model, messages, stream: true, ...(extraBody ? extraBody(candidate) : {}) }),
+      body: JSON.stringify(body),
       signal: AbortSignal.any([firstByte.signal, stall.signal, signal]),
     });
     if (!res.ok) { await res.body?.cancel(); throw new Error(`HTTP ${res.status} from model endpoint`); }
@@ -611,29 +669,43 @@ async function callCandidate(candidate, messages, onDelta, signal, extraBody) {
     let full = '';
     if (!(res.headers.get('content-type') || '').includes('text/event-stream')) {   // endpoint ignored stream:true
       const body = await res.json();
+      full = body.choices?.[0]?.message?.content;
+      if (typeof full !== 'string' || !full) throw new Error('model endpoint returned no text message');
       started();
-      full = (body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content) || '';
       full = emit(full, true);
       return full;
     }
     const decoder = new TextDecoder();
     let buf = '';
+    const consume = line => {
+      line = line.trim();
+      if (!line.startsWith('data:')) return false;
+      const data = line.slice(5).trim();
+      if (data === '[DONE]') return true;
+      let event;
+      try { event = JSON.parse(data); } catch { return false; }
+      if (event.error) throw new Error('model stream reported an error');
+      const choice = event.choices?.[0], delta = choice?.delta?.content;
+      if (delta !== undefined && delta !== null && typeof delta !== 'string') throw new Error('model stream returned unsupported non-text content');
+      if (delta) { started(); full += emit(delta); }
+      if (choice?.finish_reason === 'error') throw new Error('model stream ended with an error');
+      return typeof choice?.finish_reason === 'string' && !!choice.finish_reason;
+    };
+    const finish = () => { full += emit('', true); if (!full) throw new Error('model stream completed without text'); return full; };
     for await (const chunk of res.body) {
       buf += decoder.decode(chunk, { stream: true });
       let nl;
       while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl).trim();
+        const line = buf.slice(0, nl);
         buf = buf.slice(nl + 1);
-        if (!line.startsWith('data:')) continue;
-        const data = line.slice(5).trim();
-        if (data === '[DONE]') { full += emit('', true); return full; }
-        let delta = '';
-        try { const j = JSON.parse(data); delta = (j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content) || ''; } catch { continue; }
-        if (delta) { started(); full += emit(delta); }
+        if (consume(line)) return finish();
       }
     }
+    if (consume(buf + decoder.decode())) return finish();
+    // EOF alone is not completion. Keep emitted partial text, but never mark it
+    // as a complete turn or extract knowledge from it. Flush any redacted prefix.
     full += emit('', true);
-    return full;
+    throw new Error('model stream ended before a completion marker; kept the partial reply');
   } catch (err) {
     if (err && typeof err.message === 'string') { err.message = scrub(err.message); err.receivedDelta = receivedDelta; }
     if (stall.signal.aborted && !signal.aborted) throw stall.signal.reason;
@@ -647,28 +719,34 @@ async function callCandidate(candidate, messages, onDelta, signal, extraBody) {
 // candidate (`local: true`) failed, non-local candidates are skipped unless the role sets `allowCloudFallback: true`;
 // a missing `local` counts as non-local. Resolves {text, candidate}; on failure throws with err.partial / err.candidate.
 async function callRole(role, messages, onDelta, signal, extraBody, context) {
+  const pins = readRolePins();
+  if (!pins.doc) throw new Error(`model selection unavailable; no provider was called. ${pins.error}`);
   const order = attemptOrder(role);
   const rc = roleConfig(role);
+  const chat = activeChat();
   if (!order.length) throw new Error(`no candidate configured for role "${role}"`);
   let streamed = '', lastErr, failedLocal = null;
   for (let i = 0; i < order.length; i++) {
     const c = order[i];
     if (lastErr && failedLocal && c.local !== true && rc.allowCloudFallback !== true) {
-      await metric('fallback_blocked', { role, from: lastErr.candidate.name, to: c.name, reason: `${failedLocal.name} is local` });
+      await metric('fallback_blocked', { role, chat, from: lastErr.candidate.name, to: c.name, reason: `${failedLocal.name} is local` });
       await appendLine('system', `fallback to ${c.name} blocked: ${failedLocal.name} is local`, null, 'blocked');
       continue;
     }
-    if (lastErr) await metric('fallback', { role, from: lastErr.candidate.name, to: c.name, reason: lastErr.reason });
+    if (lastErr) await metric('fallback', { role, chat, from: lastErr.candidate.name, to: c.name, reason: lastErr.reason });
     const t0 = Date.now();
+    let receipt = null;
     try {
-      const text = await callCandidate(c, messages, (d) => { streamed += d; onDelta(d); }, signal, extraBody);
-      await metric('model_call', { role, candidate: c.name, model: c.model, ...(role === 'chat' ? { context } : {}), ok: true, latencyMs: Date.now() - t0, chars: text.length });
+      const text = await callCandidate(c, messages, (d) => { streamed += d; onDelta(d); }, signal, extraBody, body => { receipt = requestDisclosures.begin(role, chat, c, body); });
+      if (receipt) receipt.status = 'completed';
+      await metric('model_call', { role, chat, candidate: c.name, model: c.model, ...(receipt ? { requestHash: receipt.hash } : {}), ...(role === 'chat' ? { context } : {}), ok: true, latencyMs: Date.now() - t0, chars: text.length });
       lastUsed[role] = c.name;
       return { text, candidate: c };
     } catch (err) {
+      if (receipt) receipt.status = signal.aborted ? 'cancelled' : 'failed';
       const msg = String((err && err.message) || err);
-      await metric('model_call', { role, candidate: c.name, model: c.model, ...(role === 'chat' ? { context } : {}), ok: false, latencyMs: Date.now() - t0, error: msg });
-      if (err && err.stall) await metric('stall', { role, candidate: c.name, stallMs: err.stallMs, chars: streamed.length, latencyMs: Date.now() - t0 });
+      await metric('model_call', { role, chat, candidate: c.name, model: c.model, ...(receipt ? { requestHash: receipt.hash } : {}), ...(role === 'chat' ? { context } : {}), ok: false, latencyMs: Date.now() - t0, error: msg });
+      if (err && err.stall) await metric('stall', { role, chat, candidate: c.name, stallMs: err.stallMs, chars: streamed.length, latencyMs: Date.now() - t0 });
       lastErr = new Error(`${c.name}: ${msg}`);
       lastErr.candidate = c; lastErr.partial = streamed; lastErr.reason = msg; lastErr.stall = !!(err && err.stall);
       if (c.local === true) failedLocal = c;
@@ -685,23 +763,34 @@ async function callRole(role, messages, onDelta, signal, extraBody, context) {
 // item kept), items the usable view (objects with string id, kind, text).
 // pilot-v0.5: a broken file reads as {doc: null, error} with rev/items of the last good version (for display and
 // counts only; doc stays null so nothing is ever written over the broken file).
-let lastGoodState = { rev: 0, items: [] };
+let lastGoodState = { rev: 0, token: stateHash(''), items: [] };
 function readState() {
-  const broken = (error) => ({ doc: null, rev: lastGoodState.rev, items: lastGoodState.items, error });
+  const broken = (error) => ({ doc: null, rev: lastGoodState.rev, token: lastGoodState.token, items: lastGoodState.items, error });
+  try { store.recover(); } catch (e) { return broken(e.message); }
   let raw;
   try { raw = fs.readFileSync(STATE, 'utf8'); } catch (e) {
-    if (e.code === 'ENOENT') { lastGoodState = { rev: 0, items: [] }; return { doc: { rev: 0, items: [] }, rev: 0, items: [] }; }
+    if (e.code === 'ENOENT') { lastGoodState = { rev: 0, token: stateHash(''), items: [] }; return { doc: { rev: 0, items: [] }, ...lastGoodState }; }
     return broken(`state.json: ${e.message}`);
   }
   let doc;
   try { doc = JSON.parse(raw); } catch (e) { return broken(`state.json is not valid JSON: ${e.message}`); }
   if (!doc || typeof doc !== 'object' || !Array.isArray(doc.items)) return broken('state.json: expected {"rev": n, "items": [...]}');
   const items = doc.items.filter((i) => i && typeof i === 'object' && typeof i.id === 'string' && typeof i.kind === 'string' && typeof i.text === 'string');
-  const rev = Number.isInteger(doc.rev) ? doc.rev : 0;
-  lastGoodState = { rev, items };
-  return { doc, rev, items };
+  if (doc.rev !== undefined && (!Number.isSafeInteger(doc.rev) || doc.rev < 0)) return broken('state.json: revision must be a nonnegative integer');
+  const ids = doc.items.filter(i => i && typeof i.id === 'string').map(i => i.id);
+  if (new Set(ids).size !== ids.length) return broken('state.json: duplicate record ids; fix the file before writing');
+  const rev = Number.isSafeInteger(doc.rev) ? doc.rev : 0;
+  const token = stateHash(raw);
+  lastGoodState = { rev, token, items: JSON.parse(JSON.stringify(items)) };
+  return { doc, rev, token, items };
 }
-function writeState(doc) { doc.rev = (Number.isInteger(doc.rev) ? doc.rev : 0) + 1; atomicWrite(STATE, JSON.stringify(doc, null, 2) + '\n'); return doc.rev; }
+function writeState(st, metrics, transcript = []) {
+  if (!Number.isSafeInteger(st.rev + 1)) throw new Error('state revision limit reached; preserve state.json before repair');
+  st.doc.rev = st.rev + 1;
+  store.commit({ expected: st.token, doc: st.doc, metrics, transcript: transcript.map(line => ({ ...line, chat: line.chat || activeChat() })) });
+  noteItems();
+  return st.doc.rev;
+}
 
 const PREFIX = { decision: 'dec', task: 'task', source: 'src' };
 function nextId(doc, kind) {
@@ -747,7 +836,7 @@ let extracting = 0;                    // queued + running extraction runs (GET 
 let extractChain = Promise.resolve();
 
 function extractionMessages(userLine, replyLine, items, maxItems) {
-  const existing = items.map((i) => `- ${i.id} (${i.kind}, ${i.status || 'confirmed'}): ${i.text}`).join('\n') || '(none)';
+  const existing = knowledge.accepted(items).map((i) => `- ${i.id} (${i.kind}, ${i.status || 'confirmed'}): ${i.text}`).join('\n') || '(none)';
   return [
     { role: 'system', content: 'PILOT-EXTRACT v1\nYou propose decisions, tasks and sources from ONE conversation turn. Reply with JSON only: '
       + `{"items": [...]}, at most ${maxItems} items, each {"kind": "decision" | "task" | "source", "text": short title, "quote": words copied `
@@ -757,18 +846,59 @@ function extractionMessages(userLine, replyLine, items, maxItems) {
   ];
 }
 
+const activeExtractions = new Map();
+const completedExtraction = id => metricsEvents().some(e => e.fromMessage === id && ['extract', 'extract_dismissed'].includes(e.event));
 function queueExtraction(userLine, replyLine) {
-  const rc = roleConfig('extract');
-  if (!rc.candidates.length) return;
-  const every = Math.max(1, Number(rc.everyNTurns) || 1);
-  const turns = readTranscript().filter((l) => l.role === 'assistant').length;
-  if (turns % every !== 0) return;
+  if (!replyLine.extractionPlanned || !roleConfig('extract').candidates.length || activeExtractions.has(replyLine.id)) return false;
+  activeExtractions.set(replyLine.id, 'queued');
   extracting++;
   if (extracting === 1) broadcast('status', { extracting: true });
-  extractChain = extractChain.then(() => runExtraction(userLine, replyLine))
-    .catch((err) => { console.error('extraction failed:', err); return metric('extract_error', { reason: 'internal', error: String(err.message || err) }); })
+  extractChain = extractChain.then(async () => {
+    readState(); // finish any interrupted state/audit transaction before retry
+    if (completedExtraction(replyLine.id)) return;
+    activeExtractions.set(replyLine.id, 'running');
+    await metric('extract_started', { fromMessage: replyLine.id, userId: userLine.id, chat: userLine.chat });
+    await runExtraction(userLine, replyLine);
+  })
+    .catch((err) => { console.error('extraction failed:', err); return metric('extract_error', { fromMessage: replyLine.id, reason: 'internal', error: String(err.message || err) }); })
     .catch(() => {})
-    .finally(() => { extracting--; if (!extracting) broadcast('status', { extracting: false }); });
+    .finally(() => { activeExtractions.delete(replyLine.id); extracting--; if (!extracting) broadcast('status', { extracting: false }); });
+  return true;
+}
+function extractionSummary(chat) {
+  const jobs = extractionJobs(readTranscript(), metricsEvents(), activeExtractions, chat);
+  return { jobs: jobs.slice(0, 20), omitted: Math.max(0, jobs.length - 20) };
+}
+function retryExtraction(body) {
+  return serial(() => {
+    if (!body || typeof body.id !== 'string' || !['retry', 'dismiss'].includes(body.action)) return { code: 400, body: { error: 'expected extraction id and retry/dismiss action' } };
+    const st = readState();
+    if (st.error) return { code: 409, body: { error: st.error } };
+    const lines = readTranscript();
+    if (!lines.some(l => l.id === body.id && l.role === 'assistant' && l.extractionPlanned === true && chatOf(l) === activeChat())) return { code: 404, body: { error: 'no recoverable extraction in this chat' } };
+    const turn = extractionTurn(lines, body.id), { reply, user } = turn;
+    if (!reply) return { code: 409, body: { error: turn.error } };
+    if (completedExtraction(reply.id)) return { code: 200, body: { ok: true, settled: true } };
+    if (activeExtractions.has(reply.id)) return { code: 200, body: { ok: true, running: true } };
+    if (body.action === 'dismiss') {
+      appendJsonl(METRICS, { ts: new Date().toISOString(), event: 'extract_dismissed', fromMessage: reply.id, chat: chatOf(reply), by: 'user' });
+      return { code: 200, body: { ok: true, dismissed: true } };
+    }
+    if (turn.error) return { code: 409, body: { error: turn.error } };
+    if (!roleConfig('extract').candidates.length) return { code: 409, body: { error: 'no extraction provider configured' } };
+    queueExtraction(user, reply);
+    return { code: 202, body: { ok: true, queued: true } };
+  });
+}
+
+function extractionEvidenceError(userLine, replyLine) {
+  const turn = extractionTurn(readTranscript(), replyLine.id);
+  if (turn.error) return turn.error;
+  if (turn.user.id !== userLine.id || turn.user.text !== userLine.text || turn.reply.text !== replyLine.text ||
+      chatOf(turn.user) !== chatOf(userLine) || chatOf(turn.reply) !== chatOf(replyLine)) {
+    return 'The original conversation changed during extraction; review it before retrying.';
+  }
+  return null;
 }
 
 async function runExtraction(userLine, replyLine) {
@@ -777,24 +907,29 @@ async function runExtraction(userLine, replyLine) {
   const maxItems = Math.max(1, Math.min(schemaMax, Number(rc.maxItems) || schemaMax));
   const before = readState();
   if (before.error) { await metric('extract_error', { reason: 'state', error: before.error, fromMessage: replyLine.id }); return; }
+  const evidenceError = extractionEvidenceError(userLine, replyLine);
+  if (evidenceError) { await metric('extract_error', { reason: 'provenance', error: evidenceError, fromMessage: replyLine.id }); return; }
   const schema = JSON.parse(JSON.stringify(EXTRACTION_SCHEMA));
   schema.properties.items.maxItems = maxItems;
   delete schema.$schema;
   const structured = (c) => c.structured === true ? { response_format: { type: 'json_schema', json_schema: { name: 'pilot_extraction', schema } } } : {};
   const t0 = Date.now();
   let out;
-  try { out = await callRole('extract', extractionMessages(userLine, replyLine, readContext().share.board ? before.items : [], maxItems), () => {}, new AbortController().signal, structured); }
+  try { out = await callRole('extract', extractionMessages(userLine, replyLine, readContext().share.board ? knowledge.boardSnapshot(before)?.records || [] : [], maxItems), () => {}, new AbortController().signal, structured); }
   catch (err) { await metric('extract_error', { reason: err.stall ? 'stall' : 'model', error: String(err.message || err), fromMessage: replyLine.id }); return; }
-  const base = { candidate: out.candidate.name, model: out.candidate.model, fromMessage: replyLine.id };
+  const base = { candidate: out.candidate.name, model: out.candidate.model, chat: chatOf(userLine), fromMessage: replyLine.id };
   const parsed = parseExtraction(out.text);
   if (parsed.error) { await metric('extract_error', { ...base, reason: parsed.reason, error: parsed.error, chars: out.text.length }); return; }
 
   const turn = [[userLine.id, norm(userLine.text)], [replyLine.id, norm(replyLine.text)]];
   await serial(() => {
     const st = readState();   // fresh: the user may have decided or hand-edited meanwhile
+    if (completedExtraction(replyLine.id)) return;
     const ts = new Date().toISOString();
     const drop = (reason, it, extra = {}) => appendJsonl(METRICS, { ts, event: 'extract_drop', ...base, reason, kind: it.kind, text: it.text, ...extra });
     if (st.error) { appendJsonl(METRICS, { ts, event: 'extract_error', ...base, reason: 'state', error: st.error }); return; }
+    const changedEvidence = extractionEvidenceError(userLine, replyLine);
+    if (changedEvidence) { appendJsonl(METRICS, { ts, event: 'extract_error', ...base, reason: 'provenance', error: changedEvidence }); return; }
     const live = st.items.filter((i) => i.status !== 'rejected');
     const kept = [];
     for (const it of parsed.items) {
@@ -808,16 +943,16 @@ async function runExtraction(userLine, replyLine) {
     const ids = [];
     for (const it of kept) {
       const item = { id: nextId(st.doc, it.kind), kind: it.kind, text: it.text, status: 'proposed', author: 'model', model: out.candidate.name,
-        quote: it.quote, fromMessage: it.fromMessage, createdAt: ts };
+        quote: it.quote, fromMessage: it.fromMessage, fromChat: userLine.chat || DEFAULT_CHAT, createdAt: ts };
       if (it.kind === 'task') item.column = 'todo';
       if (it.url !== undefined) item.url = it.url;
       st.doc.items.push(item);
       ids.push(item.id);
     }
-    const rev = ids.length ? writeState(st.doc) : st.rev;
-    for (const id of ids) itemWrite(st.doc.items.find((i) => i.id === id), 'extract', null, ts);
-    appendJsonl(METRICS, { ts, event: 'extract', ...base, returned: parsed.items.length, proposed: ids.length,
-      dropped: parsed.items.length - ids.length, ids, rev, latencyMs: Date.now() - t0 });
+    const event = { ts, event: 'extract', ...base, returned: parsed.items.length, proposed: ids.length,
+      dropped: parsed.items.length - ids.length, ids, rev: ids.length ? st.rev + 1 : st.rev, latencyMs: Date.now() - t0 };
+    if (ids.length) writeState(st, [...ids.map(id => itemWriteEvent(st.doc.items.find(i => i.id === id), 'extract', null, ts)), event]);
+    else appendJsonl(METRICS, event);
   });
   await runController();   // new proposals may cross a map/kanban threshold
 }
@@ -996,15 +1131,14 @@ function frameLines() {
 // pilot-v0.6: the server's write ledger. Every item the server creates or decides is logged as `item_write` with a
 // copy of the item as written (see stats.js provenance). Hand edits made before this write stay attributed: their
 // fields go along as handFields (except the ones this write sets), an item that came in through the file keeps
-// addedByFile. Call inside the write chain, right after writeState.
-function itemWrite(item, via, before, ts) {
-  const set = via === 'decide' ? ['status', 'decidedAt', 'decidedBy'] : via === 'move' ? ['column', 'movedAt', 'movedBy'] : [];
+// addedByFile. Build inside the write chain and commit with writeState.
+function itemWriteEvent(item, via, before, ts, changedFields = []) {
+  const set = via === 'decide' ? ['status', 'decidedAt', 'decidedBy'] : via === 'move' ? ['column', 'movedAt', 'movedBy'] : via === 'edit' ? [...changedFields, 'editedAt', 'editedBy'] : [];
   const handFields = before ? before.fields.filter((f) => !set.includes(f)) : [];
   const e = { ts, event: 'item_write', via, itemId: item.id, item: JSON.parse(JSON.stringify(item)) };
   if (handFields.length) e.handFields = handFields;
   if (before && before.added) e.addedByFile = true;
-  appendJsonl(METRICS, e);
-  noteItems();   // the server's own write is the new baseline for file-edit detection
+  return e;
 }
 
 // File-edit detection (pilot-v0.6): on every state.json change the watcher compares each item with the ledger; when
@@ -1036,26 +1170,69 @@ function stale(file, sent, current) {
   return { code: 409, body: { error: `${file} changed since this page last saw it (rev ${sent}, now ${current}); reloaded, try again`, stale: true, file, rev: current } };
 }
 
+function replayOperation(operationId, request) {
+  if (operationId === undefined) return null; // legacy clients retain their revision contract
+  if (typeof operationId !== 'string' || !/^[a-zA-Z0-9_-]{8,100}$/.test(operationId)) return { code: 400, body: { error: 'invalid operation id' } };
+  const previous = metricsEvents().find(e => e.event === 'item_operation' && e.operationId === operationId);
+  if (!previous) return null;
+  if (JSON.stringify(previous.request) !== JSON.stringify(request)) return { code: 409, body: { error: 'operation id already used for a different request' } };
+  return { code: 200, body: { ...previous.outcome, replayed: true } };
+}
+
+function editItem(body) {
+  return serial(() => {
+    if (!body || typeof body.itemId !== 'string' || typeof body.text !== 'string') return { code: 400, body: { error: 'expected itemId and text' } };
+    if (!Number.isInteger(body.rev) || typeof body.token !== 'string') return { code: 428, body: { error: 'reload the record before editing (revision and state token required)' } };
+    const text = body.text.trim();
+    if (text.length < 3 || text.length > 240 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(text)) return { code: 400, body: { error: 'use a title of 3–240 characters' } };
+    if (secrets.looksLikeKey(text) || (typeof body.url === 'string' && secrets.looksLikeKey(body.url))) return { code: 400, body: { error: KEY_HINT } };
+    const st = readState();
+    if (st.error) return { code: 409, body: { error: st.error } };
+    if (body.rev !== st.rev || body.token !== st.token) return stale('state.json', body.rev, st.rev);
+    const item = st.doc.items.find(i => i && i.id === body.itemId);
+    if (!item) return { code: 404, body: { error: 'record no longer exists' } };
+    if ((item.status || 'confirmed') !== 'confirmed') return { code: 409, body: { error: 'accept this proposal before editing it' } };
+    const patch = { text };
+    if (body.url !== undefined) {
+      if (item.kind !== 'source' || typeof body.url !== 'string' || body.url.length > 2000) return { code: 400, body: { error: 'only sources have an editable URL (at most 2000 characters)' } };
+      try { const url = new URL(body.url); if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error(); }
+      catch { return { code: 400, body: { error: 'use an http or https source URL without credentials' } }; }
+      patch.url = body.url.trim();
+    }
+    const fields = Object.keys(patch).filter(k => patch[k] !== item[k]);
+    if (!fields.length) return { code: 200, body: { ok: true, item, rev: st.rev, changed: false } };
+    const before = stats.provenance(item, stats.ledgerOf(metricsEvents()).get(item.id));
+    const previous = Object.fromEntries(fields.map(k => [k, item[k]]));
+    const ts = new Date().toISOString(), rev = st.rev + 1;
+    Object.assign(item, patch, { editedBy: 'user', editedAt: ts });
+    writeState(st, [itemWriteEvent(item, 'edit', before, ts, fields), { ts, event: 'edit', itemId: item.id, fields, previous, by: 'user', rev }],
+      [{ id: lineId(), ts, role: 'system', text: `${item.id} edited by you: ${item.text}`, model: null }]);
+    return { code: 200, body: { ok: true, item, rev, changed: true } };
+  });
+}
+
 // POST /answer {itemId, decision, rev?}: confirm or reject a proposed item; records decidedAt and decidedBy: "user".
 // `rev` = the state.json rev the page last saw (optional; a stale one is rejected with 409 {stale: true}).
 const DECISIONS = { c: 'confirmed', confirm: 'confirmed', confirmed: 'confirmed', r: 'rejected', reject: 'rejected', rejected: 'rejected' };
-function decide(itemId, raw, seenRev) {
+function decide(itemId, raw, seenRev, token, operationId) {
   const status = DECISIONS[String(raw || '').toLowerCase()];
   return serial(() => {
     if (!status) return { code: 400, body: { error: 'decision must be c/r or confirm/reject' } };
-    const st = readState();
+    const st = readState(); // finish any interrupted transaction before looking up a retry
     if (st.error) return { code: 409, body: { error: `${st.error}; fix the file by hand first` } };
-    if (seenRev !== undefined && seenRev !== st.rev) return stale('state.json', seenRev, st.rev);
+    const request = { kind: 'decide', itemId, status, rev: seenRev, token };
+    const replay = replayOperation(operationId, request); if (replay) return replay;
+    if ((seenRev !== undefined && seenRev !== st.rev) || (token !== undefined && token !== st.token)) return stale('state.json', seenRev, st.rev);
     const item = st.doc.items.find((i) => i && i.id === itemId);
     if (!item) return { code: 404, body: { error: `no item "${itemId}"` } };
     if (item.status !== 'proposed') return { code: 409, body: { error: `${itemId} is ${item.status || 'not a proposal'}, only proposed items can be decided` } };
     const ts = new Date().toISOString();
     const before = stats.provenance(item, stats.ledgerOf(metricsEvents()).get(itemId));   // hand edits so far
     item.status = status; item.decidedAt = ts; item.decidedBy = 'user';
-    const rev = writeState(st.doc);
-    itemWrite(item, 'decide', before, ts);
-    appendTranscript({ id: 'm-' + crypto.randomUUID().slice(0, 8), ts, role: 'system', text: `${itemId} ${status}: ${item.text}`, model: null });
-    appendJsonl(METRICS, { ts, event: 'decide', itemId, kind: item.kind, decision: status, decidedBy: 'user', author: item.author || null, model: item.model || null, rev });
+    const rev = st.rev + 1;
+    const events = [itemWriteEvent(item, 'decide', before, ts), { ts, event: 'decide', itemId, kind: item.kind, decision: status, decidedBy: 'user', author: item.author || null, model: item.model || null, rev }];
+    if (operationId) events.push({ ts, event: 'item_operation', operationId, request, outcome: { ok: true, item, rev } });
+    writeState(st, events, [{ id: lineId(), ts, role: 'system', text: `${itemId} ${status}: ${item.text}`, model: null }]);
     // pilot-v0.8: a decision on a card is a touch of the pane that shows it
     const mod = fade.paneOfKind(item.kind), m = readModules();
     if (mod && !m.error && visiblePanes(m).includes(mod) && applyTouch(m, mod, 'decide', ts, fade.turnOf(readTranscript())).changed) writeModules(m);
@@ -1067,12 +1244,12 @@ function decide(itemId, raw, seenRev) {
 // tasks added by hand) move: a proposal is decided first. Records movedAt and movedBy: "user"; a move is a touch of
 // the kanban pane.
 const COLUMNS = ['todo', 'doing', 'done'];
-function moveItem(itemId, column, seenRev) {
+function moveItem(itemId, column, seenRev, token) {
   return serial(() => {
     if (!COLUMNS.includes(column)) return { code: 400, body: { error: `column must be ${COLUMNS.join(', ')}` } };
     const st = readState();
     if (st.error) return { code: 409, body: { error: `${st.error}; fix the file by hand first` } };
-    if (seenRev !== undefined && seenRev !== st.rev) return stale('state.json', seenRev, st.rev);
+    if ((seenRev !== undefined && seenRev !== st.rev) || (token !== undefined && token !== st.token)) return stale('state.json', seenRev, st.rev);
     const item = st.doc.items.find((i) => i && i.id === itemId);
     if (!item) return { code: 404, body: { error: `no item "${itemId}"` } };
     if (item.kind !== 'task') return { code: 409, body: { error: `${itemId} is a ${item.kind}, only tasks move` } };
@@ -1082,9 +1259,8 @@ function moveItem(itemId, column, seenRev) {
     const ts = new Date().toISOString();
     const before = stats.provenance(item, stats.ledgerOf(metricsEvents()).get(itemId));
     item.column = column; item.movedAt = ts; item.movedBy = 'user';
-    const rev = writeState(st.doc);
-    itemWrite(item, 'move', before, ts);
-    appendJsonl(METRICS, { ts, event: 'move', itemId, from, to: column, by: 'user', rev });
+    const rev = st.rev + 1;
+    writeState(st, [itemWriteEvent(item, 'move', before, ts), { ts, event: 'move', itemId, from, to: column, by: 'user', rev }]);
     const m = readModules();
     if (!m.error && visiblePanes(m).includes('kanban') && applyTouch(m, 'kanban', 'decide', ts, fade.turnOf(readTranscript())).changed) writeModules(m);
     return { code: 200, body: { ok: true, item, rev, changed: true } };
@@ -1189,14 +1365,15 @@ function statePayload(only, chat) {
     Object.assign(out, { panes: visiblePanes(m), pending: m.pending, pendingKind: m.pendingKind || null, answers: m.answers, removals: m.removals,
       modulesRev: m.rev, paneInfo, faded: visiblePanes(m).filter((mod) => fade.isFaded(m.panes.find((p) => p.module === mod))) });
   }
-  out.context = contextSummary();
+  out.context = contextSummary(chat || activeChat());
+  out.extractions = extractionSummary(chat || activeChat());
   if (want('flags.json')) out.flags = flagsSummary();   // pilot-v0.9
   if (want('frames.json')) { const f = readFrames(); out.frames = { rev: f.rev, pending: f.pending, applied: f.applied, resets: f.resets }; }   // pilot-v0.10
   // items carry `prov` ({added, fields}) when a part of them came from a hand edit (pilot-v0.6, see stats.js)
-  if (want('state.json')) { st = readState(); Object.assign(out, { items: stats.withProvenance(st.items, metricsEvents()), stateRev: st.rev, stateError: st.error || null }); }
+  if (want('state.json')) { st = readState(); Object.assign(out, { items: stats.withProvenance(st.items, metricsEvents()), stateRev: st.rev, stateToken: st.token, stateError: st.error || null }); }
   // a broken hand-editable file: the page says "file X is not valid JSON, showing last good version" until fixed
   const fileErrors = {};
-  for (const [f, e] of [['state.json', (st || readState()).error], ['modules.json', (m || readModules()).error], ['roles.json', readJsonGood(ROLES, {}).error], ['flags.json', readFlags().error], ['frames.json', readFrames().error], ['context.json', readContext().error], ['chats.json', readChats().error]]) if (e) fileErrors[f] = e;
+  for (const [f, e] of [['state.json', (st || readState()).error], ['modules.json', (m || readModules()).error], ['roles.json', readRolePins().error], ['flags.json', readFlags().error], ['frames.json', readFrames().error], ['context.json', readContext().error], ['chats.json', readChats().error]]) if (e) fileErrors[f] = e;
   out.fileErrors = fileErrors;
   return out;
 }
@@ -1266,39 +1443,19 @@ function serveStatic(req, res, pathname) {
   });
 }
 
-// The board as a system message for the chat role: confirmed decisions, open tasks with their column, sources, each
-// with its id. Proposed and rejected items are left out (a missing status means added by hand, i.e. confirmed). A broken
-// state.json reads as its last good items (readState); an empty board adds nothing.
-const BOARD_MAX = 8;   // per kind, so the message stays small
+// The board as a bounded system message: accepted decisions, tasks at every stage, and sources.
+// Proposed/rejected records never enter this snapshot. Broken state fails closed for model context;
+// last-good state remains available for display only. An empty board adds nothing.
 function boardContext() { return boardSnapshot()?.message || null; }
-function boardSnapshot() {
-  let items;
-  try { items = readState().items; } catch { return null; }
-  const live = items.filter((i) => (i.status || 'confirmed') === 'confirmed');
-  let count = 0;
-  const list = (title, its, fmt) => {
-    if (!its.length) return [];
-    count += Math.min(its.length, BOARD_MAX);
-    const shown = its.slice(-BOARD_MAX).map((i) => `- ${i.id}: ${fmt(i)}`);
-    return [`${title}:`, ...shown, ...(its.length > BOARD_MAX ? [`- (${its.length - BOARD_MAX} older not shown)`] : [])];
-  };
-  const lines = [
-    ...list('Confirmed decisions', live.filter((i) => i.kind === 'decision'), (i) => i.text),
-    ...list('Open tasks', live.filter((i) => i.kind === 'task' && i.column !== 'done'), (i) => `[${i.column || 'todo'}] ${i.text}`),
-    ...list('Sources', live.filter((i) => i.kind === 'source'), (i) => i.url ? `${i.text} <${i.url}>` : i.text),
-  ];
-  if (!lines.length) return null;
-  return { items: count, message: { role: 'system', content: ['Project board (the user\'s confirmed state):', ...lines,
-    'Treat confirmed decisions as current constraints. If a request conflicts with one, say so and name its id.'].join('\n') } };
-}
+function boardSnapshot() { return knowledge.boardSnapshot(readState()); }
 
 async function handleChat(req, res) {
   let text, chat;
-  try { const b = JSON.parse(await readBody(req)); text = String(b.text || '').trim(); chat = b.chat === undefined ? DEFAULT_CHAT : b.chat; } catch { return sendJson(res, 400, { error: 'expected JSON {text, chat?}' }); }
+  try { const b = JSON.parse(await readBody(req)); text = String(b.text || '').trim(); chat = b.chat === undefined ? (req.headers['x-pilot-chat'] ? decodeURIComponent(String(req.headers['x-pilot-chat'])) : DEFAULT_CHAT) : b.chat; } catch { return sendJson(res, 400, { error: 'expected JSON {text, chat?} and a valid chat header' }); }
   if (!text) return sendJson(res, 400, { error: 'empty message' });
   if (secrets.looksLikeKey(text) || /^\/key\b/.test(text)) return sendJson(res, 400, { error: KEY_HINT });
   if (!chatExists(chat)) return sendJson(res, 400, { error: `no chat "${chat}"` });
-  currentChat = chat;
+  setCurrentChat(chat);
 
   // pilot-ui: the model sees only this chat's history (plus the shared board below)
   const userLine = await appendLine('user', text, null, undefined, chat);
@@ -1306,8 +1463,8 @@ async function handleChat(req, res) {
     .map((l) => ({ role: l.role, content: l.text }));
   const snapshot = readContext().share.board ? boardSnapshot() : null;
   const board = snapshot?.message;
-  const context = { board: !!board, items: snapshot?.items || 0 };
-  await metric('chat_context', { context });
+  const context = { board: !!board, items: snapshot?.items || 0, ...(snapshot ? { rev: snapshot.rev, token: snapshot.token, omitted: snapshot.omitted, truncated: snapshot.truncated } : {}) };
+  await metric('chat_context', { chat, fromMessage: userLine.id, context });
   // Ported from 4c2dd98: keep board constraints adjacent to the newest request.
   if (board) history.splice(history.length - 1, 0, board);
 
@@ -1319,7 +1476,7 @@ async function handleChat(req, res) {
   let replyLine = null;
   try {
     const { text: reply, candidate } = await callRole('chat', history, (d) => res.write(d), abort.signal, undefined, context);
-    replyLine = await appendLine('assistant', reply, candidate.name, undefined, chat);
+    replyLine = await appendCompleteReply(userLine, reply, candidate);
   } catch (err) {
     // Keep whatever arrived before the failure, then record the failure as a system line.
     if (err.partial) await appendLine('assistant', err.partial, err.candidate && err.candidate.name, undefined, chat);
@@ -1379,6 +1536,8 @@ async function runCommand(input) {
   if (cmd === '/help') return { ok: true, lines: HELP };
   if (cmd === '/theme') return { ok: true, lines: ['/theme is handled in the page (it changes only this browser)'] };
   if (cmd === '/model') {
+    const pins = readRolePins();
+    if (args.length && pins.error) return { ok: false, lines: [pins.error + '; preserve and repair roles.json before changing selections'] };
     const summary = modelsSummary();
     if (!args.length) {
       return { ok: true, lines: Object.entries(summary).map(([role, m]) =>
@@ -1394,6 +1553,7 @@ async function runCommand(input) {
         delete saved.active[role];
         atomicWrite(ROLES, JSON.stringify(saved, null, 2) + '\n');
         lastGood['roles.json'] = saved;
+        lastGoodRolePins = saved;
       });
       delete lastUsed[role];
       const first = activeName(role);
@@ -1408,6 +1568,7 @@ async function runCommand(input) {
       saved.active = { ...saved.active, [role]: name };
       atomicWrite(ROLES, JSON.stringify(saved, null, 2) + '\n');
       lastGood['roles.json'] = saved;
+      lastGoodRolePins = saved;
     });
     delete lastUsed[role];
     await appendLine('system', `model for ${role} switched to ${name} (pinned)`, null);
@@ -1477,7 +1638,7 @@ async function runCommand(input) {
   return { ok: false, lines: [`unknown command "${cmd}". Try /help`] };
 }
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => requestContext.run({ chat: currentChat }, async () => {
   try {
     const hosts = [`127.0.0.1:${PORT}`, `localhost:${PORT}`];
     const hostOK = hosts.includes(req.headers.host);
@@ -1509,7 +1670,7 @@ const server = http.createServer(async (req, res) => {
     // land there, also after a server restart or with tabs open in different chats
     if (req.method === 'POST' && req.headers['x-pilot-chat']) {
       let hc = ''; try { hc = decodeURIComponent(String(req.headers['x-pilot-chat'])); } catch { /* ignore a bad header */ }
-      if (hc && chatExists(hc)) currentChat = hc;
+      if (hc && chatExists(hc)) setCurrentChat(hc);
     }
     if (req.method === 'GET' && pathname === '/state') {
       const only = searchParams.has('only') ? searchParams.get('only').split(',').filter(Boolean) : null;
@@ -1520,7 +1681,7 @@ const server = http.createServer(async (req, res) => {
       let body;
       try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'expected JSON {module, answer} or {itemId, decision}' }); }
       const rev = body && body.rev !== undefined && body.rev !== null ? body.rev : undefined;   // optional: the rev the page last saw
-      const out = body && body.itemId !== undefined ? await decide(body.itemId, body.decision, rev) : await answer(body && body.module, body && body.answer, rev);
+      const out = body && body.itemId !== undefined ? await decide(body.itemId, body.decision, rev, body.token, body.operationId) : await answer(body && body.module, body && body.answer, rev);
       return sendJson(res, out.code, out.body);
     }
     // pilot-v0.6: the page reports index jumps (Usefulness). Only this one event, with a message id that exists.
@@ -1561,7 +1722,19 @@ const server = http.createServer(async (req, res) => {
       let body;
       try { body = JSON.parse(await readBody(req, 2000)); } catch { return sendJson(res, 400, { error: 'expected JSON {itemId, column, rev?}' }); }
       const rev = body && body.rev !== undefined && body.rev !== null ? body.rev : undefined;
-      const out = await moveItem(body && body.itemId, body && body.column, rev);
+      const out = await moveItem(body && body.itemId, body && body.column, rev, body && body.token);
+      return sendJson(res, out.code, out.body);
+    }
+    if (req.method === 'POST' && pathname === '/extraction') {
+      let body;
+      try { body = JSON.parse(await readBody(req, 2000)); } catch { return sendJson(res, 400, { error: 'expected extraction action JSON' }); }
+      const out = await retryExtraction(body);
+      return sendJson(res, out.code, out.body);
+    }
+    if (req.method === 'POST' && pathname === '/edit') {
+      let body;
+      try { body = JSON.parse(await readBody(req, 16000)); } catch { return sendJson(res, 400, { error: 'expected edit JSON' }); }
+      const out = await editItem(body);
       return sendJson(res, out.code, out.body);
     }
     // pilot-v0.8: the page reports an interaction with a pane (a faded pane comes back)
@@ -1585,7 +1758,7 @@ const server = http.createServer(async (req, res) => {
     if (!res.headersSent) sendJson(res, 500, { error: String(err.message || err) });
     else res.end();
   }
-});
+}));
 
 server.listen(PORT, HOST, () => {
   // pilot-v0.6: continuity. Counts at start, compared by /stats with the previous run's last turn.

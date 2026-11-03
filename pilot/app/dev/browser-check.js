@@ -31,7 +31,8 @@ const stopPromises = new WeakMap();
 const URLConstructor = globalThis.URL;
 
 const APP = path.join(__dirname, '..');
-const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const browser = require('./lib/browser').browserSupport();
+const CHROME = browser.chrome;
 // Each scenario uses a marked directory below its fresh run root.
 let ENV = { url: 'http://127.0.0.1:4750/', fakes: [5701, 5702], dir: '.pilot-verify-browser', config: 'pilot.config.dev.json', cdp: 9333 };
 let URL = ENV.url;
@@ -75,38 +76,56 @@ for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) process.on(sig
   shutdown().then(() => process.exit(code), (err) => { console.error('ERROR cleanup', err.message); process.exit(1); });
 });
 async function startServer() { start('server', ENV.project ? ['bin/pilot.js', 'start', ENV.project, '--port', new URLConstructor(ENV.url).port] : ['server.js'], { PILOT_CONFIG: ENV.config, PILOT_DIR: ENV.dir, PILOT_SECRETS_FILE: path.join(ROOT, 'private', 'secrets.json'), I1_BROWSER_KEY: '' }); await waitHttp(URL); }
-async function waitHttp(url) { for (let i = 0; i < 50; i++) { try { await fetch(url); return; } catch { await sleep(100); } } throw new Error(`${url} did not come up`); }
+async function waitHttp(url) { for (let i = 0; i < 50; i++) { try { await fetch(url, { signal: AbortSignal.timeout(1000) }); return; } catch { await sleep(100); } } throw new Error(`${url} did not come up`); }
 
 // ---- minimal CDP client ----
 async function openBrowser() {
   const dir = safety.mark(fs.mkdtempSync(path.join(ROOT, 'cdp-')));
   const port = ENV.cdp;
   if (stopping) throw new Error('browser runner stopping');
-  const chrome = procs.chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, '--no-first-run', 'about:blank'], { stdio: 'ignore', detached: true });
+  const chrome = procs.chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, '--no-first-run', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
+  let startupLog = '';
+  chrome.stderr.on('data', chunk => { startupLog = (startupLog + chunk).slice(-8000); });
   chrome.on('error', (err) => { chrome.spawnError = err; });
   let target;
   for (let i = 0; i < 80 && !target; i++) {
-    try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'); } catch { /* not up yet */ }
+    if (chrome.spawnError || chrome.exitCode !== null || chrome.signalCode !== null) throw new Error(`browser startup failed: ${chrome.spawnError?.message || chrome.signalCode || `exit ${chrome.exitCode}`}\n${startupLog}`);
+    try { target = (await (await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(1000) })).json()).find((t) => t.type === 'page'); } catch { /* not up yet */ }
     if (!target) await sleep(100);
   }
+  if (!target) throw new Error(`browser did not expose a page on port ${port}\n${startupLog}`);
   const page = await connectTab(target);
   // pilot-v0.5: a second tab in the same browser (two tabs stay in sync)
-  page.newTab = async () => connectTab(await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: 'PUT' })).json());
+  page.newTab = async () => connectTab(await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: 'PUT', signal: AbortSignal.timeout(3000) })).json());
   return page;
 }
 
 async function connectTab(target) {
   const ws = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((r) => { ws.onopen = r; });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { ws.close(); reject(new Error('browser debugger connection timed out')); }, 5000);
+    ws.onopen = () => { clearTimeout(timer); resolve(); };
+    ws.onerror = () => { clearTimeout(timer); reject(new Error('browser debugger connection failed')); };
+    ws.onclose = () => { clearTimeout(timer); reject(new Error('browser debugger closed before connecting')); };
+  });
   let id = 0; const pending = {}; const net = []; const errors = [];
   ws.onmessage = (m) => {
     const j = JSON.parse(m.data);
-    if (j.id && pending[j.id]) { pending[j.id](j); delete pending[j.id]; }
+    if (j.id && pending[j.id]) {
+      const request = pending[j.id]; delete pending[j.id]; clearTimeout(request.timer);
+      if (j.error) request.reject(new Error(`${request.method}: ${j.error.message}`)); else request.resolve(j);
+    }
     if (j.method === 'Network.requestWillBeSent') net.push({ id: j.params.requestId, url: j.params.request.url, method: j.params.request.method });
     if (j.method === 'Network.loadingFailed') { const r = net.find((n) => n.id === j.params.requestId); if (r) r.failed = j.params.errorText; }
     if (j.method === 'Runtime.exceptionThrown') errors.push(j.params.exceptionDetails.exception ? j.params.exceptionDetails.exception.description : j.params.exceptionDetails.text);
   };
-  const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending[i] = r; ws.send(JSON.stringify({ id: i, method, params })); });
+  ws.onclose = () => { for (const [id, request] of Object.entries(pending)) { clearTimeout(request.timer); request.reject(new Error(`browser debugger closed during ${request.method}`)); delete pending[id]; } };
+  const send = (method, params = {}) => new Promise((resolve, reject) => {
+    const i = ++id, timer = setTimeout(() => { delete pending[i]; reject(new Error(`browser debugger timed out during ${method}`)); }, 10000);
+    pending[i] = { resolve, reject, timer, method };
+    try { ws.send(JSON.stringify({ id: i, method, params })); }
+    catch (error) { delete pending[i]; clearTimeout(timer); reject(error); }
+  });
   for (const m of ['Network.enable', 'Runtime.enable', 'Page.enable']) await send(m);
   await send('Emulation.setFocusEmulationEnabled', { enabled: true });
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
@@ -119,7 +138,7 @@ async function connectTab(target) {
       return r.result.result.value;
     },
     async key(k) {
-      const ARROWS = { ArrowUp: 38, ArrowDown: 40, Tab: 9, Escape: 27 };
+      const ARROWS = { ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, Tab: 9, Escape: 27 };
       if (ARROWS[k]) {
         await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: k, code: k, windowsVirtualKeyCode: ARROWS[k] });
         await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: ARROWS[k] });
@@ -163,6 +182,7 @@ async function p1(page) {
   await page.submit('frontier is down now');
   s = await page.status();
   check('status bar shows frontier→morrow after a fallback', /chat: frontier→morrow/.test(s), s);
+  check('context disclosure shows both failed and successful fallback recipients', await page.eval(`(() => { const labels = [...document.querySelectorAll('#context-roles [data-role="chat"] .request-recipient')].map(e => e.textContent); return labels.some(s => s.includes('frontier') && s.includes('failed')) && labels.some(s => s.includes('morrow') && s.includes('completed')); })()`));
 
   await stop('server'); await startServer(); await page.goto(URL);
   s = await page.status();
@@ -397,8 +417,7 @@ async function v04(page) {
 }
 
 // pilot-v0.5: live files. Two tabs stay in sync; a hand edit shows within 1 s (measured hand edit -> DOM); a stale
-// write is rejected and the page reloads with a notice; a broken file shows "not valid JSON, showing last good
-// version"; reconnect after a server restart; fallback without EventSource; c/r only on a focused card.
+// write is rejected and the page reloads with a notice; a broken file shows "not valid JSON; fix it before saving changes"; reconnect after a server restart; fallback without EventSource; c/r only on a focused card.
 const timings = {};
 async function v05(page) {
   const at = (m) => new Date(Date.UTC(2026, 9, 17, 9, m)).toISOString();
@@ -475,8 +494,8 @@ async function v05(page) {
   // broken hand edits: the last good version stays visible with a notice, until the file is fixed
   const good = fs.readFileSync(file('state.json'), 'utf8');
   fs.writeFileSync(file('state.json'), good + 'oops');
-  const brokenMs = await waitFor(page, `${notice}.includes('file state.json is not valid JSON, showing last good version')`);
-  check('broken state.json: notice "file state.json is not valid JSON, showing last good version" within 1 s; cards still shown', brokenMs !== null && brokenMs < 1000 && await page.eval(`${tagOf('dec-5')} === 'confirmed' && !!document.querySelector('.item[data-id="dec-6"]')`), `${brokenMs} ms`);
+  const brokenMs = await waitFor(page, `${notice}.includes('file state.json is not valid JSON; fix it before saving changes')`);
+  check('broken state.json: notice "file state.json is not valid JSON; fix it before saving changes" within 1 s; cards still shown', brokenMs !== null && brokenMs < 1000 && await page.eval(`${tagOf('dec-5')} === 'confirmed' && !!document.querySelector('.item[data-id="dec-6"]')`), `${brokenMs} ms`);
   await page.eval(`document.querySelector('.item[data-id="dec-6"] .key[data-decision="confirm"]').click()`); await sleep(500);
   check('confirm while state.json is broken: error line, file untouched', fs.readFileSync(file('state.json'), 'utf8') === good + 'oops' && await page.eval(`[...document.querySelectorAll('.ln.out.err')].some(l => /not valid JSON/.test(l.textContent))`));
   fs.writeFileSync(file('state.json'), good);
@@ -484,7 +503,7 @@ async function v05(page) {
   check('fixing state.json removes the notice', fixedMs !== null, `${fixedMs} ms`);
   const mods = fs.readFileSync(file('modules.json'), 'utf8');
   fs.writeFileSync(file('modules.json'), '{"rev": 1, "panes": [');
-  const mMs = await waitFor(page, `${notice}.includes('file modules.json is not valid JSON, showing last good version')`);
+  const mMs = await waitFor(page, `${notice}.includes('file modules.json is not valid JSON; fix it before saving changes')`);
   check('broken modules.json: notice, the map pane stays (last good version)', mMs !== null && await page.eval(`!!document.getElementById('pane-map')`), `${mMs} ms`);
   fs.writeFileSync(file('modules.json'), mods);
   check('fixing modules.json removes the notice', (await waitFor(page, `${notice} === ''`)) !== null);
@@ -551,7 +570,7 @@ async function v06(page) {
   check('pristine proposal: "model · morrow · proposed", no file-edit mark', m['dec-7'] === 'dec-7 · model · morrow · proposed', m['dec-7']);
   check('status flipped in the file: "confirmed by you (file edit)"', m['dec-8'] === 'dec-8 · model · morrow · confirmed · confirmed by you (file edit)', m['dec-8']);
   check('column moved in the file: "edited by you (file edit): column"', /edited by you \(file edit\): column$/.test(m['task-1']) && /confirmed by you 10-14/.test(m['task-1']), m['task-1']);
-  check('item added in the file: "task-7 · you (file edit) · confirmed"', m['task-7'] === 'task-7 · you (file edit) · confirmed', m['task-7']);
+  check('item added in the file: "task-7 · you (file edit) · confirmed"', m['task-7'] === 'task-7 · you (file edit) · confirmed · stage: todo', m['task-7']);
   check('the proposed tag is not drawn in the controller pair (lavender stays the controller\'s)', (await page.eval(color('.item[data-id="dec-7"] .tag'))) !== lav);
   check('times on cards are local with the ISO timestamp as tooltip', await page.eval(`(() => { const w = document.querySelector('.item[data-id="dec-1"] .when'); return !!w && /^\\d{4}-\\d\\d-\\d\\dT/.test(w.title); })()`));
   check('card chips: model sky, you peach', (await page.eval(color('.item[data-id="dec-1"] .by.model'))) === sky && (await page.eval(color('.item[data-id="dec-8"] .by.you:last-child'))) === peach);
@@ -1108,6 +1127,13 @@ async function v10(page) {
     && doneAfter.split(',')[0] === 'task-2' && doneAfter.split(',').sort().join() === doneBefore.split(',').sort().join() && (await col('todo')).split(',').sort().join() === todoBefore.split(',').sort().join(), `done ${doneBefore} -> ${doneAfter}; todo ${todoBefore} -> ${await col('todo')}`);
   check('the map tab stayed a tab (a frame never brings a pane back)', await page.eval(`!!document.querySelector('#pane-map.faded')`));
   check('no frame write touched state.json items or modules.json panes', events().filter((e) => e.event === 'item_write').length === writes0 && JSON.parse(fs.readFileSync(file('modules.json'), 'utf8')).panes.length === 3);
+
+  // A no-suggestion frame writes only metrics. Its disclosure must still settle
+  // after the extraction/state events have already reached the page.
+  await stop('f2'); start('f2', ['dev/fake-model.js', String(ENV.fakes[1]), 'morrow', '--frame=none', '--delay=400']);
+  await waitHttp(`http://127.0.0.1:${ENV.fakes[1]}`);
+  await page.submit('Inspect the frame receipt after no suggestion.', 100);
+  check('frame request disclosure updates after a metrics-only completion', (await waitFor(`(() => { const d = document.querySelector('#context-roles [data-role="frame"]'); return d && [...d.querySelectorAll('.request-recipient')].some(e => e.textContent.includes('completed')) && [...d.querySelectorAll('.last-request')].some(e => e.textContent.includes('Inspect the frame receipt after no suggestion.')); })()`, 6000)) !== null);
 }
 
 async function m1(page) {
@@ -1123,7 +1149,7 @@ async function m1(page) {
   check('M1 /context says nothing beyond conversation', await page.eval(`document.getElementById('log').textContent.includes('nothing beyond this conversation')`));
   fs.writeFileSync(path.join(ENV.dir, 'state.json'), JSON.stringify({ rev: 1, items: [{ id: 'dec-m1', kind: 'decision', text: 'Use Postgres', status: 'confirmed', author: 'user' }] }));
   await page.submit('/context share board on', 400);
-  check('M1 cloud recipient in status and board preview in /context', (await page.status()).includes('board is sent to frontier (cloud)') && await page.eval(`document.getElementById('log').textContent.includes('dec-m1: Use Postgres')`));
+  check('M1 cloud recipient in status and board preview in /context', (await page.status()).includes('board is sent to frontier (cloud)') && await page.eval(`document.getElementById('log').textContent.includes('dec-m1') && document.getElementById('log').textContent.includes('Use Postgres')`));
   await page.submit('a browser chat request');
   check('M1 saved key allows fake model chat', await page.eval(`document.querySelector('.ln.assistant .text').textContent.includes('[fake:frontier]')`));
   const requests = page.net.filter(n => n.url.endsWith('/chat')).length;
@@ -1139,7 +1165,7 @@ async function m1(page) {
 }
 
 async function i1(page) {
-  const shots = '/home/nuc/orca-reports/blackboard-i1/screenshots'; fs.mkdirSync(shots, { recursive: true });
+  const shots = process.env.SHOT_DIR || path.join(ROOT, 'screenshots'); fs.mkdirSync(shots, { recursive: true });
   const shot = async name => { const r = await page.send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(shots, name + '.png'), Buffer.from(r.result.data, 'base64')); };
   const waitFor = async (expr, ms = 6000) => { const start = Date.now(); while (Date.now() - start < ms) { if (await page.eval(expr)) return true; await sleep(30); } return false; };
   await page.goto(URL); await shot('01-open');
@@ -1168,10 +1194,22 @@ async function i1(page) {
   await page.eval(`document.getElementById('file-close').click()`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false }); await sleep(100); await shot('11-narrow');
   check('I1 narrow workspace has no horizontal overflow', await page.eval(`document.documentElement.scrollWidth <= innerWidth`));
+  await page.eval(`document.getElementById('show-knowledge').click(); document.querySelector('#file-list button').click()`);
+  check('I1 file navigation from narrow Knowledge reveals its read-only content', await waitFor(`!document.getElementById('file-view').hidden && document.getElementById('file-view').getBoundingClientRect().width > 0 && document.getElementById('file-text').textContent.includes('Read-only project note')`));
+  await page.eval(`document.getElementById('show-knowledge').click(); document.querySelector('#overview .item.confirmed .why').click()`);
+  check('I1 explanation from Knowledge closes the file overlay and reveals its conversation output', await waitFor(`document.body.dataset.surface === 'conversation' && document.getElementById('file-view').hidden && !!document.querySelector('.why-line') && document.getElementById('pane-chat').getBoundingClientRect().width > 0`));
 }
 
-const SCENARIOS = { i1, m1, p1, p2, v03, v04, v05, v06, v07, v08, v09, v10 };
+const SCENARIOS = { loop: page => require('./browser-loop')(page, { url: URL, dir: ENV.dir, root: ROOT, check, stop, startServer,
+  async setExtractor(...args) { await stop('f1'); start('f1', ['dev/fake-model.js', String(ENV.fakes[0]), 'frontier', '--board-aware', ...args]); await waitHttp(`http://127.0.0.1:${ENV.fakes[0]}`); },
+}), i1, m1, p1, p2, v03, v04, v05, v06, v07, v08, v09, v10 };
 const ENVS = {
+  loop: () => {
+    const candidate = { name: 'loop-local', model: 'fake', local: true, baseUrl: 'http://127.0.0.1:5866/v1' };
+    const config = path.join(ROOT, 'loop-config.json');
+    fs.writeFileSync(config, JSON.stringify({ port: 4865, roles: { chat: { candidates: [candidate] }, extract: { candidates: [candidate] } } }));
+    return { url: 'http://127.0.0.1:4865/', fakes: [5866, 5867], dir: '.pilot-verify-loopb', config, cdp: 9443, fakeArgs: ['--board-aware'] };
+  },
   i1: () => {
     const project = path.join(ROOT, 'i1-project');
     const init = spawnSync(process.execPath, [path.join(APP, 'bin/pilot.js'), 'init', project], { cwd: ROOT, env: { ...process.env, PILOT_SECRETS_FILE: path.join(ROOT, 'private', 'secrets.json') } });
@@ -1272,9 +1310,15 @@ const ENVS = {
 };
 
 (async () => {
+  if (process.argv.length > 3) { console.error('ERROR browser-check.js accepts one scenario per invocation; use all for p1 + p2, or run separate commands.'); process.exit(2); }
   const which = process.argv[2] || 'all';
   const list = which === 'all' ? ['p1', 'p2'] : [which];
   if (!list.every((n) => SCENARIOS[n])) { console.error(`unknown scenario "${which}". Use: ${Object.keys(SCENARIOS).join(', ')}, all`); process.exit(2); }
+  if (browser.status !== 'ready') {
+    const required = browser.status === 'error' || process.env.PILOT_REQUIRE_BROWSER === '1';
+    console.log(`${required ? 'FAIL' : 'SKIP'} browser ${which}: ${browser.reason}`);
+    process.exitCode = required ? 1 : 77; return;
+  }
   let page;
   try {
     ROOT = safety.tempRoot();
@@ -1291,7 +1335,7 @@ const ENVS = {
       }
       URL = ENV.url;
       await safety.portsFree([new URLConstructor(URL).port, ...ENV.fakes, ENV.cdp]);
-      start('f1', ['dev/fake-model.js', String(ENV.fakes[0]), 'frontier']);
+      start('f1', ['dev/fake-model.js', String(ENV.fakes[0]), 'frontier', ...(ENV.fakeArgs || [])]);
       start('f2', ['dev/fake-model.js', String(ENV.fakes[1]), 'morrow']);
       await sleep(300);
       await startServer();

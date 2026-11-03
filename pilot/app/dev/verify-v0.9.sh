@@ -13,6 +13,7 @@ T=$(fixture_temp) || exit 1; fixture_root "$T"; FIXTURE_ROOT="$T"; PIDS=(); SERV
 DIR="$T/.pilot-verify-v09"
 cleanup() { kill "${PIDS[@]}" 2>/dev/null; wait 2>/dev/null; fixture_remove "$T"; }
 trap cleanup EXIT
+cp -R demo/fixtures/v0.8 "$T/previous-fixture" || exit 1
 fixture_ports 4820 4976 5821 5822
 FAILS=0
 check() { if [ "$2" = "true" ]; then echo "PASS $1"; else echo "FAIL $1"; FAILS=$((FAILS+1)); fi; }
@@ -125,11 +126,10 @@ check "/flag pushes a change event for flags.json (rev 10) to every open page" "
 stop_server
 
 echo "== 7. page (headless Chrome): off = today, the offer, Tab, Enter, Escape, /stats, narrow widths"
-if node -e 'process.exit(typeof WebSocket==="function"?0:1)' && [ -x "${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}" ]; then
-  node dev/browser-check.js v09 | tee "$T/browser.log"
-  check "browser checks (v09) all passed" "$(grep -q 'ALL BROWSER CHECKS PASSED' "$T/browser.log" && echo true)"
-else
-  echo "SKIP browser checks: need Node 22+ and Google Chrome"; FAILS=$((FAILS+1))
+node dev/browser-check.js v09 > "$T/browser.log" 2>&1; BROWSER_RC=$?
+cat "$T/browser.log"
+if [ "$BROWSER_RC" -ne 77 ]; then
+  check "browser checks (v09) all passed" "$( [ "$BROWSER_RC" -eq 0 ] && grep -q 'ALL BROWSER CHECKS PASSED' "$T/browser.log" && echo true)"
 fi
 node dev/contrast-check.js > "$T/contrast.log"; RC=$?
 check "contrast-check.js passes (the offer uses the checked --muted pair)" "$( [ $RC -eq 0 ] && echo true)"
@@ -148,7 +148,7 @@ OUT=$(curl -H 'x-pilot: 1' -s -X POST localhost:4976/command -H 'content-type: a
 check "demo: /flag settled-input off restores the default" "$(curl -H 'x-pilot: 1' -s 'localhost:4976/state?only=flags.json' | q 'x.flags.settledInput===false')"
 kill -INT $DEMO; wait $DEMO 2>/dev/null; sleep 0.5
 check "Ctrl+C on the demo leaves no processes on its ports" "$( ! pgrep -f 'fake-model.js 597(8|9)' > /dev/null && ! lsof -iTCP:4976 -sTCP:LISTEN > /dev/null 2>&1 && echo true)"
-check "the v0.8 fixture is unchanged by the v0.9 generator" "$(git diff --quiet -- demo/fixtures/v0.8 && echo true)"
+check "the v0.8 fixture is unchanged by the v0.9 generator" "$(diff -qr "$T/previous-fixture" demo/fixtures/v0.8 > /dev/null && echo true)"
 
 echo; [ $FAILS -eq 0 ] && echo "ALL v0.9 CHECKS PASSED" || echo "$FAILS v0.9 CHECK(S) FAILED"
 exit $(( FAILS > 0 ))

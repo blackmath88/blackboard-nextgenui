@@ -9,6 +9,11 @@
 //   --status=<code>  answer every request with this HTTP error (to exercise fallback)
 //   --stall-after=<n> stream n content tokens, then send nothing more but keep the connection open
 //                    (to exercise the stall timeout; streaming requests only)
+//   --eof-after=<n>  close after n content tokens without a terminal event
+//   --finish-only   end with finish_reason and omit [DONE]
+//   --missing-content return a JSON completion without a message
+//   --board-aware   echo the accepted snapshot in the latest system context
+//   PILOT_FAKE_CAPTURE optionally records exact request JSON to a test-owned file
 //   --extract=<mode>  how to answer an extraction request (pilot-v0.4): one that carries `response_format`
 //                    or whose system message contains "PILOT-EXTRACT". Default good. The turn is read from the
 //                    server's prompt ("Last user message:" / "Last assistant message:"); sentences starting
@@ -47,6 +52,7 @@ const opt = (k) => { const a = process.argv.find((x) => x.startsWith(`--${k}=`))
 const delay = opt('delay');
 const failStatus = opt('status');
 const stallAfter = opt('stall-after');
+const eofAfter = opt('eof-after'); // close without a terminal event to test interrupted responses
 const extractMode = ((process.argv.find((x) => x.startsWith('--extract=')) || '--extract=good').split('=')[1]);
 const extractDelay = opt('extract-delay');
 if (!['good', 'malformed', 'badquote', 'many', 'dupes'].includes(extractMode)) { console.error(`unknown --extract mode "${extractMode}"`); process.exit(1); }
@@ -167,6 +173,10 @@ http.createServer((req, res) => {
 }).listen(port, '127.0.0.1', () => console.log(`[dev] fake model "${name}" on http://127.0.0.1:${port}/v1${delay ? ` (delay ${delay} ms)` : ''}${failStatus ? ` (always HTTP ${failStatus})` : ''}${stallAfter ? ` (stalls after ${stallAfter} tokens)` : ''} (extract: ${extractMode}${extractDelay ? `, +${extractDelay} ms` : ''}; frame: ${frameMode})`));
 
 function respond(req, res, body, isExtract, isFrame) {
+  if (process.argv.includes('--missing-content')) {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    return res.end(JSON.stringify({ choices: [{ message: {} }] }));
+  }
   const reflect = process.argv.find(a => a.startsWith('--reflect-key='))?.split('=')[1];
   if (reflect) {
     const key = (req.headers.authorization || '').replace(/^Bearer /, '');
@@ -175,7 +185,7 @@ function respond(req, res, body, isExtract, isFrame) {
     if (reflect.startsWith('prefix-')) {
       const prefix = key.slice(0, -1);
       if (reflect === 'prefix-nonstream') { res.end(JSON.stringify({ choices: [{ message: { content: prefix } }] })); return; }
-      res.write('data: ' + JSON.stringify({ choices: [{ delta: { content: 'safe text ' + prefix } }] }) + '\n\n');
+      res.write('data: ' + JSON.stringify({ choices: [{ delta: { content: (reflect === 'prefix-only-stall' ? '' : 'safe text ') + prefix } }] }) + '\n\n');
       if (reflect === 'prefix-done') res.end('data: [DONE]\n\n');
       else if (reflect === 'prefix-eof') res.end();
       return;
@@ -201,6 +211,10 @@ function respond(req, res, body, isExtract, isFrame) {
     reply = extraction(msgs);
     let n = 0; try { n = JSON.parse(reply).items.length; } catch { n = 'malformed'; }
     console.log(`[extract] mode=${extractMode} response_format=${reqJson.response_format ? 'yes' : 'no'} items=${n}`);
+  } else if (process.argv.includes('--board-aware')) {
+    const board = msgs.find(m => m.role === 'system' && String(m.content).startsWith('Project board ('));
+    let records = []; try { records = JSON.parse(board.content.split('\n')[1]); } catch {}
+    reply = board ? `[fake:${name}] Latest accepted board: ${records.map(i => `${i.id}${i.stage ? ` [${i.stage}]` : ''}: ${i.text}`).join('; ')}` : `[fake:${name}] Conversation only; no accepted board was sent.`;
   } else reply = `[fake:${name}] ${CANNED[turn++ % CANNED.length]} (you said: "${echo}"; ${msgs.length} messages in context)`;
   const model = reqJson.model || name;
   const id = `chatcmpl-fake-${Date.now()}`;
@@ -218,11 +232,12 @@ function respond(req, res, body, isExtract, isFrame) {
     choices: [{ index: 0, delta, finish_reason: finish || null }] })}\n\n`;
   res.write(chunk({ role: 'assistant' }));
   const t = setInterval(() => {
+    if (eofAfter && i >= eofAfter) { clearInterval(t); return res.end(); }
     if (stallAfter && i >= stallAfter) return;   // hang: no more tokens, no [DONE], socket stays open
     if (i < words.length) return res.write(chunk({ content: words[i++] }));
     clearInterval(t);
     res.write(chunk({}, 'stop'));
-    res.end('data: [DONE]\n\n');
+    res.end(process.argv.includes('--finish-only') ? '' : 'data: [DONE]\n\n');
   }, 40);
   res.on('close', () => clearInterval(t));
 }

@@ -132,14 +132,20 @@ async function run(args, cwd, env) {
     for (const name of ['p0', 'p1', 'p2']) {
       const r = await run(['bash', `dev/verify-${name}.sh`], layout);
       fs.writeFileSync(path.join(root, `${name}.log`), r.stdout + r.stderr);
-      const ok = r.status === 0 && (name === 'p0' ? r.stdout.includes('"role":"assistant"') : /ALL .*PASSED/.test(r.stdout)) && !/^FAIL/m.test(r.stdout);
+      const ok = r.status === 0 && /^ALL .*PASSED/m.test(r.stdout) && !/^FAIL/m.test(r.stdout);
       if (!ok) {
         console.error(`== ${name} failure log\n${r.stdout}${r.stderr}`);
         const port = /REFUSE port (\d+): already in use/.exec(r.stderr);
         if (port) throw Error(`BLOCKED: port ${port[1]} in use`);
       }
       check(`${name} runs beside read-only fake .pilot`, ok);
-      check(`${name}: whole sentinel tree unchanged`, tree(real) === before);
+      const after = tree(real);
+      if (after !== before) {
+        const old = new Map(JSON.parse(before).map(entry => [entry[0], entry]));
+        const current = new Map(JSON.parse(after).map(entry => [entry[0], entry]));
+        console.error('Sentinel differences:', [...new Set([...old.keys(), ...current.keys()])].filter(key => JSON.stringify(old.get(key)) !== JSON.stringify(current.get(key))).map(key => ({ path: key, before: old.get(key), after: current.get(key) })));
+      }
+      check(`${name}: whole sentinel tree unchanged`, after === before);
     }
     // Symlink scenario stays inside the sandbox, including its complete target tree.
     const saved = path.join(layout, 'saved-real'); fs.renameSync(real, saved); fs.symlinkSync(saved, real);

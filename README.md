@@ -28,6 +28,17 @@ Each explainer keeps its own `README.md` with its acts, structure and sources. T
 
 The pilot build lives in `pilot/app/` and grows in tagged iterations (`pilot-v0.3` to `pilot-v0.10`; see `pilot/app/CHANGELOG.md` and `pilot/app/REPORT.md`). Run any of them with `cd pilot/app && npm run demo -- v0.N`, or a tag with `bash pilot/app/scripts/try.sh pilot-v0.N`.
 
+## Try the complete knowledge loop
+
+Run `cd pilot/app && npm run demo -- loop`, then open <http://127.0.0.1:4870>.
+This demo uses deterministic local providers and needs no API key. Propose a task
+in conversation, accept it, edit it, move it in Kanban, and enable board sharing:
+the next response uses the same accepted record shown in Summary, Index and Kanban.
+Stop with Ctrl+C; `npm run demo -- loop --resume` keeps the saved demo state.
+
+See the [walkthrough and recovery contract](docs/accepted-state-loop.md) for the
+exact steps, privacy boundaries and verification commands.
+
 ## How to open
 
 - Double-click `index.html`. Everything works from `file://`: no build, no server, no dependencies. The pages load Google Fonts if they are online and fall back to system fonts if not.

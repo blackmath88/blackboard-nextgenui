@@ -101,9 +101,14 @@ async function main() {
     await request('/chat', { text: 'reflected streaming credential' });
     await stop(fake); fake = start(['dev/fake-model.js', '5841', 'mistral', '--reflect-key=error'], { PILOT_FAKE_CAPTURE: capture }); await ready('http://127.0.0.1:5841');
     await request('/chat', { text: 'reflected error credential' });
+    const attempts = (await request('/state')).json.context.roles.chat.providerRequests;
+    assert.deepEqual(attempts.map(r => r.candidate), ['fallback-must-not-run-after-token', 'mistral-test']);
+    assert(attempts.every(r => r.status === 'failed'));
+    for (const [n, attempt] of attempts.entries()) assert.deepEqual(JSON.parse(attempt.payload), chatCalls().at(-1 - n).body);
+    pass('each fallback provider retains its own exact last attempted request and failed delivery status');
     await stop(fake); fake = start(['dev/fake-model.js', '5841', 'mistral'], { PILOT_FAKE_CAPTURE: capture }); await ready('http://127.0.0.1:5841');
     pass('provider error-body and split streaming credential reflections cannot escape');
-    await stop(fake); fake = start(['dev/fake-model.js', '5841', 'mistral', '--reflect-key=prefix-stall'], { PILOT_FAKE_CAPTURE: capture }); await ready('http://127.0.0.1:5841');
+    await stop(fake); fake = start(['dev/fake-model.js', '5841', 'mistral', '--reflect-key=prefix-only-stall'], { PILOT_FAKE_CAPTURE: capture }); await ready('http://127.0.0.1:5841');
     const prefixCalls = calls().length;
     await request('/chat', { text: 'withheld prefix stalls' });
     assert.equal(calls().length, prefixCalls + 1, 'a withheld credential prefix must not enable fallback');
@@ -125,6 +130,30 @@ async function main() {
     await request('/settings/key', { name: 'M1_TEST_KEY' }, 'DELETE'); assert.equal((await request('/settings/keys')).json.keys[0].source, 'env');
     await stop(server); server = start(['server.js']); await ready(url); assert.equal((await request('/settings/keys')).json.keys[0].source, 'missing');
     pass('environment overrides saved; Remove deletes saved only; missing survives restart');
+    await stop(server);
+    const localPin = { name: 'local-pinned', model: 'fake-local', local: true, baseUrl: 'http://127.0.0.1:5841/v1' };
+    fs.writeFileSync(config, JSON.stringify({ port: 4840, roles: { chat: { candidates: [{ ...localPin, name: 'cloud-default', local: false }, localPin] } } }));
+    fs.writeFileSync(path.join(data, 'roles.json'), JSON.stringify({ rev: 1, active: { chat: 'local-pinned' } }));
+    server = start(['server.js']); await ready(url);
+    assert.equal((await request('/state')).json.models.chat.active, 'local-pinned');
+    await stop(server);
+    for (const broken of ['{', 'null', JSON.stringify({ rev: 2, active: [] })]) {
+      fs.writeFileSync(path.join(data, 'roles.json'), broken);
+      server = start(['server.js']); await ready(url);
+      const before = calls().length;
+      const unavailable = (await request('/state')).json;
+      assert(unavailable.fileErrors['roles.json']);
+      assert.equal(unavailable.models.chat.active, null);
+      await request('/chat', { text: 'Do not silently lose the local model pin' });
+      assert.equal(calls().length, before, 'unreadable model selection after restart must not fall back to the cloud default');
+      assert.equal(fs.readFileSync(path.join(data, 'roles.json'), 'utf8'), broken);
+      await stop(server);
+    }
+    fs.writeFileSync(path.join(data, 'roles.json'), JSON.stringify({ rev: 3, active: { chat: 'local-pinned' } }));
+    server = start(['server.js']); await ready(url);
+    await request('/chat', { text: 'Use the repaired explicit local selection' });
+    assert.equal((await request('/state')).json.models.chat.last, 'local-pinned');
+    pass('broken model selection after restart blocks all provider calls instead of silently losing a local pin; repair restores the chosen provider');
     const ac = new AbortController(); const r = await fetch(url + '/events', { signal: ac.signal }); const reader = r.body.getReader(); outputs += new TextDecoder().decode((await reader.read()).value); ac.abort();
     await stop(server);
     let project = ''; for (const name of fs.readdirSync(data)) if (fs.statSync(path.join(data, name)).isFile()) project += fs.readFileSync(path.join(data, name), 'utf8');

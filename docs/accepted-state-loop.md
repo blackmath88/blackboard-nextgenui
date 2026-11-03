@@ -1,0 +1,178 @@
+# Accepted knowledge stays connected to the conversation
+
+This increment builds on PR #9 (`feat/workspace-knowledge-slice`, `82314f0`), which
+already contains the local Pilot foundation from PR #5 and the planning work from
+PR #8. It keeps the dependency-free Node server, local files, consent-driven panes,
+model roles, offline operation, host/origin checks, and local-to-cloud fallback
+policy. It adds no framework, AG-UI adapter, Cloudflare integration or deployment.
+
+## Walk through the loop
+
+From the repository root:
+
+```sh
+cd pilot/app
+npm run demo -- loop
+```
+
+Open `http://127.0.0.1:4870`. The demo starts two deterministic local fake providers
+on ports 5871 and 5872. It needs no API key and makes no paid model call.
+
+1. Send `Decision: keep evidence local. Task: review the release notes. Task: discard the archive.`
+2. Confirm the release-notes task; reject the archive task. Leave the decision pending.
+3. Edit the accepted task to `Publish reviewed release notes`.
+4. Choose Kanban and move its Stage to `done`. Arrow keys also move a focused task.
+5. Switch among Summary, Index and Kanban. The title, stage and provenance belong
+   to the same record. “Show in conversation” finds its originating chat/message.
+   If that message is older than the latest 500 displayed lines, a read-only
+   evidence dialog opens without replacing the current conversation. It displays
+   up to 20,000 characters and explicitly labels longer messages; the full original
+   remains in `transcript.jsonl`.
+6. Enable Share project board and inspect the chat disclosure. Ask
+   `What is the latest accepted task?` The fake response names the edited title
+   and completed stage. Pending and rejected records are absent from the board payload.
+7. Disable sharing and ask again. No board snapshot is attached. Conversation text
+   that was previously sent remains in history; this setting does not erase it.
+8. Stop with Ctrl+C and run `npm run demo -- loop --resume`. Accepted edits, pending
+   proposals, history and sharing survive. Without `--resume`, the marked demo resets.
+
+For a persistent project instead of a throwaway demo, use the existing
+`node bin/pilot.js init <directory>` and `node bin/pilot.js start <directory>` flow
+with your explicitly chosen provider configuration. No provider is provisioned by
+this change. Application runtime: Node 20.3+. Browser checks: Node 22+ and Chromium.
+
+### Browser evidence
+
+These captures use the deterministic local demo and synthetic text. The desktop
+view keeps the conversation beside the accepted record: the next response names
+the same edited title and completed stage.
+
+![Edited task and completed stage used by the next response](screenshots/accepted-state-loop/shared-response-desktop.png)
+
+A stale save preserves the draft and requires an explicit review of the current
+record. At phone width, interrupted extraction remains visible in Knowledge with
+retry and dismiss controls; restarting alone sends nothing.
+
+| Stale edit review | Recovery at 375 px |
+| --- | --- |
+| ![Stale draft preserved with current record shown](screenshots/accepted-state-loop/stale-edit-preserves-draft.png) | ![Interrupted extraction and explicit recovery controls](screenshots/accepted-state-loop/interrupted-extraction-375.png) |
+
+## Canonical state and disclosure
+
+`state.json` remains the canonical record store. Acceptance changes status;
+editing changes title and, for a source, URL; moving changes a task's column.
+Existing offline sources can keep an absent URL when their title is edited.
+Identity, model author, original quote, source message/chat, creation and acceptance
+are retained. Edits and moves add their own user attribution and timestamp.
+`/why <id>` cites the edit/move audit entries as well as the original evidence.
+Its button reveals the explanation in the conversation at narrow widths. Duplicate
+message or record IDs are reported as ambiguous instead of choosing an origin.
+
+The browser sends a revision and SHA-256 token of the raw state file. A same-revision
+manual file edit still invalidates the token. A stale editor keeps its unsaved draft,
+shows the saved record, and requires an explicit “Load latest record” before saving.
+The existing acceptance/move endpoints still accept legacy callers without a
+revision/token; those callers do not gain the browser's stale-write protection.
+New clients should always send both. The edit endpoint requires both, and durable
+acceptance replay requires the same operation ID and original request.
+
+The next chat context uses current accepted records, including tasks in `done`.
+It is bounded to eight records per kind and 16,000 characters total. The most recent
+edit/move/acceptance/creation timestamps determine inclusion; omitted and shortened
+records are counted. The original quote is evidence, not a substitute for the edited
+title. A broken state file supplies no board context even when a last-good display
+is available. Broken sharing configuration defaults to off.
+
+Each role disclosure names configured candidates, locality, models and blocked
+local-to-cloud fallbacks. It shows a next-request template with placeholders, and
+the latest attempted request body for each provider in that role and chat, including
+failed fallback attempts. Attempt bodies live only in server memory: at most 30
+role/chat/provider entries, each displayed up to 100,000 characters
+with explicit truncation. They contain no authorization headers and disappear on
+restart. Metrics retain request hashes, initiating chat IDs and board revision/token
+metadata; each chat-context event names the originating user message. A failed
+attempt means delivery was not confirmed; it does not prove the provider received nothing.
+
+## Recovery contract
+
+| Situation | Behavior |
+| --- | --- |
+| Acceptance response is lost | A retry with the same operation ID and request returns the stored outcome. A different request cannot reuse that ID. |
+| Process stops during a canonical write | `state-transaction.json` completes state, provenance/audit and the conversation note exactly once on the next read/start. |
+| State differs from both transaction images | Recovery refuses to overwrite the external edit and retains the journal for inspection. |
+| Journal is empty, truncated or malformed | Writes stop; the journal and state are preserved. |
+| Second server opens the same workspace | A live or unknown lock owner is refused. A dead local process can be recovered; a different host is not assumed dead. |
+| Extraction is interrupted after a complete reply | The reply's durable extraction intent appears as interrupted after restart. Restart makes no model call. |
+| Extraction returns invalid JSON or fails | No partial proposal batch is committed. The failed turn can be retried or dismissed in Knowledge. |
+| Several retries arrive together | One extraction is queued. A committed extraction event prevents another batch or provider call. |
+| Retry after changing sharing/provider settings | The original turn is extracted using current settings. Prior conversation text remains part of that turn. |
+| Old/partial reply has no extraction intent | It is not automatically replayed. |
+| Model stream ends without a completion marker | Partial evidence is retained with a failure; no proposal extraction runs. |
+| Transcript/audit contains malformed or non-record JSONL rows | Readers skip unusable rows without deleting or rewriting the original evidence. |
+| A provenance lookup matches duplicate message IDs | The lookup refuses to guess and preserves the transcript for repair. |
+| Recovery finds duplicate source/reply IDs | Retry is disabled and refused before any provider call. An ambiguous reply cannot be dismissed under a shared ID. |
+| Original turn changes while extraction is queued/running | The stale proposal batch is discarded with a visible error. Explicit retry uses the current original turn. |
+| Model-selection file is broken at restart | No provider is selected or called until repair. While an already running server has a valid prior selection, it retains that selection and reports the broken file. |
+
+State, audit and note writes use a short-lived redo journal and atomic, synced file
+replacement. The journal's destinations are fixed. This is a local single-writer
+contract, not a distributed database or a lock that arbitrary text editors obey.
+Keep a backup before repairing a conflicting journal or an unknown lock owner.
+Do not remove a lock merely because a request is slow. Preserve the entire `.pilot`
+directory, stop the owning server, and inspect the current state, the journal's
+proposed after-state and expected before-hash, and the audit before deciding how
+to resolve a conflict. The journal is a redo record; it does not store a full
+before-state for automatic rollback. A crash before journal promotion may leave
+an unused `.tmp` file; recovery does not mistake it for an accepted transaction.
+
+This increment makes canonical item writes transactional. Existing pane/module,
+frame and sharing actions retain their own file/audit paths; they are not covered
+by the item transaction. Auxiliary pane-touch updates can follow an item commit.
+Real-model extraction quality, remote filesystems and power-loss behavior on every
+filesystem are not claimed by the deterministic process-crash tests.
+
+## Verification
+
+```sh
+cd pilot/app
+bash dev/verify-foundation.sh
+bash dev/verify-loop.sh
+bash dev/verify-demo-loop.sh
+PILOT_REQUIRE_BROWSER=1 npm run verify
+# Optional executable override and screenshot destination:
+CHROME=/usr/bin/chromium SHOT_DIR=/absolute/output/path node dev/browser-check.js loop
+```
+
+The browser runner takes one scenario per invocation; `all` is the legacy P1/P2
+pair. Extra arguments fail explicitly. `npm run verify` runs every scenario via
+its corresponding gate.
+
+The harness distinguishes PASS, FAIL, PARTIAL and SKIP using both exit status and
+assertions. P0 now asserts its original contract and requires an explicit completion
+marker; provider-looking diagnostic output cannot count as a pass. Missing optional browser support is not a pass; required-browser mode
+fails instead. Fixtures are marked, isolated, and refuse occupied ports. Linux and
+macOS use the same browser discovery. Fixture preservation checks compare the actual
+before/after files and work in source archives without Git metadata.
+
+The loop checks cover actual fake-provider requests, sharing boundaries, stale raw
+tokens, provenance, concurrent chats, server restarts, interrupted extraction,
+concurrent retries and acceptance killed between state and audit writes. Browser
+checks exercise review/edit/move keys, all three views, stale drafts, restart,
+cross-chat origin links, narrow layouts, extraction retry, and a delayed editor
+response. A delayed context-only response cannot replace a newer sharing preview.
+Write notices stay visible in both surfaces; new chats and file previews reveal
+their content at narrow widths. Browser exceptions and off-origin page requests
+fail the scenario. Older evidence remains reachable beyond the visible tail,
+and delayed evidence lookups cannot reverse a newer chat navigation. Screenshots
+are checked visually as well as captured.
+Focused browser checks also cover close/reopen editor events, title-only edits to
+offline sources and delayed command output after navigating to another chat.
+
+The missing capabilities addressed here were accepted-state continuity, explicit
+recovery, trustworthy disclosure and connected navigation. Existing HTTP commands
+and SSE snapshots support those capabilities, so no protocol adapter was needed.
+AG-UI remains deferred until a specific remaining transport requirement justifies
+a removable adapter.
+
+Review is self-review unless a separate reviewer is explicitly recorded. No
+independent approval, real-model validation, merge or deployment is implied.
