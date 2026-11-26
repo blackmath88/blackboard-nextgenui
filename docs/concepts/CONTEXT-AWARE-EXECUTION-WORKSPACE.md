@@ -1,0 +1,27 @@
+# Context-aware isolated execution — research proposal
+Date: 2026-11-26. Status: concept only; no migration, runtime deployment or acceptance implied.
+
+## Thesis
+Devvm prepares a repeatable technical execution environment (toolchains, checkout, CLI, skills, MCP configuration, network and credential boundaries). We need the counterpart for cognitive context: intent, conversation-derived rationale, project history, concepts, accepted decisions, constraints, open questions and relevant cross-project knowledge. The workspace survives the disposable worker. Do not paste all memory into a giant prompt.
+
+## Three complementary inputs
+1. Repository instructions (AGENTS.md/CLAUDE.md, build commands, architectural invariants) at pinned commit.
+2. A generated read-only launch brief and manifest: task ID, exact objective, acceptance criteria, scope, source revisions, context receipt/hash and available tools. Store outside tracked repo where possible; exclude from commits, logs and output by default.
+3. Dynamic project-scoped MCP knowledge service: deterministic get_context/search/read_source; optional ask_memory_agent for synthesis and clarification, with citations, uncertainty, conflicting decisions and explicit missing context. Treat model synthesis as advisory. No direct unrestricted chat history, index or home mount.
+
+## AI-to-AI over MCP
+Execution agent (MCP client) -> host-side scoped gateway (MCP server) -> deterministic Knowledge Lab retrieval -> optional separate memory specialist model -> structured answer back. This is ordinary tools/call backed by another model, not a claim that MCP provides agent identity, federation, memory or delegation semantics automatically. MCP sampling is a distinct optional client-mediated path; compare only after checking actual harness support. A2A protocol may be relevant for long-lived delegated jobs, not required for the first consultation.
+Suggested tool contracts (not implemented): get_project_brief(), search_context(question), read_source(sourceId, revision), ask_memory_agent(question, purpose, evidenceRefs), propose_insight(claim, evidenceRefs). Bind run/project/audience server-side; never trust caller-supplied identity. Answers: claim, status (accepted/source-backed/inferred/unknown), refs, asOf, gaps, receipt; error: denied/stale/unavailable/budget. No accept/dispatch/merge tools in worker scope.
+Bound question count, token/time/cost, recursion depth (initially one), source set and outbound routes. No memory agent shell or write authority; no raw credentials forwarded. Log approved data disclosure without secrets; model provider is a separate trust boundary. Tool descriptions and retrieved text are untrusted; enforce policy in code. Revocation blocks new reads; cannot un-disclose copies already delivered.
+
+## Execution and feedback
+Compile approved intent into a runner-neutral envelope; choose native/devvm/remote adapter. Devvm clone mode and branch export are candidates, not yet qualified. Start with explicit manual launch and synthetic inputs; inspect actual devvm configuration, mounts, agent/MCP sync, network proxy and host differences before use. Weavr2 D3 forbids OAuth proxies; do not assume subscription credential proxy is approved, qualify vendor terms and use approved credentials only. No automatic merge. Record context receipts and consultation traces outside VM; independently verify returned commit/test evidence. Worker proposes knowledge; authorised human accepts via existing path. Destroy guest; preserve run record and accepted knowledge. No new canonical task or memory ledger.
+
+## Experiment
+Same disposable task and base revision, four arms: prompt only; pinned brief; brief + deterministic retrieval; brief + retrieval + memory specialist. Measure task success, clarification quality, unsupported claims, context bytes/tokens, latency/cost, source accuracy and ability to reconstruct what was disclosed. Test synthetic unrelated records, scope denial, injected instruction in retrieved text, expired/revoked grant, offline service, repeat calls and no self-acceptance. Verify no synthetic secret or unrelated record reaches guest/provider; delete VM and revoke grants, retain minimal synthetic receipts. No real sensitive data or vendor token experimentation before approval.
+
+## Blackboard UI specimen
+A durable spatial workspace shows the originating conversation, reviewed concept and decision cards, context manifest, execution window and knowledge consultation trace. Each has distinct ownership, state and identity; VM deletion does not delete surrounding workspace. Show source provenance, what crossed boundary, pending requests, stale context and policy denial. Use FoldKit typed model/update/view, deterministic fixture events and explicit review actions. A consultation card expands to question, answer, evidence, status and cost; a manifest diff shows snapshot vs live additions. Make accessible non-spatial equivalent. First prototype uses synthetic data and no real dispatch. Do not create another orchestration backend or imply Blackboard supersedes Weavr2 D1.
+Tracking: https://github.com/blackmath88/blackboard-nextgenui/issues/15
+Companion private research issue: https://github.com/blackmath88/weavr/issues/162 (includes source conversation reference; no public transcript).
+Public references: https://github.com/devvmhq/devvm ; https://github.com/blackmath88/mcp/blob/main/CONCEPT.md
