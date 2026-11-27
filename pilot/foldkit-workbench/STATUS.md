@@ -15,3 +15,10 @@
 - Offline verification passed: TypeScript and all 13 tests across two test files.
 - No new API requests. Pilot usage remains one Pi engineering request (1,676 reported tokens) and one app inference request (token count unknown). The authorised budget remains unknown, so sustained inference is on hold.
 - Browser and fixed-view checks remain queued.
+
+## 2026-11-27 12:15 CET
+
+- Five-hour product mission opened on the mini. The offline queue and acceptance evidence are in MISSION.md.
+- Accepted responsive workspace package `50b1370`. Browser widths 1095, 820, and 390 px had no document overflow after repair. Keyboard evidence selection survived reload.
+- Offline checkpoint `5ab0a30`: TypeScript, 13 tests, and build passed. The checkpoint command locks out duplicate verification in this worktree.
+- No new UniCorn requests. Next package is the dark palette and contrast verification.
