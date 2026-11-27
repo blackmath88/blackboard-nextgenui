@@ -123,13 +123,15 @@ export const makeUpdate =
 
     return Message.match(message, {
       ChangedChatDraft: ({ value }) => ({ model: { ...model, chatDraft: value.slice(0, 500) } }),
+      MountedChatScroll: () => ({ model }),
       SubmittedChat: () => {
         const text = model.chatDraft.trim()
         if (!text || model.requesting) return { model }
         if (model.providerMode === 'runtime') {
           const conversation = [...model.conversation, { role: 'user' as const, text }].slice(-30)
           const chatContext = model.sharing ? taskContext(model.workspaceTasks) : ''
-          const next = { ...model, conversation, chatContext, chatDraft: '', requesting: true, chatFailed: false, chatStopped: false, partialReply: '' }
+          const next = { ...model, conversation, chatContext, chatDraft: '', requesting: true,
+            chatSequence: model.chatSequence + 1, chatFailed: false, chatStopped: false, partialReply: '' }
           return { model: next, commands: persist(next) }
         }
         const next = { ...model, chatDraft: '', chatHistory: [...model.chatHistory, text].slice(-30) }
@@ -145,7 +147,18 @@ export const makeUpdate =
         const result = makeUpdate(deps)(next, Message.ClickedAsk({ question }))
         return { ...result, commands: [...persist(next), ...(result.commands ?? [])] }
       },
-      StreamedChat: ({ text }) => ({ model: { ...model, partialReply: model.partialReply + text } }),
+      StreamedChat: ({ text, sequence }) => ({
+        model: model.requesting && sequence === model.chatSequence
+          ? { ...model, partialReply: model.partialReply + text }
+          : model,
+      }),
+      RetriedChat: () => {
+        if (model.providerMode !== 'runtime' || model.requesting || model.conversation.at(-1)?.role !== 'user') return { model }
+        return { model: { ...model, requesting: true, chatSequence: model.chatSequence + 1,
+          chatContext: model.sharing ? taskContext(model.workspaceTasks) : '',
+          chatFailed: false, chatStopped: false, partialReply: '',
+        } }
+      },
       StoppedChat: () => {
         if (!model.requesting || model.providerMode !== 'runtime') return { model }
         const partial = model.partialReply.trim()
@@ -155,7 +168,8 @@ export const makeUpdate =
         const next = { ...model, conversation, requesting: false, chatStopped: true, partialReply: '' }
         return { model: next, commands: persist(next) }
       },
-      ReceivedChat: ({ result }) => {
+      ReceivedChat: ({ result, sequence }) => {
+        if (sequence !== undefined && (!model.requesting || sequence !== model.chatSequence)) return { model }
         const next = {
           ...model,
           requesting: false,
@@ -168,7 +182,11 @@ export const makeUpdate =
         }
         return { model: next, commands: persist(next) }
       },
-      FailedChat: () => ({ model: { ...model, requesting: false, chatFailed: true } }),
+      FailedChat: ({ sequence }) => ({
+        model: model.requesting && sequence === model.chatSequence
+          ? { ...model, requesting: false, chatFailed: true }
+          : model,
+      }),
       AppliedChatWorkspace: () => {
         if (!model.proposedWorkspace) return { model }
         const next = { ...model, previousWorkspace: model.conversationWorkspace,

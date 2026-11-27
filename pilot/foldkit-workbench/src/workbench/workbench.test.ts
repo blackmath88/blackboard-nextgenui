@@ -15,6 +15,23 @@ import { resolveFrame, resolveInspector } from './resolve.js'
 import { session } from './harness.js'
 import { checklistKey, taskContext } from './chat.js'
 
+it('ignores late deltas and replies after stopping and retrying', async () => {
+  const board = session({ ...initialModel(fixtureProject()), providerMode: 'runtime' })
+  await board.send(Message.ChangedChatDraft({ value: 'Plan a demo' }))
+  await board.send(Message.SubmittedChat())
+  const first = board.model().chatSequence
+  await board.send(Message.StoppedChat())
+  await board.send(Message.RetriedChat())
+  const second = board.model().chatSequence
+  await board.send(Message.StreamedChat({ sequence: first, text: 'Stale' }))
+  await board.send(Message.ReceivedChat({ sequence: first, result: { reply: 'Stale', workspace: null } }))
+  expect(board.model().conversation).toHaveLength(1)
+  await board.send(Message.StreamedChat({ sequence: second, text: 'Current' }))
+  expect(board.model().partialReply).toBe('Current')
+  await board.send(Message.ReceivedChat({ sequence: second, result: { reply: 'Current', workspace: null } }))
+  expect(board.model().conversation.map(message => message.text)).toEqual(['Plan a demo', 'Current'])
+})
+
 it('keeps an accepted edit across a reframe and reload', async () => {
   const board = session()
   const section = { title: 'Prepare', kind: 'checklist' as const, items: ['Book a room'] }

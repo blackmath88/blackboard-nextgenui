@@ -10,6 +10,7 @@ import type { Document, HtmlBuilder } from 'foldkit/html'
 import { Option } from 'effect'
 import { checklistKey } from './chat.js'
 import { chatMarkdown } from './chat-markdown.js'
+import { FollowChat } from './chat-scroll.js'
 
 import {
   type Probe,
@@ -510,7 +511,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
     body: h.main([h.Class('wb blank-workbench')], [
       h.section([h.Class('col conversation')], [
         h.h2([], ['Conversation']),
-        h.ol([h.Class('conversation-history')], [
+        h.ol([h.Class('conversation-history'), h.OnMount(FollowChat())], [
           ...model.conversation.map(({ role, text }) =>
           h.li([], [h.strong([], [role === 'user' ? 'You' : 'Blackboard']),
             ...(role === 'user' ? [h.p([], [text])] : renderAnswer(text))]),
@@ -521,7 +522,10 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
           model.partialReply ? 'Writing reply…' : 'Waiting for Qwen…',
         ])] : []),
         ...(model.chatStopped ? [h.p([h.Class('chat-progress'), h.Role('status')], ['Response stopped.'])] : []),
-        ...(model.chatFailed ? [h.p([h.Role('status')], ['Qwen couldn’t reply. Send another message to try again.'])] : []),
+        ...(model.chatFailed ? [h.p([h.Role('status')], ['Qwen couldn’t complete the reply.'])] : []),
+        ...(!model.requesting && model.conversation.at(-1)?.role === 'user'
+          ? [h.div([], [button('Retry last message', Message.RetriedChat(), [h.Class('ghost')])])]
+          : []),
         h.form([h.Class('chat-composer'), h.OnSubmit(Message.SubmittedChat())], [
           h.textarea([h.AriaLabel('Message'), h.Placeholder('Start a conversation…'), h.Rows(2),
             h.Value(model.chatDraft), h.OnInput((value) => Message.ChangedChatDraft({ value })),
@@ -557,10 +561,12 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
         ])] : []),
         ...(model.workspaceTasks.length || workspaceLayout === 'kanban' ? [h.section([], [
           h.h2([], ['Accepted tasks']),
+          ...(model.workspaceTasks.length ? [button(model.sharing ? 'Task context on' : 'Task context off',
+            Message.ClickedToggleSharing(), [h.Class('ghost small'), h.AriaPressed(String(model.sharing))])] : []),
           workspaceLayout === 'kanban' ? h.div([h.Class('workspace-kanban')], [false, true].map(done => {
             const tasks = model.workspaceTasks.filter(task => task.done === done)
             return h.section([], [
-              h.h3([], [done ? 'Done' : 'Open']),
+              h.h3([], [done ? 'Done' : 'Open', ' ', h.small([h.Class('hint')], [String(tasks.length)])]),
               tasks.length ? h.ul([h.Class('accepted-work')], tasks.map(renderTask)) : h.p([h.Class('hint')], [
                 done ? 'Completed tasks appear here.' : 'Accept a task from the checklist below.',
               ]),
@@ -569,18 +575,24 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
         ])] : []),
         ...(model.conversationWorkspace === null ? [] : [
         h.h2([h.Class(workspaceLayout === 'map' ? 'map-center' : '')], [model.conversationWorkspace.title]),
-        h.div([h.Class(workspaceLayout === 'map' ? 'map-branches' : 'summary-sections')], model.conversationWorkspace.sections.map((section) => h.section([], [
-          h.h3([], [section.title]),
-          h.ul([], section.items.map((item, index) => {
+        ...(workspaceLayout === 'kanban' && model.conversationWorkspace.sections.some(section => section.items.length)
+          ? [h.h3([], ['Suggestions'])] : []),
+        h.div([h.Class(workspaceLayout === 'map' ? 'map-branches' : 'summary-sections')], model.conversationWorkspace.sections.flatMap((section) => {
+          const rows = section.items.flatMap((item, index) => {
             const key = checklistKey(section, index)
             const accepted = model.workspaceTasks.find(task => task.id === key)
-            return h.li([], section.kind !== 'checklist' ? [item] : [
+            if (workspaceLayout === 'kanban' && accepted) return []
+            return [h.li([], section.kind !== 'checklist' ? [item] : [
               h.label([], [h.input([h.Type('checkbox'), h.Checked(accepted?.done ?? model.checkedChatItems.includes(key)),
                 h.OnClick(Message.ToggledChatItem({ key }))]), ' ', accepted?.title ?? item]),
               ...(accepted ? [] : [button('Accept task', Message.AcceptedWorkspaceTask({ id: key, title: item }), [h.Class('small')])]),
-            ])
-          })),
-        ]))),
+            ])]
+          })
+          if (!rows.length) return []
+          const title = workspaceLayout === 'kanban' && /^(open|done|to do|todo|in progress)$/i.test(section.title.trim())
+            ? 'Suggested tasks' : section.title
+          return [h.section([], [h.h3([], [title]), h.ul([], rows)])]
+        })),
         ]),
         ...(model.previousWorkspace === undefined ? [] : [
           h.div([h.Class('workspace-tools')], [button('Undo view change', Message.UndidChatWorkspace())]),

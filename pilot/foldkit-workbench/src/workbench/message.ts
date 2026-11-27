@@ -21,9 +21,11 @@ export const Message = defineMessageUnion({
   ClickedAsk: { question: QuestionId },
   ChangedChatDraft: { value: Schema.String },
   SubmittedChat: {},
+  MountedChatScroll: {},
   StoppedChat: {},
-  ReceivedChat: { result: ChatReply },
-  StreamedChat: { text: Schema.String },
+  RetriedChat: {},
+  ReceivedChat: { result: ChatReply, sequence: Schema.optional(Schema.Number) },
+  StreamedChat: { text: Schema.String, sequence: Schema.Number },
   AppliedChatWorkspace: {},
   UndidChatWorkspace: {},
   ChangedWorkspaceLayout: { layout: WorkspaceLayout },
@@ -31,7 +33,7 @@ export const Message = defineMessageUnion({
   AcceptedWorkspaceTask: { id: Schema.String, title: Schema.String },
   RenamedWorkspaceTask: { id: Schema.String, title: Schema.String },
   ToggledChatItem: { key: Schema.String },
-  FailedChat: {},
+  FailedChat: { sequence: Schema.Number },
   /** Untrusted provider output, exactly as it arrived. */
   ReceivedProposals: {
     question: QuestionId,

@@ -511,10 +511,27 @@ blockquote {
 .workspace-kanban h3, .map-branches h3 { margin-top: 0; }
 .map-center {
   text-align: center;
-  border-bottom: 2px solid var(--accent);
-  padding: 0 8px 10px;
+  align-self: center;
+  margin: 8px 0 0;
+  padding: 8px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
 }
-.map-branches > section { border-top: 2px solid var(--accent); }
+.map-branches { position: relative; padding-top: 12px; }
+.map-branches::before {
+  content: ''; position: absolute; top: -12px; left: 50%; height: 18px;
+  border-left: 1px solid var(--accent);
+}
+.map-branches > section { position: relative; }
+.map-branches > section:nth-child(-n+2)::before {
+  content: ''; position: absolute; top: -7px; height: 6px; width: calc(50% + 5px);
+  border: solid var(--accent); border-width: 1px 0 0;
+}
+.map-branches > section:first-child::before { left: 50%; border-left-width: 1px; }
+.map-branches > section:nth-child(2)::before { right: 50%; border-right-width: 1px; }
+@media (max-width: 420px) {
+  .map-branches > section:nth-child(-n+2)::before { display: none; }
+}
 .summary-sections > section + section { border-top: 1px solid var(--line); }
 .blank-workbench .conversation-history pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .blank-workbench .conversation-history code { background: var(--bg); padding: 2px 4px; border-radius: 4px; }
