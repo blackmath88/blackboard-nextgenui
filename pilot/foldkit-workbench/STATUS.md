@@ -36,3 +36,10 @@
 - Codex implemented the dark palette and keyboard-focus styles in `8ecd638`. TypeScript, 13 tests and build passed. Rendered dark-mode and contrast checks remain pending.
 - Zero new UniCorn calls. Sustained-use permission remains unverified.
 - The existing takt! task is the status surface for 15-minute check-ins.
+
+## 2026-11-27 17:33 CET
+
+- Verified clean application checkpoint `93bb790` on `mac-mini-bruh`. TypeScript, 27 tests, and the production build passed.
+- In a browser over Tailscale, generated a checklist, accepted a task, marked it Done, reloaded, and jumped back to the proposing chat reply. A separate live follow-up correctly identified the completed task. Phone pane switching passed at 390 px without horizontal overflow.
+- The standalone HTML export renderer passed its test. Browser download delivery remains unverified after the browser check timed out.
+- Codex implemented the latest changes. No implementation worker dispatched during this check-in. Earlier bounded Qwen demo requests reached the live service; their token counts are unknown. The sustained-use budget remains unverified.
