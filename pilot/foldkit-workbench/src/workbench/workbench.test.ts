@@ -13,6 +13,24 @@ import { initialModel } from './model.js'
 import { encodePersisted, decodePersisted, modelOf } from './persistence.js'
 import { resolveFrame, resolveInspector } from './resolve.js'
 import { session } from './harness.js'
+import { checklistKey } from './chat.js'
+
+it('keeps an accepted edit across a reframe and reload', async () => {
+  const board = session()
+  const section = { title: 'Prepare', kind: 'checklist' as const, items: ['Book a room'] }
+  await board.send(Message.ReceivedChat({ result: { reply: 'Try this.', workspace: { title: 'Plan', sections: [section] } } }))
+  await board.send(Message.AppliedChatWorkspace())
+  const id = checklistKey(section, 0)
+  await board.send(Message.AcceptedWorkspaceTask({ id, title: 'Book a room' }))
+  await board.send(Message.RenamedWorkspaceTask({ id, title: 'Book the library' }))
+  await board.send(Message.ToggledChatItem({ key: id }))
+  await board.send(Message.ReceivedChat({ result: { reply: 'Another view.', workspace: { title: 'Summary', sections: [] } } }))
+  await board.send(Message.AppliedChatWorkspace())
+  const restored = decodePersisted(encodePersisted(board.model()))
+  expect(restored._tag === 'Restored' && restored.state.workspaceTasks).toMatchObject([
+    { id, title: 'Book the library', done: true },
+  ])
+})
 
 it('starts with an empty workspace and preserves it across ordinary replies', async () => {
   const board = session()
@@ -20,8 +38,10 @@ it('starts with an empty workspace and preserves it across ordinary replies', as
   expect(board.model().conversationWorkspace).toBeNull()
   const workspace = { title: 'Book swap', sections: [{ title: 'Before the event', items: ['Book a room'] }] }
   await board.send(Message.ReceivedChat({ result: { reply: 'Here is a plan.', workspace } }))
+  expect(board.model().conversationWorkspace).toBeNull()
+  await board.send(Message.AppliedChatWorkspace())
   await board.send(Message.ReceivedChat({ result: { reply: 'You’re welcome.', workspace: null } }))
-  expect(board.model().conversationWorkspace).toEqual(workspace)
+  expect(board.model().conversationWorkspace).toMatchObject(workspace)
   expect(board.model().conversation.at(-1)).toEqual({ role: 'assistant', text: 'You’re welcome.' })
 })
 

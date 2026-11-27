@@ -9,7 +9,7 @@
  */
 
 import { Schema } from 'effect'
-import { ChatMessage, ChatWorkspace } from './chat.js'
+import { ChatMessage, ChatWorkspace, WorkspaceTask } from './chat.js'
 
 import { Project } from '../project/records.js'
 import {
@@ -140,7 +140,12 @@ export const Model = Schema.Struct({
   chatHistory: Schema.Array(Schema.String),
   conversation: Schema.Array(ChatMessage),
   conversationWorkspace: Schema.NullOr(ChatWorkspace),
+  proposedWorkspace: Schema.NullOr(ChatWorkspace),
+  workspaceTasks: Schema.Array(WorkspaceTask),
+  chatContext: Schema.String,
   chatFailed: Schema.Boolean,
+  partialReply: Schema.String,
+  checkedChatItems: Schema.Array(Schema.String),
   preview: Schema.optional(Preview),
 
   selection: Selection,
@@ -180,7 +185,12 @@ export const initialModel = (project: Project): Model => ({
   chatHistory: [],
   conversation: [],
   conversationWorkspace: null,
+  proposedWorkspace: null,
+  workspaceTasks: [],
+  chatContext: '',
   chatFailed: false,
+  partialReply: '',
+  checkedChatItems: [],
   selection: {},
   pins: [],
   sharing: true,

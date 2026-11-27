@@ -19,6 +19,8 @@ import { Project } from '../project/records.js'
 export const StorageKey = 'blackboard.foldkit-workbench.v1'
 export const PersistedVersion = 1
 
+import { ChatMessage, ChatWorkspace, WorkspaceTask } from './chat.js'
+
 export const PersistedState = Schema.Struct({
   version: Schema.Literal(PersistedVersion),
   project: Project,
@@ -28,6 +30,10 @@ export const PersistedState = Schema.Struct({
   arrangementHistory: Schema.Array(Arrangement),
   savedViews: Schema.Array(SavedView),
   chatHistory: Schema.optional(Schema.Array(Schema.String)),
+  conversation: Schema.optional(Schema.Array(ChatMessage)),
+  conversationWorkspace: Schema.optional(Schema.NullOr(ChatWorkspace)),
+  workspaceTasks: Schema.optional(Schema.Array(WorkspaceTask)),
+  checkedChatItems: Schema.optional(Schema.Array(Schema.String)),
   selection: Selection,
   pins: Schema.Array(Schema.String),
   sharing: Schema.Boolean,
@@ -48,6 +54,10 @@ export const persistedOf = (model: Model): PersistedState => ({
   arrangementHistory: model.arrangementHistory,
   savedViews: model.savedViews,
   chatHistory: model.chatHistory,
+  conversation: model.conversation,
+  conversationWorkspace: model.conversationWorkspace,
+  workspaceTasks: model.workspaceTasks,
+  checkedChatItems: model.checkedChatItems,
   selection: model.selection,
   pins: model.pins,
   sharing: model.sharing,
@@ -97,6 +107,10 @@ export const modelOf = (
   arrangementHistory: state.arrangementHistory,
   savedViews: state.savedViews,
   chatHistory: state.chatHistory ?? [],
+  conversation: state.conversation ?? [],
+  conversationWorkspace: state.conversationWorkspace ?? null,
+  workspaceTasks: state.workspaceTasks ?? [],
+  checkedChatItems: state.checkedChatItems ?? [],
   selection: state.selection,
   pins: state.pins,
   sharing: state.sharing,

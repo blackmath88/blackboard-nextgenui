@@ -22,6 +22,12 @@ export const Message = defineMessageUnion({
   ChangedChatDraft: { value: Schema.String },
   SubmittedChat: {},
   ReceivedChat: { result: ChatReply },
+  StreamedChat: { text: Schema.String },
+  AppliedChatWorkspace: {},
+  DismissedChatWorkspace: {},
+  AcceptedWorkspaceTask: { id: Schema.String, title: Schema.String },
+  RenamedWorkspaceTask: { id: Schema.String, title: Schema.String },
+  ToggledChatItem: { key: Schema.String },
   FailedChat: {},
   /** Untrusted provider output, exactly as it arrived. */
   ReceivedProposals: {

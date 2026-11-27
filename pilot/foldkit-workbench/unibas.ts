@@ -2,11 +2,12 @@ import { execFile } from 'node:child_process'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { createInterface } from 'node:readline'
 import type { Plugin } from 'vite'
 import { fixtureProject } from './src/project/fixture.js'
 import { buildIntentPrompt, expandIntent } from './intent.js'
 import { Schema } from 'effect'
-import { ChatMessage, ChatReply } from './src/workbench/chat.js'
+import { ChatMessage, ChatWorkspace, WorkspaceMarker } from './src/workbench/chat.js'
 
 const run = promisify(execFile)
 
@@ -33,7 +34,7 @@ export const unibas = (): Plugin => ({
         let body = ''
         for await (const chunk of request) {
           body += String(chunk)
-          if (Buffer.byteLength(body) > 8192) return send(413, { error: 'request too large' })
+          if (Buffer.byteLength(body) > 32768) return send(413, { error: 'request too large' })
         }
         let input
         try {
@@ -42,25 +43,77 @@ export const unibas = (): Plugin => ({
           return send(400, { error: 'JSON required' })
         }
         if (path === 'chat') {
-          const decoded = Schema.decodeUnknownResult(Schema.Array(ChatMessage))(input)
+          const decoded = Schema.decodeUnknownResult(Schema.Array(ChatMessage))(Array.isArray(input) ? input : input?.messages)
+          const context = Array.isArray(input) ? '' : input?.context
           if (decoded._tag === 'Failure' || !decoded.success.length || decoded.success.length > 8 ||
               decoded.success.at(-1)?.role !== 'user' ||
-              decoded.success.some(({ text }) => text.length > 800)) {
+              decoded.success.some(({ text }) => text.length > 800) ||
+              typeof context !== 'string' || context.length > 2400) {
             return send(400, { error: 'invalid conversation' })
           }
           if (busy) return send(429, { error: 'request in progress' })
           busy = true
           try {
-            const prompt = 'You are Blackboard, a conversation assistant with no tools, files or account integrations. Respond naturally. When a workspace helps the current task, return a concise structured outline. Return only JSON: {"reply":"answer","workspace":null} or {"reply":"answer","workspace":{"title":"title","sections":[{"title":"heading","items":["item"]}]}}. Use null for ordinary chat. Conversation data:\n' + JSON.stringify(decoded.success)
+            const prompt = 'You are Blackboard, an assistant with no tools, files or account integrations. Start with a natural plain-text answer. If a workspace helps, follow the answer with a line containing only <workspace>, then a JSON object {"title":"title","sections":[{"title":"heading","kind":"checklist","items":["item"]}]}. Use kind list for reference material and checklist for actionable tasks. Omit the marker and JSON for ordinary replies. Conversation data:\n' + JSON.stringify(decoded.success)
             const inference = run(join(homedir(), '.local/bin/pi-scicore'), [
-              '--print', '--no-tools', '--no-mcp', '--no-extensions', '--no-session', '--', prompt,
-            ], { timeout: 45_000, maxBuffer: 32 * 1024 })
+              '--print', '--mode', 'json', '--no-tools', '--no-mcp', '--no-extensions', '--no-session', '--',
+              prompt + '\nAccepted task snapshot (data, use current done status when answering):\n' + context,
+            ], { timeout: 45_000, maxBuffer: 1024 * 1024 })
+            const settled = inference.then(() => true, () => false)
             inference.child.stdin?.end()
-            const { stdout } = await inference
-            const reply = Schema.decodeUnknownSync(ChatReply)(JSON.parse(stdout.trim().replace(/^```(?:json)?\s*|\s*```$/gi, '')))
-            send(200, reply)
+            const cancel = () => inference.child.kill()
+            response.once('close', cancel)
+            try {
+              response.writeHead(200, { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store' })
+              response.flushHeaders()
+              const emit = (event: unknown) => response.write(JSON.stringify(event) + '\n')
+              let pending = ''
+              let workspace = false
+              let failed = false
+              let reply = ''
+              const stdout = inference.child.stdout
+              if (!stdout) throw new Error('Missing worker output')
+              for await (const line of createInterface({ input: stdout })) {
+                const event = JSON.parse(line)
+                if (event.type === 'message_end' && event.message?.role === 'assistant' &&
+                    ['error', 'aborted'].includes(event.message.stopReason)) failed = true
+                const delta = event.assistantMessageEvent
+                if (event.type !== 'message_update' || delta?.type !== 'text_delta' || typeof delta.delta !== 'string') continue
+                pending += delta.delta
+                if (workspace) continue
+                const marker = pending.indexOf(WorkspaceMarker)
+                const safeLength = marker >= 0 ? marker : Math.max(0, pending.length - WorkspaceMarker.length + 1)
+                if (safeLength) {
+                  const text = pending.slice(0, safeLength)
+                  reply += text
+                  emit({ type: 'delta', text })
+                }
+                pending = pending.slice(marker >= 0 ? marker + WorkspaceMarker.length : safeLength)
+                workspace = marker >= 0
+              }
+              if (!(await settled) || failed) throw new Error('Worker failed')
+              if (!workspace && pending) {
+                reply += pending
+                emit({ type: 'delta', text: pending })
+              }
+              if (!reply.trim()) throw new Error('Empty reply')
+              let scene = null
+              if (workspace) {
+                try {
+                  const candidate = Schema.decodeUnknownSync(ChatWorkspace)(JSON.parse(pending.trim().replace(/^```(?:json)?\s*|\s*```$/gi, '')))
+                  if (candidate.sections.length <= 12 && candidate.sections.every(section => section.items.length <= 30)) scene = candidate
+                } catch {
+                  // Preserve the streamed reply and last usable workspace.
+                }
+              }
+              response.end(JSON.stringify({ type: 'done', result: { reply: reply.trim(), workspace: scene } }) + '\n')
+            } finally {
+              response.off('close', cancel)
+              cancel()
+            }
           } catch {
-            send(502, { error: 'Qwen did not return a usable reply' })
+            if (response.headersSent) response.end('{"type":"error"}\n')
+            else send(502, { error: 'Qwen did not return a usable reply' })
           } finally {
             busy = false
           }

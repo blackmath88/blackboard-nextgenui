@@ -16,6 +16,7 @@ import { initialModel, Model, type Model as WorkbenchModel } from './workbench/m
 import { StorageKey, encodePersisted, modelOf, restoreFrom } from './workbench/persistence.js'
 import { makeUpdate } from './workbench/update.js'
 import { view } from './workbench/view.js'
+import { chatSubscriptions } from './workbench/chat-stream.js'
 
 /** A developer-supplied loopback route, or nothing. */
 const runtimeRoute = (): string | undefined => {
@@ -66,6 +67,7 @@ const boot = (): void => {
       now: () => new Date().toISOString(),
     }),
     view: (current, h) => view(current, h, { restoreNote }),
+    subscriptions: chatSubscriptions,
     container: document.getElementById('app'),
   })
 

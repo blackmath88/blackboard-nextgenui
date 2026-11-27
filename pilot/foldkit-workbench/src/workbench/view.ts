@@ -7,6 +7,7 @@
  */
 
 import type { Document, HtmlBuilder } from 'foldkit/html'
+import { checklistKey } from './chat.js'
 
 import {
   type Probe,
@@ -481,9 +482,12 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
     body: h.main([h.Class('wb blank-workbench')], [
       h.section([h.Class('col conversation')], [
         h.h2([], ['Conversation']),
-        h.ol([h.Class('conversation-history'), h.AriaLive('polite')], model.conversation.map(({ role, text }) =>
+        h.ol([h.Class('conversation-history'), h.AriaLive('polite')], [
+          ...model.conversation.map(({ role, text }) =>
           h.li([], [h.strong([], [role === 'user' ? 'You' : 'Blackboard']), h.p([], [text])]),
-        )),
+          ),
+          ...(model.partialReply ? [h.li([], [h.strong([], ['Blackboard']), h.p([], [model.partialReply])])] : []),
+        ]),
         ...(model.chatFailed ? [h.p([h.Role('status')], ['Qwen couldn’t reply. Send another message to try again.'])] : []),
         h.form([h.Class('row'), h.OnSubmit(Message.SubmittedChat())], [
           h.input([h.Class('name'), h.AriaLabel('Message'), h.Placeholder('Start a conversation…'),
@@ -494,12 +498,44 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
         ]),
         h.small([h.Class('hint')], ['Messages are sent to UniBas Qwen. Use synthetic or public information.']),
       ]),
-      h.section([h.Class('col conversation')], model.conversationWorkspace === null ? [] : [
+      h.section([h.Class('col conversation')], [
+        ...(model.proposedWorkspace ? [h.section([h.Class('workspace-proposal')], [
+          h.h2([], ['Suggested workspace']),
+          h.p([], [model.proposedWorkspace.title]),
+          h.ul([], model.proposedWorkspace.sections.map(section => h.li([], [section.title]))),
+          h.div([h.Class('row')], [
+            button('Apply view', Message.AppliedChatWorkspace(), [h.Class('primary')]),
+            button('Decline', Message.DismissedChatWorkspace()),
+          ]),
+        ])] : []),
+        ...(model.workspaceTasks.length ? [h.section([], [
+          h.h2([], ['Accepted tasks']),
+          h.ul([h.Class('accepted-work')], model.workspaceTasks.map(task => h.li([h.Key(task.id)], [
+            h.label([], [h.input([h.Type('checkbox'), h.Checked(task.done),
+              h.OnClick(Message.ToggledChatItem({ key: task.id }))]), ' ', task.title]),
+            h.details([], [
+              h.summary([], ['Edit or trace']),
+              h.input([h.Class('name'), h.AriaLabel('Task title'), h.Value(task.title),
+                h.OnChange(title => Message.RenamedWorkspaceTask({ id: task.id, title }))]),
+              ...(task.source ? [h.blockquote([], [task.source])] : []),
+            ]),
+          ]))),
+        ])] : []),
+        ...(model.conversationWorkspace === null ? [] : [
         h.h2([], [model.conversationWorkspace.title]),
         ...model.conversationWorkspace.sections.map((section) => h.section([], [
           h.h3([], [section.title]),
-          h.ul([], section.items.map((item) => h.li([], [item]))),
+          h.ul([], section.items.map((item, index) => {
+            const key = checklistKey(section, index)
+            const accepted = model.workspaceTasks.some(task => task.id === key)
+            return h.li([], section.kind !== 'checklist' ? [item] : [
+              h.label([], [h.input([h.Type('checkbox'), h.Checked(model.checkedChatItems.includes(key)),
+                h.OnClick(Message.ToggledChatItem({ key }))]), ' ', item]),
+              ...(accepted ? [] : [button('Accept task', Message.AcceptedWorkspaceTask({ id: key, title: item }), [h.Class('small')])]),
+            ])
+          })),
         ])),
+        ]),
       ]),
     ]),
   }

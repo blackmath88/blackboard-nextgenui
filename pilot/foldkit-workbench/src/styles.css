@@ -469,6 +469,13 @@ blockquote {
 
 .blank-workbench .conversation { overflow-wrap: anywhere; }
 .blank-workbench .conversation p { white-space: pre-wrap; }
+.blank-workbench { gap: 12px; }
+.blank-workbench .conversation { border-radius: 10px; padding: 18px; }
+.blank-workbench .conversation-history p { margin: 4px 0 0; }
+.workspace-proposal { border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.accepted-work { list-style: none; padding: 0; }
+.accepted-work li { border-bottom: 1px solid var(--line); padding: 8px 0; }
+.blank-workbench input[type='checkbox'] { accent-color: var(--accent); }
 
 @media (max-width: 640px) {
   .blank-workbench { grid-template-columns: minmax(0, 1fr); }

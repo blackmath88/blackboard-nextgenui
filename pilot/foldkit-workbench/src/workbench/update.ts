@@ -24,7 +24,8 @@ import type { Project } from '../project/records.js'
 import { auditFor, findRecord, markTaskDone } from '../project/records.js'
 import { reviewProposals } from '../generation/validate.js'
 import { type TurnRequest, buildTurnRequest, questionText } from '../generation/turn.js'
-import { AskFrame, RunChat, RunTurn, SaveFixture } from './command.js'
+import { AskFrame, RunTurn, SaveFixture } from './command.js'
+import { checklistKey } from './chat.js'
 import { type Arrangement, type Model, type Proposal, type SavedView, defaultArrangement } from './model.js'
 import { Message } from './message.js'
 import { StorageKey } from './persistence.js'
@@ -127,12 +128,9 @@ export const makeUpdate =
         if (!text || model.requesting) return { model }
         if (model.providerMode === 'runtime') {
           const conversation = [...model.conversation, { role: 'user' as const, text }].slice(-30)
-          return {
-            model: { ...model, conversation, chatDraft: '', requesting: true, chatFailed: false },
-            commands: [RunChat({ messages: conversation.slice(-8).map((entry) => ({
-              ...entry, text: entry.text.slice(0, 800),
-            })) })],
-          }
+          const chatContext = model.sharing ? JSON.stringify(model.workspaceTasks.slice(-12).map(({ title, done }) => ({ title, done }))).slice(0, 2400) : ''
+          const next = { ...model, conversation, chatContext, chatDraft: '', requesting: true, chatFailed: false, partialReply: '' }
+          return { model: next, commands: persist(next) }
         }
         const next = { ...model, chatDraft: '', chatHistory: [...model.chatHistory, text].slice(-30) }
         const question = /evidence|sources?|unsupported/i.test(text)
@@ -147,15 +145,55 @@ export const makeUpdate =
         const result = makeUpdate(deps)(next, Message.ClickedAsk({ question }))
         return { ...result, commands: [...persist(next), ...(result.commands ?? [])] }
       },
-      ReceivedChat: ({ result }) => ({
-        model: {
+      StreamedChat: ({ text }) => ({ model: { ...model, partialReply: model.partialReply + text } }),
+      ReceivedChat: ({ result }) => {
+        const next = {
           ...model,
           requesting: false,
+          partialReply: '',
           conversation: [...model.conversation, { role: 'assistant' as const, text: result.reply }].slice(-30),
-          conversationWorkspace: result.workspace ?? model.conversationWorkspace,
-        },
-      }),
+          proposedWorkspace: result.workspace ? {
+            ...result.workspace,
+            source: model.conversation.at(-1)?.text ?? '',
+          } : model.proposedWorkspace,
+        }
+        return { model: next, commands: persist(next) }
+      },
       FailedChat: () => ({ model: { ...model, requesting: false, chatFailed: true } }),
+      AppliedChatWorkspace: () => {
+        if (!model.proposedWorkspace) return { model }
+        const next = { ...model, conversationWorkspace: model.proposedWorkspace, proposedWorkspace: null }
+        return { model: next, commands: persist(next) }
+      },
+      DismissedChatWorkspace: () => ({ model: { ...model, proposedWorkspace: null } }),
+      AcceptedWorkspaceTask: ({ id, title }) => {
+        if (!model.conversationWorkspace?.sections.some(section =>
+          section.kind === 'checklist' && section.items.some((item, index) => item === title && checklistKey(section, index) === id),
+        )) return { model }
+        if (model.workspaceTasks.some(task => task.id === id)) return { model }
+        const source = model.conversationWorkspace.source ?? ''
+        const next = { ...model, workspaceTasks: [...model.workspaceTasks, {
+          id, title, source, done: model.checkedChatItems.includes(id),
+        }].slice(-100) }
+        return { model: next, commands: persist(next) }
+      },
+      RenamedWorkspaceTask: ({ id, title }) => {
+        const trimmed = title.trim().slice(0, 240)
+        if (!trimmed) return { model }
+        const next = { ...model, workspaceTasks: model.workspaceTasks.map(task =>
+          task.id === id ? { ...task, title: trimmed } : task,
+        ) }
+        return { model: next, commands: persist(next) }
+      },
+      ToggledChatItem: ({ key }) => {
+        const checkedChatItems = model.checkedChatItems.includes(key)
+          ? model.checkedChatItems.filter(item => item !== key)
+          : [...model.checkedChatItems, key].slice(-360)
+        const next = { ...model, checkedChatItems, workspaceTasks: model.workspaceTasks.map(task =>
+          task.id === key ? { ...task, done: checkedChatItems.includes(key) } : task,
+        ) }
+        return { model: next, commands: persist(next) }
+      },
       // ------------------------------------------------------------ asking
       ClickedAsk: ({ question }) => ({
         model: { ...model, question, requesting: true },
