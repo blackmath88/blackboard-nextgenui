@@ -43,3 +43,9 @@
 - In a browser over Tailscale, generated a checklist, accepted a task, marked it Done, reloaded, and jumped back to the proposing chat reply. A separate live follow-up correctly identified the completed task. Phone pane switching passed at 390 px without horizontal overflow.
 - The standalone HTML export renderer passed its test. Browser download delivery remains unverified after the browser check timed out.
 - Codex implemented the latest changes. No implementation worker dispatched during this check-in. Earlier bounded Qwen demo requests reached the live service; their token counts are unknown. The sustained-use budget remains unverified.
+
+## 2026-11-27 18:33 CET
+
+- Idle since the verified Tailscale pass. Clean checkout on `mac-mini-bruh` at status commit `fe43acb`; the application remains at `93bb790`.
+- Latest recorded checks remain TypeScript, 27 tests, and the production build. No checks rerun this hour. Browser delivery of the HTML export is still open.
+- No new UniCorn requests or worker dispatch. Prior live demo token counts and the sustained-use budget remain unknown.
