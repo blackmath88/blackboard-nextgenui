@@ -5,8 +5,11 @@ export const ChatMessage = Schema.Struct({
   text: Schema.String,
 })
 
+export const WorkspaceLayout = Schema.Literals(['summary', 'map', 'kanban'])
+
 export const ChatWorkspace = Schema.Struct({
   title: Schema.String,
+  layout: Schema.optional(WorkspaceLayout),
   source: Schema.optional(Schema.String),
   sections: Schema.Array(Schema.Struct({
     title: Schema.String,

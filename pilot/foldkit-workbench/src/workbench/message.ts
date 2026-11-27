@@ -11,7 +11,7 @@ import { defineMessageUnion } from 'foldkit/message'
 
 import { Probe, QuestionId } from '../generation/proposal.js'
 import { ProviderMode, Turn } from './model.js'
-import { ChatReply } from './chat.js'
+import { ChatReply, WorkspaceLayout } from './chat.js'
 
 export const Direction = Schema.Literals(['up', 'down', 'front', 'back'])
 export type Direction = typeof Direction.Type
@@ -24,6 +24,7 @@ export const Message = defineMessageUnion({
   ReceivedChat: { result: ChatReply },
   StreamedChat: { text: Schema.String },
   AppliedChatWorkspace: {},
+  ChangedWorkspaceLayout: { layout: WorkspaceLayout },
   DismissedChatWorkspace: {},
   AcceptedWorkspaceTask: { id: Schema.String, title: Schema.String },
   RenamedWorkspaceTask: { id: Schema.String, title: Schema.String },

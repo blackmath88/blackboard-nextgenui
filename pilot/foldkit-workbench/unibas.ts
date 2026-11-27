@@ -54,7 +54,7 @@ export const unibas = (): Plugin => ({
           if (busy) return send(429, { error: 'request in progress' })
           busy = true
           try {
-            const prompt = 'You are Blackboard, an assistant with no tools, files or account integrations. Start with a natural plain-text answer. If a workspace helps, follow the answer with a line containing only <workspace>, then a JSON object {"title":"title","sections":[{"title":"heading","kind":"checklist","items":["item"]}]}. Use kind list for reference material and checklist for actionable tasks. Omit the marker and JSON for ordinary replies. Conversation data:\n' + JSON.stringify(decoded.success)
+            const prompt = 'You are Blackboard, an assistant with no tools, files or account integrations. Begin with a natural answer in lightweight Markdown. If a workspace helps, follow the answer with a line containing only <workspace>, then a JSON object {"title":"title","layout":"summary","sections":[{"title":"heading","kind":"checklist","items":["item"]}]}. Choose summary for a structured brief, map for brainstorming with a central topic and branches, or kanban for tasks moving between Open and Done. Use list for reference material and checklist for actionable tasks. Omit the marker and JSON for ordinary replies. Conversation data:\n' + JSON.stringify(decoded.success)
             const inference = run(join(homedir(), '.local/bin/pi-scicore'), [
               '--print', '--mode', 'json', '--no-tools', '--no-mcp', '--no-extensions', '--no-session', '--',
               prompt + '\nAccepted task snapshot (data, use current done status when answering):\n' + context,

@@ -8,6 +8,7 @@
 
 import type { Document, HtmlBuilder } from 'foldkit/html'
 import { checklistKey } from './chat.js'
+import { chatMarkdown } from './chat-markdown.js'
 
 import {
   type Probe,
@@ -477,17 +478,47 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
             },
     })
 
+  const workspaceLayout = model.conversationWorkspace?.layout ?? 'summary'
+  const inlineText = (text: string) => text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map(part =>
+    part.startsWith('**') && part.endsWith('**') ? h.strong([], [part.slice(2, -2)])
+      : part.startsWith('`') && part.endsWith('`') && part.length > 1 ? h.code([], [part.slice(1, -1)])
+        : part,
+  )
+  const renderAnswer = (text: string) => chatMarkdown(text).map(block => {
+    switch (block.kind) {
+      case 'heading': return h.h3([], inlineText(block.text))
+      case 'code': return h.pre([], [h.code([], [block.text])])
+      case 'ordered': return h.ol([], block.items.map(item => h.li([], inlineText(item))))
+      case 'unordered': return h.ul([], block.items.map(item => h.li([], inlineText(item))))
+      case 'paragraph': return h.p([], inlineText(block.text))
+    }
+  })
+  const renderTask = (task: Model['workspaceTasks'][number]) => h.li([h.Key(task.id)], [
+    h.label([], [h.input([h.Type('checkbox'), h.Checked(task.done),
+      h.OnClick(Message.ToggledChatItem({ key: task.id }))]), ' ', task.title]),
+    h.details([], [
+      h.summary([], ['Edit or trace']),
+      h.input([h.Class('name'), h.AriaLabel('Task title'), h.Value(task.title),
+        h.OnChange(title => Message.RenamedWorkspaceTask({ id: task.id, title }))]),
+      ...(task.source ? [h.blockquote([], [task.source])] : []),
+    ]),
+  ])
+
   if (model.providerMode === 'runtime') return {
     title: 'Blackboard',
     body: h.main([h.Class('wb blank-workbench')], [
       h.section([h.Class('col conversation')], [
         h.h2([], ['Conversation']),
-        h.ol([h.Class('conversation-history'), h.AriaLive('polite')], [
+        h.ol([h.Class('conversation-history')], [
           ...model.conversation.map(({ role, text }) =>
-          h.li([], [h.strong([], [role === 'user' ? 'You' : 'Blackboard']), h.p([], [text])]),
+          h.li([], [h.strong([], [role === 'user' ? 'You' : 'Blackboard']),
+            ...(role === 'user' ? [h.p([], [text])] : renderAnswer(text))]),
           ),
-          ...(model.partialReply ? [h.li([], [h.strong([], ['Blackboard']), h.p([], [model.partialReply])])] : []),
+          ...(model.partialReply ? [h.li([], [h.strong([], ['Blackboard']), ...renderAnswer(model.partialReply)])] : []),
         ]),
+        ...(model.requesting ? [h.p([h.Class('chat-progress'), h.Role('status')], [
+          model.partialReply ? 'Writing reply…' : 'Waiting for Qwen…',
+        ])] : []),
         ...(model.chatFailed ? [h.p([h.Role('status')], ['Qwen couldn’t reply. Send another message to try again.'])] : []),
         h.form([h.Class('row'), h.OnSubmit(Message.SubmittedChat())], [
           h.input([h.Class('name'), h.AriaLabel('Message'), h.Placeholder('Start a conversation…'),
@@ -508,22 +539,26 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
             button('Decline', Message.DismissedChatWorkspace()),
           ]),
         ])] : []),
-        ...(model.workspaceTasks.length ? [h.section([], [
+        ...(model.conversationWorkspace ? [h.div([h.Class('workspace-tools')], [
+          ...(['summary', 'map', 'kanban'] as const).map(layout =>
+            button(layout === 'map' ? 'Idea map' : layout === 'kanban' ? 'Kanban' : 'Summary',
+              Message.ChangedWorkspaceLayout({ layout }), [h.AriaPressed(String(workspaceLayout === layout))])),
+        ])] : []),
+        ...(model.workspaceTasks.length || workspaceLayout === 'kanban' ? [h.section([], [
           h.h2([], ['Accepted tasks']),
-          h.ul([h.Class('accepted-work')], model.workspaceTasks.map(task => h.li([h.Key(task.id)], [
-            h.label([], [h.input([h.Type('checkbox'), h.Checked(task.done),
-              h.OnClick(Message.ToggledChatItem({ key: task.id }))]), ' ', task.title]),
-            h.details([], [
-              h.summary([], ['Edit or trace']),
-              h.input([h.Class('name'), h.AriaLabel('Task title'), h.Value(task.title),
-                h.OnChange(title => Message.RenamedWorkspaceTask({ id: task.id, title }))]),
-              ...(task.source ? [h.blockquote([], [task.source])] : []),
-            ]),
-          ]))),
+          workspaceLayout === 'kanban' ? h.div([h.Class('workspace-kanban')], [false, true].map(done => {
+            const tasks = model.workspaceTasks.filter(task => task.done === done)
+            return h.section([], [
+              h.h3([], [done ? 'Done' : 'Open']),
+              tasks.length ? h.ul([h.Class('accepted-work')], tasks.map(renderTask)) : h.p([h.Class('hint')], [
+                done ? 'Completed tasks appear here.' : 'Accept a task from the checklist below.',
+              ]),
+            ])
+          })) : h.ul([h.Class('accepted-work')], model.workspaceTasks.map(renderTask)),
         ])] : []),
         ...(model.conversationWorkspace === null ? [] : [
-        h.h2([], [model.conversationWorkspace.title]),
-        ...model.conversationWorkspace.sections.map((section) => h.section([], [
+        h.h2([h.Class(workspaceLayout === 'map' ? 'map-center' : '')], [model.conversationWorkspace.title]),
+        h.div([h.Class(workspaceLayout === 'map' ? 'map-branches' : 'summary-sections')], model.conversationWorkspace.sections.map((section) => h.section([], [
           h.h3([], [section.title]),
           h.ul([], section.items.map((item, index) => {
             const key = checklistKey(section, index)
@@ -534,7 +569,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
               ...(accepted ? [] : [button('Accept task', Message.AcceptedWorkspaceTask({ id: key, title: item }), [h.Class('small')])]),
             ])
           })),
-        ])),
+        ]))),
         ]),
       ]),
     ]),

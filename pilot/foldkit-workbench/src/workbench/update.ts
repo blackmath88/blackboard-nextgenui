@@ -166,6 +166,11 @@ export const makeUpdate =
         return { model: next, commands: persist(next) }
       },
       DismissedChatWorkspace: () => ({ model: { ...model, proposedWorkspace: null } }),
+      ChangedWorkspaceLayout: ({ layout }) => {
+        if (!model.conversationWorkspace) return { model }
+        const next = { ...model, conversationWorkspace: { ...model.conversationWorkspace, layout } }
+        return { model: next, commands: persist(next) }
+      },
       AcceptedWorkspaceTask: ({ id, title }) => {
         if (!model.conversationWorkspace?.sections.some(section =>
           section.kind === 'checklist' && section.items.some((item, index) => item === title && checklistKey(section, index) === id),

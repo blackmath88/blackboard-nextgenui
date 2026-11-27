@@ -486,6 +486,33 @@ blockquote {
   scrollbar-gutter: stable;
 }
 .blank-workbench .conversation-history p { margin: 4px 0 0; }
+.chat-progress { color: var(--muted); font-size: 12px; margin: 0; }
+.workspace-tools { display: flex; flex-wrap: wrap; gap: 4px; }
+.workspace-tools button[aria-pressed='true'] { border-color: var(--accent); color: var(--accent); }
+.workspace-kanban, .map-branches {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.workspace-kanban > section, .map-branches > section {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}
+.workspace-kanban h3, .map-branches h3 { margin-top: 0; }
+.map-center {
+  text-align: center;
+  border-bottom: 2px solid var(--accent);
+  padding: 0 8px 10px;
+}
+.map-branches > section { border-top: 2px solid var(--accent); }
+.summary-sections > section + section { border-top: 1px solid var(--line); }
+.blank-workbench .conversation-history pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.blank-workbench .conversation-history code { background: var(--bg); padding: 2px 4px; border-radius: 4px; }
+@media (max-width: 420px) {
+  .workspace-kanban, .map-branches { grid-template-columns: minmax(0, 1fr); }
+}
 .workspace-proposal { border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
 .accepted-work { list-style: none; padding: 0; }
 .accepted-work li { border-bottom: 1px solid var(--line); padding: 8px 0; }
