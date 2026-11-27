@@ -70,9 +70,11 @@ export const unibas = (): Plugin => ({
             'Group shape: {id, recordIds}. Group ID must be a listed waitingOnId, record ID or unassigned.',
             'Use only listed record IDs, and include every relevant record. Keep actions empty. Add no prose.',
           ].join('\n')
-          const { stdout } = await run(join(homedir(), '.local/bin/pi-scicore'), [
+          const inference = run(join(homedir(), '.local/bin/pi-scicore'), [
             '--print', '--no-tools', '--no-mcp', '--no-extensions', '--no-session', '--', prompt,
           ], { timeout: 90_000, maxBuffer: 128 * 1024 })
+          inference.child.stdin?.end()
+          const { stdout } = await inference
           const output: unknown = JSON.parse(stdout.trim().replace(/^```(?:json)?\s*|\s*```$/gi, ''))
           send(200, [output])
         } catch (error) {
