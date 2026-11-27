@@ -22,6 +22,7 @@ export const Message = defineMessageUnion({
   ChangedChatDraft: { value: Schema.String },
   SubmittedChat: {},
   MountedChatScroll: {},
+  SelectedMobilePane: { pane: Schema.Literals(['chat', 'workspace']) },
   StoppedChat: {},
   RetriedChat: {},
   ReceivedChat: { result: ChatReply, sequence: Schema.optional(Schema.Number) },

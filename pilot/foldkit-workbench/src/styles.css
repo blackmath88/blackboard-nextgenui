@@ -472,7 +472,7 @@ blockquote {
 .blank-workbench { gap: 12px; }
 .blank-workbench .conversation { border-radius: 10px; padding: 18px; }
 .blank-workbench > .conversation { min-height: 0; }
-.blank-workbench > .conversation:first-child > :not(.conversation-history) { flex-shrink: 0; }
+.blank-workbench .live-chat > :not(.conversation-history) { flex-shrink: 0; }
 .blank-workbench .conversation-history {
   flex: 1 1 0;
   min-height: 0;
@@ -480,7 +480,7 @@ blockquote {
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
-.blank-workbench > .conversation:last-child {
+.blank-workbench .live-workspace {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -548,12 +548,20 @@ blockquote {
 .accepted-work { list-style: none; padding: 0; }
 .accepted-work li { border-bottom: 1px solid var(--line); padding: 8px 0; }
 .blank-workbench input[type='checkbox'] { accent-color: var(--accent); }
+.mobile-panes { display: none; }
 
 @media (max-width: 640px) {
   .blank-workbench {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    padding: 8px;
+    gap: 8px;
   }
+  .mobile-panes { display: flex; gap: 6px; }
+  .mobile-panes button { flex: 1; }
+  .mobile-panes button[aria-pressed='true'] { border-color: var(--accent); color: var(--accent); }
+  .blank-workbench.show-chat .live-workspace,
+  .blank-workbench.show-workspace .live-chat { display: none; }
 }
 
 .chat-workspace h2 { margin: 0; font-size: 15px; }

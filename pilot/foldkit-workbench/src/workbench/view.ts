@@ -511,8 +511,13 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
 
   if (model.providerMode === 'runtime') return {
     title: 'Blackboard',
-    body: h.main([h.Class('wb blank-workbench')], [
-      h.section([h.Class('col conversation')], [
+    body: h.main([h.Class('wb blank-workbench show-' + model.mobilePane)], [
+      h.nav([h.Class('mobile-panes'), h.AriaLabel('Choose pane')], [
+        button('Chat', Message.SelectedMobilePane({ pane: 'chat' }), [h.AriaPressed(String(model.mobilePane === 'chat'))]),
+        button(model.proposedWorkspace ? 'Workspace · New' : 'Workspace',
+          Message.SelectedMobilePane({ pane: 'workspace' }), [h.AriaPressed(String(model.mobilePane === 'workspace'))]),
+      ]),
+      h.section([h.Class('col conversation live-chat'), h.AriaLabel('Chat')], [
         h.h2([], ['Conversation']),
         h.ol([h.Class('conversation-history'), h.OnMount(FollowChat())], [
           ...model.conversation.map(({ id, role, text }) =>
@@ -541,7 +546,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
         ]),
         h.small([h.Class('hint')], ['Messages are sent to UniBas Qwen. Use synthetic or public information.']),
       ]),
-      h.section([h.Class('col conversation')], [
+      h.section([h.Class('col conversation live-workspace'), h.AriaLabel('Workspace')], [
         ...(model.proposedWorkspace ? [h.section([h.Class('workspace-proposal')], [
           h.h2([], ['Suggested workspace']),
           h.p([], [model.proposedWorkspace.title]),

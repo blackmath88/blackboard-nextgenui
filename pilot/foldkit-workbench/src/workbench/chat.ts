@@ -34,6 +34,20 @@ export const findChecklistItem = (workspace: typeof ChatWorkspace.Type | null, k
 
 export const WorkspaceMarker = '\n<workspace>\n'
 
+/** Hold only a suffix that could begin the workspace separator. */
+export function splitWorkspaceDelta(pending: string, delta: string) {
+  const text = pending + delta
+  const boundary = text.indexOf(WorkspaceMarker)
+  if (boundary >= 0) return {
+    text: text.slice(0, boundary),
+    pending: text.slice(boundary + WorkspaceMarker.length),
+    workspace: true,
+  }
+  let held = Math.min(text.length, WorkspaceMarker.length - 1)
+  while (held > 0 && !text.endsWith(WorkspaceMarker.slice(0, held))) held--
+  return { text: text.slice(0, text.length - held), pending: held ? text.slice(-held) : '', workspace: false }
+}
+
 export const WorkspaceTask = Schema.Struct({
   id: Schema.String,
   title: Schema.String,

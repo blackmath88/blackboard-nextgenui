@@ -7,7 +7,7 @@ import type { Plugin } from 'vite'
 import { fixtureProject } from './src/project/fixture.js'
 import { buildIntentPrompt, expandIntent } from './intent.js'
 import { Schema } from 'effect'
-import { ChatMessage, ChatWorkspace, WorkspaceMarker } from './src/workbench/chat.js'
+import { ChatMessage, ChatWorkspace, splitWorkspaceDelta } from './src/workbench/chat.js'
 import { recoverIdeaMap } from './src/workbench/chat-markdown.js'
 
 const run = promisify(execFile)
@@ -80,17 +80,17 @@ export const unibas = (): Plugin => ({
                     ['error', 'aborted'].includes(event.message.stopReason)) failed = true
                 const delta = event.assistantMessageEvent
                 if (event.type !== 'message_update' || delta?.type !== 'text_delta' || typeof delta.delta !== 'string') continue
-                pending += delta.delta
-                if (workspace) continue
-                const marker = pending.indexOf(WorkspaceMarker)
-                const safeLength = marker >= 0 ? marker : Math.max(0, pending.length - WorkspaceMarker.length + 1)
-                if (safeLength) {
-                  const text = pending.slice(0, safeLength)
-                  reply += text
-                  emit({ type: 'delta', text })
+                if (workspace) {
+                  pending += delta.delta
+                  continue
                 }
-                pending = pending.slice(marker >= 0 ? marker + WorkspaceMarker.length : safeLength)
-                workspace = marker >= 0
+                const next = splitWorkspaceDelta(pending, delta.delta)
+                if (next.text) {
+                  reply += next.text
+                  emit({ type: 'delta', text: next.text })
+                }
+                pending = next.pending
+                workspace = next.workspace
               }
               if (!(await settled) || failed) throw new Error('Worker failed')
               if (!workspace && pending) {

@@ -124,6 +124,7 @@ export const makeUpdate =
     return Message.match(message, {
       ChangedChatDraft: ({ value }) => ({ model: { ...model, chatDraft: value.slice(0, 500) } }),
       MountedChatScroll: () => ({ model }),
+      SelectedMobilePane: ({ pane }) => ({ model: { ...model, mobilePane: pane } }),
       SubmittedChat: () => {
         const text = model.chatDraft.trim()
         if (!text || model.requesting) return { model }
@@ -181,7 +182,9 @@ export const makeUpdate =
             ...(replyId ? { id: replyId } : {}),
           }],
           proposedWorkspace: result.workspace ? {
-            ...result.workspace,
+            title: result.workspace.title,
+            sections: result.workspace.sections,
+            ...(result.workspace.layout ? { layout: result.workspace.layout } : {}),
             source: source?.text ?? '',
             ...(replyId ? { sourceMessageId: replyId } : {}),
           } : model.proposedWorkspace,
