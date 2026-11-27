@@ -19,9 +19,9 @@ import { view } from './workbench/view.js'
 
 /** A developer-supplied loopback route, or nothing. */
 const runtimeRoute = (): string | undefined => {
-  const raw = new URLSearchParams(globalThis.location?.search ?? '').get('runtimeRoute')
-  if (raw === null) return undefined
-  return /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/.*)?$/.test(raw) ? raw : undefined
+  return import.meta.env.DEV && new URLSearchParams(location.search).get('unibas') === '1'
+    ? '/api/unibas'
+    : undefined
 }
 
 const readStored = (): Option.Option<string> => {
@@ -35,10 +35,15 @@ const boot = (): void => {
   const restore = restoreFrom(readStored())
   const { _tag: outcome } = restore
 
-  const model: WorkbenchModel =
+  const restored: WorkbenchModel =
     restore._tag === 'Restored'
       ? modelOf(restore.state, { runtimeRouteConfigured: route !== undefined })
       : initialModel(fixtureProject())
+  const model: WorkbenchModel = {
+    ...restored,
+    runtimeRouteConfigured: route !== undefined,
+    providerMode: route === undefined ? 'fixture' : 'runtime',
+  }
 
   const restoreNote =
     outcome === 'Restored'

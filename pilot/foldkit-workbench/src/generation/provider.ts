@@ -150,27 +150,7 @@ export const runtimeProgramProvider = (config: RuntimeConfig): ProgramProvider =
           message: `Runtime route ${config.baseUrl} did not answer (${String(cause)}). ${runtimeDecodeNote}`,
         }),
     }),
-  reply: (request) =>
-    Effect.tryPromise({
-      try: async () => {
-        const response = await fetch(`${config.baseUrl}/turn`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(request),
-        })
-        if (!response.ok) throw new Error(`runtime route answered ${response.status}`)
-        const body = (await response.json()) as { reply?: string; recordIds?: ReadonlyArray<string> }
-        return {
-          reply: typeof body.reply === 'string' ? body.reply : '',
-          recordIds: Array.isArray(body.recordIds) ? body.recordIds : [],
-          source: 'runtime' as const,
-        }
-      },
-      catch: (cause) =>
-        new ProviderError({
-          message: `Runtime route ${config.baseUrl} did not answer (${String(cause)}).`,
-        }),
-    }),
+  reply: FixtureProgramProvider.reply,
 })
 
 export const runtimeProviderLayer = (config: RuntimeConfig) =>

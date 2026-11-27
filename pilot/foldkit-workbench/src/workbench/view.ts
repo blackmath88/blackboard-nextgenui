@@ -125,10 +125,9 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
   const settings = h.section([h.Class('panel settings')], [
     h.h2([], ['Host settings']),
     h.p([h.Class('hint')], [
-      'Fixture provider always. A runtime route can only be supplied at boot with ',
-      h.code([], ['?runtimeRoute=http://127.0.0.1:<port>']),
-      model.runtimeRouteConfigured ? ' (supplied)' : ' (none supplied)',
-      '.',
+      model.runtimeRouteConfigured
+        ? 'UniBas generates views from the original synthetic fixture. Follow-up simulation runs locally.'
+        : 'Views and follow-up simulation use the deterministic fixture provider.',
     ]),
     button(
       model.sharing ? 'Sharing: include accepted board records' : 'Sharing: off — send no board records',
