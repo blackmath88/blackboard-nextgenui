@@ -135,6 +135,8 @@ export const Model = Schema.Struct({
   savedViews: Schema.Array(SavedView),
   /** Draft text of the name input, so the view stays a pure function. */
   viewNameDraft: Schema.String,
+  chatDraft: Schema.String,
+  chatHistory: Schema.Array(Schema.String),
   preview: Schema.optional(Preview),
 
   selection: Selection,
@@ -170,6 +172,8 @@ export const initialModel = (project: Project): Model => ({
   arrangementHistory: [],
   savedViews: [],
   viewNameDraft: '',
+  chatDraft: '',
+  chatHistory: [],
   selection: {},
   pins: [],
   sharing: true,

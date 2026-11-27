@@ -18,6 +18,8 @@ export type Direction = typeof Direction.Type
 export const Message = defineMessageUnion({
   // ---- asking a question
   ClickedAsk: { question: QuestionId },
+  ChangedChatDraft: { value: Schema.String },
+  SubmittedChat: {},
   /** Untrusted provider output, exactly as it arrived. */
   ReceivedProposals: {
     question: QuestionId,

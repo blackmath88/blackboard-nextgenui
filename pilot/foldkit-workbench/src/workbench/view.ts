@@ -477,14 +477,38 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
     })
 
   return {
-    title: 'Blackboard workbench — fixture only',
+    title: 'Blackboard · Conversation and workspace',
     body: h.div([h.Class('wb')], [
       header,
       notices,
-      h.main([h.Class('grid')], [
-        h.aside([h.Class('col left')], [questionControls, previewPanel(), savedPanel, settings]),
-        h.div([h.Class('col centre')], [framePanel()]),
-        h.aside([h.Class('col right')], [inspectorPanel, turnsPanel]),
+      h.main([h.Class('chat-workspace')], [
+        h.aside([h.Class('col project-nav')], [
+          h.h2([], ['Projects']),
+          h.p([], [model.project.name]),
+          h.h2([], ['Chats']),
+          h.p([], ['Rollout conversation']),
+        ]),
+        h.section([h.Class('col conversation')], [
+          h.h2([], ['Conversation']),
+          h.ol([h.Class('conversation-history'), h.AriaLive('polite')], [
+            ...model.chatHistory.map((text) => h.li([], [text])),
+          ]),
+          h.form([h.Class('row'), h.OnSubmit(Message.SubmittedChat())], [
+            h.input([
+              h.Class('name'), h.AriaLabel('Message'), h.Placeholder('Ask about the rollout…'),
+              h.Value(model.chatDraft), h.OnInput((value) => Message.ChangedChatDraft({ value })),
+            ]),
+            h.button([h.Type('submit'), h.Class('primary'), h.Disabled(model.requesting)], [
+              model.requesting ? 'Working…' : 'Send',
+            ]),
+          ]),
+          h.p([h.Class('hint')], ['Try “What’s blocking rollout?” or “Which decisions lack evidence?”']),
+        ]),
+        h.section([h.Class('col dynamic-workspace')], [
+          h.h2([], ['Workspace']),
+          previewPanel(), framePanel(), inspectorPanel, savedPanel,
+          h.details([h.Class('panel')], [h.summary([], ['Workbench controls']), questionControls, settings, turnsPanel]),
+        ]),
       ]),
       h.footer([h.Class('bar foot')], [
         h.h4([], ['Next request (preview)']),

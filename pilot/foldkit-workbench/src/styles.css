@@ -453,6 +453,29 @@ blockquote {
   display: block;
 }
 
+.chat-workspace {
+  display: grid;
+  grid-template-columns: minmax(130px, .55fr) minmax(0, 1fr) minmax(0, 1.8fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.chat-workspace h2 { margin: 0; font-size: 15px; }
+.project-nav { border-right: 1px solid var(--line); padding: 8px; }
+.project-nav p { margin: 0; overflow-wrap: anywhere; }
+.conversation { padding: 12px; background: var(--panel); border: 1px solid var(--line); }
+.conversation-history { margin: 0; padding: 0; list-style: none; overflow-wrap: anywhere; }
+.conversation-history li { padding: 9px 0; border-bottom: 1px solid var(--line); }
+
+@media (max-width: 850px) {
+  .chat-workspace { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); }
+  .project-nav { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; border-right: 0; }
+}
+
+@media (max-width: 640px) {
+  .chat-workspace { grid-template-columns: minmax(0, 1fr); }
+}
+
 button:focus-visible,
 input:focus-visible,
 summary:focus-visible {

@@ -14,6 +14,17 @@ import { encodePersisted, decodePersisted, modelOf } from './persistence.js'
 import { resolveFrame, resolveInspector } from './resolve.js'
 import { session } from './harness.js'
 
+it('routes a typed chat message to the workspace and persists the conversation', async () => {
+  const board = session()
+  const value = 'Which decisions lack evidence?'
+  await board.send(Message.ChangedChatDraft({ value }))
+  await board.send(Message.SubmittedChat())
+  expect(board.model().chatDraft).toBe('')
+  expect(board.model().preview?.accepted[0]?.questionId).toBe('q_decisions_without_evidence')
+  const restored = decodePersisted(encodePersisted(board.model()))
+  expect(restored._tag === 'Restored' && restored.state.chatHistory).toEqual([value])
+})
+
 const firstPaneGroupIds = (model: ReturnType<typeof initialModel>) => {
   const resolved = resolveFrame({
     project: model.project,

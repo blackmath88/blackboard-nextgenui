@@ -121,6 +121,23 @@ export const makeUpdate =
     ]
 
     return Message.match(message, {
+      ChangedChatDraft: ({ value }) => ({ model: { ...model, chatDraft: value.slice(0, 500) } }),
+      SubmittedChat: () => {
+        const text = model.chatDraft.trim()
+        if (!text || model.requesting) return { model }
+        const next = { ...model, chatDraft: '', chatHistory: [...model.chatHistory, text].slice(-30) }
+        const question = /evidence|sources?|unsupported/i.test(text)
+          ? 'q_decisions_without_evidence'
+          : /block|readiness|waiting|dependenc/i.test(text)
+            ? 'q_blocking_groups'
+            : undefined
+        if (question === undefined) {
+          const explained = say(next, 'info', 'Try asking what is blocking rollout or which decisions lack evidence.', deps.now())
+          return { model: explained, commands: persist(explained) }
+        }
+        const result = makeUpdate(deps)(next, Message.ClickedAsk({ question }))
+        return { ...result, commands: [...persist(next), ...(result.commands ?? [])] }
+      },
       // ------------------------------------------------------------ asking
       ClickedAsk: ({ question }) => ({
         model: { ...model, question, requesting: true },
