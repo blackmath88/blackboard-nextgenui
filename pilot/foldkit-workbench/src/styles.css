@@ -486,6 +486,12 @@ blockquote {
   scrollbar-gutter: stable;
 }
 .blank-workbench .conversation-history p { margin: 4px 0 0; }
+.blank-workbench .conversation-history li:target {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  border-radius: 6px;
+}
+.accepted-work details a { display: block; margin-top: 4px; color: var(--accent); }
 .chat-progress { color: var(--muted); font-size: 12px; margin: 0; }
 .chat-composer { display: flex; align-items: end; gap: 8px; }
 .chat-composer textarea {

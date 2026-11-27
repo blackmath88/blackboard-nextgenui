@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 
 export const ChatMessage = Schema.Struct({
+  id: Schema.optional(Schema.String),
   role: Schema.Literals(['user', 'assistant']),
   text: Schema.String,
 })
@@ -11,6 +12,7 @@ export const ChatWorkspace = Schema.Struct({
   title: Schema.String,
   layout: Schema.optional(WorkspaceLayout),
   source: Schema.optional(Schema.String),
+  sourceMessageId: Schema.optional(Schema.String),
   sections: Schema.Array(Schema.Struct({
     title: Schema.String,
     items: Schema.Array(Schema.String),
@@ -36,6 +38,7 @@ export const WorkspaceTask = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
   source: Schema.String,
+  sourceMessageId: Schema.optional(Schema.String),
   done: Schema.Boolean,
 })
 

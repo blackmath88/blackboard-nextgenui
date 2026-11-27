@@ -40,7 +40,7 @@ export const chatSubscriptions = Subscription.make<Model, Message>()(entry => ({
   chat: entry({ messages: Schema.Array(ChatMessage), context: Schema.String, sequence: Schema.Number }, {
     modelToDependencies: model => ({
       messages: model.providerMode === 'runtime' && model.requesting
-        ? model.conversation.slice(-8).map(item => ({ ...item, text: item.text.slice(0, 800) }))
+        ? model.conversation.slice(-8).map(({ role, text }) => ({ role, text: text.slice(0, 800) }))
         : [],
       context: model.requesting ? model.chatContext : '',
       sequence: model.chatSequence,

@@ -32,6 +32,25 @@ it('ignores late deltas and replies after stopping and retrying', async () => {
   expect(board.model().conversation.map(message => message.text)).toEqual(['Plan a demo', 'Current'])
 })
 
+it('keeps a task linked to the assistant turn that proposed it after reload', async () => {
+  const board = session({ ...initialModel(fixtureProject()), providerMode: 'runtime' })
+  await board.send(Message.ChangedChatDraft({ value: 'Make a checklist' }))
+  await board.send(Message.SubmittedChat())
+  const section = { title: 'Setup', kind: 'checklist' as const, items: ['Open the room'] }
+  await board.send(Message.ReceivedChat({ sequence: board.model().chatSequence,
+    result: { reply: 'Add a setup task.', workspace: { title: 'Plan', sections: [section] } },
+  }))
+  await board.send(Message.AppliedChatWorkspace())
+  await board.send(Message.AcceptedWorkspaceTask({ id: checklistKey(section, 0), title: section.items[0]! }))
+  const restored = decodePersisted(encodePersisted(board.model()))
+  expect(restored._tag).toBe('Restored')
+  if (restored._tag !== 'Restored') return
+  const task = restored.state.workspaceTasks?.[0]
+  expect(task?.source).toBe('Make a checklist')
+  const reply = restored.state.conversation?.find(message => message.id === task?.sourceMessageId)
+  expect(reply?.text).toBe('Add a setup task.')
+})
+
 it('keeps an accepted edit across a reframe and reload', async () => {
   const board = session()
   const section = { title: 'Prepare', kind: 'checklist' as const, items: ['Book a room'] }

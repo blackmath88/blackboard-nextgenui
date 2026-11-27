@@ -502,6 +502,9 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
       h.summary([], ['Edit or trace']),
       h.input([h.Class('name'), h.AriaLabel('Task title'), h.Value(task.title),
         h.OnChange(title => Message.RenamedWorkspaceTask({ id: task.id, title }))]),
+      ...(task.sourceMessageId && model.conversation.some(message => message.id === task.sourceMessageId)
+        ? [h.a([h.Href('#' + encodeURIComponent(task.sourceMessageId))], ['Jump to source message'])]
+        : []),
       ...(task.source ? [h.blockquote([], [task.source])] : []),
     ]),
   ])
@@ -512,8 +515,8 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
       h.section([h.Class('col conversation')], [
         h.h2([], ['Conversation']),
         h.ol([h.Class('conversation-history'), h.OnMount(FollowChat())], [
-          ...model.conversation.map(({ role, text }) =>
-          h.li([], [h.strong([], [role === 'user' ? 'You' : 'Blackboard']),
+          ...model.conversation.map(({ id, role, text }) =>
+          h.li(id ? [h.Id(id), h.Key(id)] : [], [h.strong([], [role === 'user' ? 'You' : 'Blackboard']),
             ...(role === 'user' ? [h.p([], [text])] : renderAnswer(text))]),
           ),
           ...(model.partialReply ? [h.li([], [h.strong([], ['Blackboard']), ...renderAnswer(model.partialReply)])] : []),

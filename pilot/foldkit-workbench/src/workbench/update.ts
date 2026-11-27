@@ -128,7 +128,8 @@ export const makeUpdate =
         const text = model.chatDraft.trim()
         if (!text || model.requesting) return { model }
         if (model.providerMode === 'runtime') {
-          const conversation = [...model.conversation, { role: 'user' as const, text }].slice(-30)
+          const id = 'message-' + deps.now() + '-' + (model.chatSequence + 1)
+          const conversation = [...model.conversation, { id, role: 'user' as const, text }]
           const chatContext = model.sharing ? taskContext(model.workspaceTasks) : ''
           const next = { ...model, conversation, chatContext, chatDraft: '', requesting: true,
             chatSequence: model.chatSequence + 1, chatFailed: false, chatStopped: false, partialReply: '' }
@@ -164,20 +165,25 @@ export const makeUpdate =
         const partial = model.partialReply.trim()
         const conversation = partial ? [...model.conversation, {
           role: 'assistant' as const, text: partial + '\n\n[Response stopped]',
-        }].slice(-30) : model.conversation
+        }] : model.conversation
         const next = { ...model, conversation, requesting: false, chatStopped: true, partialReply: '' }
         return { model: next, commands: persist(next) }
       },
       ReceivedChat: ({ result, sequence }) => {
         if (sequence !== undefined && (!model.requesting || sequence !== model.chatSequence)) return { model }
+        const source = model.conversation.at(-1)
+        const replyId = source?.role === 'user' && source.id ? source.id + '-reply' : undefined
         const next = {
           ...model,
           requesting: false,
           partialReply: '',
-          conversation: [...model.conversation, { role: 'assistant' as const, text: result.reply }].slice(-30),
+          conversation: [...model.conversation, { role: 'assistant' as const, text: result.reply,
+            ...(replyId ? { id: replyId } : {}),
+          }],
           proposedWorkspace: result.workspace ? {
             ...result.workspace,
-            source: model.conversation.at(-1)?.text ?? '',
+            source: source?.text ?? '',
+            ...(replyId ? { sourceMessageId: replyId } : {}),
           } : model.proposedWorkspace,
         }
         return { model: next, commands: persist(next) }
@@ -214,8 +220,9 @@ export const makeUpdate =
         if (findChecklistItem(model.conversationWorkspace, id) !== title) return { model }
         if (model.workspaceTasks.some(task => task.id === id)) return { model }
         const source = model.conversationWorkspace?.source ?? ''
+        const sourceMessageId = model.conversationWorkspace?.sourceMessageId
         const next = { ...model, workspaceTasks: [...model.workspaceTasks, {
-          id, title, source, done: model.checkedChatItems.includes(id),
+          id, title, source, ...(sourceMessageId ? { sourceMessageId } : {}), done: model.checkedChatItems.includes(id),
         }] }
         return { model: next, commands: persist(next) }
       },
