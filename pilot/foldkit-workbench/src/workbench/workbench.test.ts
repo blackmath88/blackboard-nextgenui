@@ -29,10 +29,29 @@ it('keeps an accepted edit across a reframe and reload', async () => {
   expect(board.model().workspaceTasks[0]?.done).toBe(true)
   await board.send(Message.ReceivedChat({ result: { reply: 'Another view.', workspace: { title: 'Summary', sections: [] } } }))
   await board.send(Message.AppliedChatWorkspace())
+  await board.send(Message.UndidChatWorkspace())
+  expect(board.model().conversationWorkspace?.title).toBe('Plan')
+  expect(board.model().workspaceTasks[0]?.done).toBe(true)
   const restored = decodePersisted(encodePersisted(board.model()))
   expect(restored._tag === 'Restored' && restored.state.workspaceTasks).toMatchObject([
     { id, title: 'Book the library', done: true },
   ])
+})
+
+it('restores an unapplied proposal and a previous applied view', async () => {
+  const board = session()
+  const scene = (title: string) => ({ title, sections: [] })
+  await board.send(Message.ReceivedChat({ result: { reply: 'First.', workspace: scene('First') } }))
+  await board.send(Message.AppliedChatWorkspace())
+  await board.send(Message.ReceivedChat({ result: { reply: 'Second.', workspace: scene('Second') } }))
+  await board.send(Message.AppliedChatWorkspace())
+  await board.send(Message.ReceivedChat({ result: { reply: 'Third.', workspace: scene('Third') } }))
+  const restored = decodePersisted(encodePersisted(board.model()))
+  expect(restored._tag === 'Restored' && restored.state).toMatchObject({
+    conversationWorkspace: { title: 'Second' },
+    previousWorkspace: { title: 'First' },
+    proposedWorkspace: { title: 'Third' },
+  })
 })
 
 it('starts with an empty workspace and preserves it across ordinary replies', async () => {

@@ -1,13 +1,14 @@
-import { Schema, Stream } from 'effect'
+import { Effect, Schema, Stream } from 'effect'
 import { Subscription } from 'foldkit'
 import { ChatMessage, ChatReply } from './chat.js'
 import { Message } from './message.js'
 import type { Model } from './model.js'
 
-async function* events(messages: ReadonlyArray<typeof ChatMessage.Type>, context: string): AsyncGenerator<Message> {
+async function* events(messages: ReadonlyArray<typeof ChatMessage.Type>, context: string, signal: AbortSignal): AsyncGenerator<Message> {
   const response = await fetch('/api/unibas/chat', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ messages, context }),
+    signal,
   })
   if (!response.ok || !response.body) throw new Error('Chat unavailable')
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
@@ -45,8 +46,13 @@ export const chatSubscriptions = Subscription.make<Model, Message>()(entry => ({
     }),
     dependenciesToStream: ({ messages, context }) => messages.length === 0
       ? Stream.empty
-      : Stream.fromAsyncIterable(events(messages, context), () => null).pipe(
-          Stream.catch(() => Stream.succeed(Message.FailedChat())),
-        ),
+      : Stream.unwrap(Effect.acquireRelease(
+          Effect.sync(() => new AbortController()),
+          controller => Effect.sync(() => controller.abort()),
+        ).pipe(Effect.map(controller =>
+          Stream.fromAsyncIterable(events(messages, context, controller.signal), () => null).pipe(
+            Stream.catch(() => Stream.succeed(Message.FailedChat())),
+          ),
+        ))),
   }),
 }))

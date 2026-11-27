@@ -129,7 +129,7 @@ export const makeUpdate =
         if (model.providerMode === 'runtime') {
           const conversation = [...model.conversation, { role: 'user' as const, text }].slice(-30)
           const chatContext = model.sharing ? JSON.stringify(model.workspaceTasks.slice(-12).map(({ title, done }) => ({ title, done }))).slice(0, 2400) : ''
-          const next = { ...model, conversation, chatContext, chatDraft: '', requesting: true, chatFailed: false, partialReply: '' }
+          const next = { ...model, conversation, chatContext, chatDraft: '', requesting: true, chatFailed: false, chatStopped: false, partialReply: '' }
           return { model: next, commands: persist(next) }
         }
         const next = { ...model, chatDraft: '', chatHistory: [...model.chatHistory, text].slice(-30) }
@@ -146,6 +146,15 @@ export const makeUpdate =
         return { ...result, commands: [...persist(next), ...(result.commands ?? [])] }
       },
       StreamedChat: ({ text }) => ({ model: { ...model, partialReply: model.partialReply + text } }),
+      StoppedChat: () => {
+        if (!model.requesting || model.providerMode !== 'runtime') return { model }
+        const partial = model.partialReply.trim()
+        const conversation = partial ? [...model.conversation, {
+          role: 'assistant' as const, text: partial + '\n\n[Response stopped]',
+        }].slice(-30) : model.conversation
+        const next = { ...model, conversation, requesting: false, chatStopped: true, partialReply: '' }
+        return { model: next, commands: persist(next) }
+      },
       ReceivedChat: ({ result }) => {
         const next = {
           ...model,
@@ -162,13 +171,25 @@ export const makeUpdate =
       FailedChat: () => ({ model: { ...model, requesting: false, chatFailed: true } }),
       AppliedChatWorkspace: () => {
         if (!model.proposedWorkspace) return { model }
-        const next = { ...model, conversationWorkspace: model.proposedWorkspace, proposedWorkspace: null }
+        const next = { ...model, previousWorkspace: model.conversationWorkspace,
+          conversationWorkspace: model.proposedWorkspace, proposedWorkspace: null }
         return { model: next, commands: persist(next) }
       },
-      DismissedChatWorkspace: () => ({ model: { ...model, proposedWorkspace: null } }),
+      UndidChatWorkspace: () => {
+        if (model.previousWorkspace === undefined) return { model }
+        const { previousWorkspace, ...current } = model
+        const next = { ...current, conversationWorkspace: previousWorkspace }
+        return { model: next, commands: persist(next) }
+      },
+      DismissedChatWorkspace: () => {
+        const next = { ...model, proposedWorkspace: null }
+        return { model: next, commands: persist(next) }
+      },
       ChangedWorkspaceLayout: ({ layout }) => {
         if (!model.conversationWorkspace) return { model }
-        const next = { ...model, conversationWorkspace: { ...model.conversationWorkspace, layout } }
+        if (model.conversationWorkspace.layout === layout) return { model }
+        const next = { ...model, previousWorkspace: model.conversationWorkspace,
+          conversationWorkspace: { ...model.conversationWorkspace, layout } }
         return { model: next, commands: persist(next) }
       },
       AcceptedWorkspaceTask: ({ id, title }) => {

@@ -487,6 +487,14 @@ blockquote {
 }
 .blank-workbench .conversation-history p { margin: 4px 0 0; }
 .chat-progress { color: var(--muted); font-size: 12px; margin: 0; }
+.chat-composer { display: flex; align-items: end; gap: 8px; }
+.chat-composer textarea {
+  flex: 1; min-width: 0; resize: vertical; max-height: 12vh; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 8px; font: inherit;
+  color: var(--ink); background: var(--panel);
+}
+.chat-composer textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chat-composer button:disabled { opacity: .55; cursor: default; }
 .workspace-tools { display: flex; flex-wrap: wrap; gap: 4px; }
 .workspace-tools button[aria-pressed='true'] { border-color: var(--accent); color: var(--accent); }
 .workspace-kanban, .map-branches {

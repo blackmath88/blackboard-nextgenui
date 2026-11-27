@@ -7,6 +7,7 @@
  */
 
 import type { Document, HtmlBuilder } from 'foldkit/html'
+import { Option } from 'effect'
 import { checklistKey } from './chat.js'
 import { chatMarkdown } from './chat-markdown.js'
 
@@ -519,13 +520,17 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
         ...(model.requesting ? [h.p([h.Class('chat-progress'), h.Role('status')], [
           model.partialReply ? 'Writing reply…' : 'Waiting for Qwen…',
         ])] : []),
+        ...(model.chatStopped ? [h.p([h.Class('chat-progress'), h.Role('status')], ['Response stopped.'])] : []),
         ...(model.chatFailed ? [h.p([h.Role('status')], ['Qwen couldn’t reply. Send another message to try again.'])] : []),
-        h.form([h.Class('row'), h.OnSubmit(Message.SubmittedChat())], [
-          h.input([h.Class('name'), h.AriaLabel('Message'), h.Placeholder('Start a conversation…'),
-            h.Value(model.chatDraft), h.OnInput((value) => Message.ChangedChatDraft({ value }))]),
-          h.button([h.Type('submit'), h.Class('primary'), h.Disabled(model.requesting)], [
-            model.requesting ? 'Working…' : 'Send',
-          ]),
+        h.form([h.Class('chat-composer'), h.OnSubmit(Message.SubmittedChat())], [
+          h.textarea([h.AriaLabel('Message'), h.Placeholder('Start a conversation…'), h.Rows(2),
+            h.Value(model.chatDraft), h.OnInput((value) => Message.ChangedChatDraft({ value })),
+            h.OnKeyDownPreventDefault((key, modifiers) =>
+              key === 'Enter' && !modifiers.shiftKey && !modifiers.ctrlKey && !modifiers.altKey && !modifiers.metaKey
+                ? Option.some(Message.SubmittedChat()) : Option.none(),
+            )]),
+          model.requesting ? button('Stop', Message.StoppedChat()) :
+            h.button([h.Type('submit'), h.Class('primary'), h.Disabled(!model.chatDraft.trim())], ['Send']),
         ]),
         h.small([h.Class('hint')], ['Messages are sent to UniBas Qwen. Use synthetic or public information.']),
       ]),
@@ -533,7 +538,13 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
         ...(model.proposedWorkspace ? [h.section([h.Class('workspace-proposal')], [
           h.h2([], ['Suggested workspace']),
           h.p([], [model.proposedWorkspace.title]),
-          h.ul([], model.proposedWorkspace.sections.map(section => h.li([], [section.title]))),
+          h.details([], [
+            h.summary([], ['Preview contents']),
+            ...model.proposedWorkspace.sections.map(section => h.section([], [
+              h.h3([], [section.title]),
+              h.ul([], section.items.map(item => h.li([], [item]))),
+            ])),
+          ]),
           h.div([h.Class('row')], [
             button('Apply view', Message.AppliedChatWorkspace(), [h.Class('primary')]),
             button('Decline', Message.DismissedChatWorkspace()),
@@ -570,6 +581,9 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
             ])
           })),
         ]))),
+        ]),
+        ...(model.previousWorkspace === undefined ? [] : [
+          h.div([h.Class('workspace-tools')], [button('Undo view change', Message.UndidChatWorkspace())]),
         ]),
       ]),
     ]),
