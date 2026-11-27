@@ -14,6 +14,28 @@ import { Probe, QuestionId } from '../generation/proposal.js'
 import { ProgramProvider, providerLayerFor, type RuntimeConfig } from '../generation/provider.js'
 import { TurnRequest } from '../generation/turn.js'
 import { Message } from './message.js'
+import { ChatWorkspace, WorkspaceTask } from './chat.js'
+import { workspaceReport } from './workspace-report.js'
+
+export const DownloadWorkspace = Command.define('DownloadWorkspace', {
+  args: { workspace: ChatWorkspace, tasks: Schema.Array(WorkspaceTask) },
+  messages: [Message.DownloadedWorkspace, Message.FailedWorkspaceDownload],
+  execute: ({ workspace, tasks }) => Effect.try({
+    try: () => {
+      const url = URL.createObjectURL(new Blob([workspaceReport(workspace, tasks)], { type: 'text/html' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'blackboard-workspace.html'
+      try {
+        link.click()
+      } finally {
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
+      }
+      return Message.DownloadedWorkspace()
+    },
+    catch: () => null,
+  }).pipe(Effect.catch(() => Effect.succeed(Message.FailedWorkspaceDownload()))),
+})
 
 const ProviderArgs = {
   providerMode: Schema.Literals(['fixture', 'runtime']),

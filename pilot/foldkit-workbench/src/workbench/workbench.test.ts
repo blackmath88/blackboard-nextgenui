@@ -14,6 +14,16 @@ import { encodePersisted, decodePersisted, modelOf } from './persistence.js'
 import { resolveFrame, resolveInspector } from './resolve.js'
 import { session } from './harness.js'
 import { checklistKey, taskContext } from './chat.js'
+import { ChatDraftKey } from './persistence.js'
+
+it('saves a live draft separately and clears it when sent', async () => {
+  const board = session({ ...initialModel(fixtureProject()), providerMode: 'runtime' })
+  await board.send(Message.ChangedChatDraft({ value: 'Draft a plan\nSecond line' }))
+  expect(localStorage.getItem(ChatDraftKey)).toBe('Draft a plan\nSecond line')
+  await board.send(Message.SubmittedChat())
+  expect(localStorage.getItem(ChatDraftKey)).toBe('')
+  expect(board.model().conversation.at(-1)?.text).toBe('Draft a plan\nSecond line')
+})
 
 it('ignores late deltas and replies after stopping and retrying', async () => {
   const board = session({ ...initialModel(fixtureProject()), providerMode: 'runtime' })

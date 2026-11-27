@@ -13,7 +13,7 @@ import { Runtime } from 'foldkit'
 
 import { fixtureProject } from './project/fixture.js'
 import { initialModel, Model, type Model as WorkbenchModel } from './workbench/model.js'
-import { StorageKey, encodePersisted, modelOf, restoreFrom } from './workbench/persistence.js'
+import { ChatDraftKey, StorageKey, encodePersisted, modelOf, restoreFrom } from './workbench/persistence.js'
 import { makeUpdate } from './workbench/update.js'
 import { view } from './workbench/view.js'
 import { chatSubscriptions } from './workbench/chat-stream.js'
@@ -25,15 +25,17 @@ const runtimeRoute = (): string | undefined => {
     : undefined
 }
 
-const readStored = (): Option.Option<string> => {
-  const storage = globalThis.localStorage
-  if (storage === undefined) return Option.none()
-  return Option.fromNullishOr(storage.getItem(StorageKey))
+const readStored = (key: string): Option.Option<string> => {
+  try {
+    return Option.fromNullishOr(globalThis.localStorage?.getItem(key))
+  } catch {
+    return Option.none()
+  }
 }
 
 const boot = (): void => {
   const route = runtimeRoute()
-  const restore = restoreFrom(readStored())
+  const restore = restoreFrom(readStored(StorageKey))
   const { _tag: outcome } = restore
 
   const restored: WorkbenchModel =
@@ -44,6 +46,7 @@ const boot = (): void => {
     ...restored,
     runtimeRouteConfigured: route !== undefined,
     providerMode: route === undefined ? 'fixture' : 'runtime',
+    chatDraft: route === undefined ? '' : Option.getOrElse(readStored(ChatDraftKey), () => '').slice(0, 500),
   }
 
   const restoreNote =

@@ -24,11 +24,11 @@ import type { Project } from '../project/records.js'
 import { auditFor, findRecord, markTaskDone } from '../project/records.js'
 import { reviewProposals } from '../generation/validate.js'
 import { type TurnRequest, buildTurnRequest, questionText } from '../generation/turn.js'
-import { AskFrame, RunTurn, SaveFixture } from './command.js'
+import { AskFrame, DownloadWorkspace, RunTurn, SaveFixture } from './command.js'
 import { findChecklistItem, taskContext } from './chat.js'
 import { type Arrangement, type Model, type Proposal, type SavedView, defaultArrangement } from './model.js'
 import { Message } from './message.js'
-import { StorageKey } from './persistence.js'
+import { ChatDraftKey, StorageKey } from './persistence.js'
 
 const MaxHistory = 25
 const MaxTurns = 8
@@ -122,8 +122,23 @@ export const makeUpdate =
     ]
 
     return Message.match(message, {
-      ChangedChatDraft: ({ value }) => ({ model: { ...model, chatDraft: value.slice(0, 500) } }),
+      ChangedChatDraft: ({ value }) => {
+        const chatDraft = value.slice(0, 500)
+        return {
+          model: { ...model, chatDraft },
+          ...(model.providerMode === 'runtime' ? {
+            commands: [SaveFixture({ key: ChatDraftKey, payload: chatDraft })],
+          } : {}),
+        }
+      },
       MountedChatScroll: () => ({ model }),
+      ClickedDownloadWorkspace: () => model.conversationWorkspace ? {
+        model, commands: [DownloadWorkspace({ workspace: model.conversationWorkspace, tasks: model.workspaceTasks })],
+      } : { model },
+      DownloadedWorkspace: () => ({ model }),
+      FailedWorkspaceDownload: () => ({
+        model: say(model, 'error', 'Couldn’t download the workspace.', deps.now()),
+      }),
       SelectedMobilePane: ({ pane }) => ({ model: { ...model, mobilePane: pane } }),
       SubmittedChat: () => {
         const text = model.chatDraft.trim()
@@ -134,7 +149,7 @@ export const makeUpdate =
           const chatContext = model.sharing ? taskContext(model.workspaceTasks) : ''
           const next = { ...model, conversation, chatContext, chatDraft: '', requesting: true,
             chatSequence: model.chatSequence + 1, chatFailed: false, chatStopped: false, partialReply: '' }
-          return { model: next, commands: persist(next) }
+          return { model: next, commands: [...persist(next), SaveFixture({ key: ChatDraftKey, payload: '' })] }
         }
         const next = { ...model, chatDraft: '', chatHistory: [...model.chatHistory, text].slice(-30) }
         const question = /evidence|sources?|unsupported/i.test(text)

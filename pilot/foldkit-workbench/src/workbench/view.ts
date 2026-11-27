@@ -85,13 +85,14 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
     ]),
   ])
 
+  const restoreNote = model.providerMode === 'runtime' ? undefined : deps.restoreNote
   const notices =
-    model.notices.length === 0 && deps.restoreNote === undefined
+    model.notices.length === 0 && restoreNote === undefined
       ? h.div([], [])
       : h.section([h.Class('notices'), h.Role('status')], [
-          ...(deps.restoreNote === undefined
+          ...(restoreNote === undefined
             ? []
-            : [h.div([h.Class('notice info')], [deps.restoreNote])]),
+            : [h.div([h.Class('notice info')], [restoreNote])]),
           ...model.notices.map((notice) =>
             h.div([h.Class(`notice ${notice.tone}`)], [
               h.small([], [notice.at]),
@@ -535,7 +536,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
           ? [h.div([], [button('Retry last message', Message.RetriedChat(), [h.Class('ghost')])])]
           : []),
         h.form([h.Class('chat-composer'), h.OnSubmit(Message.SubmittedChat())], [
-          h.textarea([h.AriaLabel('Message'), h.Placeholder('Start a conversation…'), h.Rows(2),
+          h.textarea([h.AriaLabel('Message'), h.Placeholder('Start a conversation…'), h.Rows(2), h.Maxlength(500),
             h.Value(model.chatDraft), h.OnInput((value) => Message.ChangedChatDraft({ value })),
             h.OnKeyDownPreventDefault((key, modifiers) =>
               key === 'Enter' && !modifiers.shiftKey && !modifiers.ctrlKey && !modifiers.altKey && !modifiers.metaKey
@@ -547,6 +548,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
         h.small([h.Class('hint')], ['Messages are sent to UniBas Qwen. Use synthetic or public information.']),
       ]),
       h.section([h.Class('col conversation live-workspace'), h.AriaLabel('Workspace')], [
+        ...(model.notices.length ? [notices] : []),
         ...(model.proposedWorkspace ? [h.section([h.Class('workspace-proposal')], [
           h.h2([], ['Suggested workspace']),
           h.p([], [model.proposedWorkspace.title]),
@@ -605,6 +607,9 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
         ...(model.previousWorkspace === undefined ? [] : [
           h.div([h.Class('workspace-tools')], [button('Undo view change', Message.UndidChatWorkspace())]),
         ]),
+        ...(model.conversationWorkspace ? [
+          h.div([h.Class('workspace-tools')], [button('Download HTML', Message.ClickedDownloadWorkspace(), [h.Class('ghost')])]),
+        ] : []),
       ]),
     ]),
   }

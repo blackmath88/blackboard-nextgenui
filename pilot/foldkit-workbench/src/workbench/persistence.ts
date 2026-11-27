@@ -17,6 +17,7 @@ import { FrameProposal, QuestionId } from '../generation/proposal.js'
 import { Project } from '../project/records.js'
 
 export const StorageKey = 'blackboard.foldkit-workbench.v1'
+export const ChatDraftKey = 'blackboard.chat-draft.v1'
 export const PersistedVersion = 1
 
 import { ChatMessage, ChatWorkspace, WorkspaceTask } from './chat.js'
