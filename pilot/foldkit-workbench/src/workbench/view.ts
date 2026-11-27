@@ -573,10 +573,10 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
           h.h3([], [section.title]),
           h.ul([], section.items.map((item, index) => {
             const key = checklistKey(section, index)
-            const accepted = model.workspaceTasks.some(task => task.id === key)
+            const accepted = model.workspaceTasks.find(task => task.id === key)
             return h.li([], section.kind !== 'checklist' ? [item] : [
-              h.label([], [h.input([h.Type('checkbox'), h.Checked(model.checkedChatItems.includes(key)),
-                h.OnClick(Message.ToggledChatItem({ key }))]), ' ', item]),
+              h.label([], [h.input([h.Type('checkbox'), h.Checked(accepted?.done ?? model.checkedChatItems.includes(key)),
+                h.OnClick(Message.ToggledChatItem({ key }))]), ' ', accepted?.title ?? item]),
               ...(accepted ? [] : [button('Accept task', Message.AcceptedWorkspaceTask({ id: key, title: item }), [h.Class('small')])]),
             ])
           })),

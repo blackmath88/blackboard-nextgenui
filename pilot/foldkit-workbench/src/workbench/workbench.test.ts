@@ -13,7 +13,7 @@ import { initialModel } from './model.js'
 import { encodePersisted, decodePersisted, modelOf } from './persistence.js'
 import { resolveFrame, resolveInspector } from './resolve.js'
 import { session } from './harness.js'
-import { checklistKey } from './chat.js'
+import { checklistKey, taskContext } from './chat.js'
 
 it('keeps an accepted edit across a reframe and reload', async () => {
   const board = session()
@@ -32,10 +32,24 @@ it('keeps an accepted edit across a reframe and reload', async () => {
   await board.send(Message.UndidChatWorkspace())
   expect(board.model().conversationWorkspace?.title).toBe('Plan')
   expect(board.model().workspaceTasks[0]?.done).toBe(true)
+  expect(board.model().checkedChatItems).not.toContain(id)
+  expect(JSON.parse(taskContext(board.model().workspaceTasks))).toEqual([
+    { title: 'Book the library', done: true },
+  ])
   const restored = decodePersisted(encodePersisted(board.model()))
   expect(restored._tag === 'Restored' && restored.state.workspaceTasks).toMatchObject([
     { id, title: 'Book the library', done: true },
   ])
+})
+
+it('bounds task sharing while preserving valid JSON and the most recent task', () => {
+  const tasks = Array.from({ length: 20 }, (_, i) => ({
+    id: String(i), title: i + 'x'.repeat(230), source: 'private provenance', done: false,
+  }))
+  const context = taskContext(tasks)
+  expect(context.length).toBeLessThanOrEqual(2400)
+  expect(JSON.parse(context).at(-1)).toEqual({ title: tasks[19]?.title, done: false })
+  expect(context).not.toContain('private provenance')
 })
 
 it('restores an unapplied proposal and a previous applied view', async () => {

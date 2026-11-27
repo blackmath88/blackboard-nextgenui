@@ -25,7 +25,7 @@ import { auditFor, findRecord, markTaskDone } from '../project/records.js'
 import { reviewProposals } from '../generation/validate.js'
 import { type TurnRequest, buildTurnRequest, questionText } from '../generation/turn.js'
 import { AskFrame, RunTurn, SaveFixture } from './command.js'
-import { checklistKey } from './chat.js'
+import { findChecklistItem, taskContext } from './chat.js'
 import { type Arrangement, type Model, type Proposal, type SavedView, defaultArrangement } from './model.js'
 import { Message } from './message.js'
 import { StorageKey } from './persistence.js'
@@ -128,7 +128,7 @@ export const makeUpdate =
         if (!text || model.requesting) return { model }
         if (model.providerMode === 'runtime') {
           const conversation = [...model.conversation, { role: 'user' as const, text }].slice(-30)
-          const chatContext = model.sharing ? JSON.stringify(model.workspaceTasks.slice(-12).map(({ title, done }) => ({ title, done }))).slice(0, 2400) : ''
+          const chatContext = model.sharing ? taskContext(model.workspaceTasks) : ''
           const next = { ...model, conversation, chatContext, chatDraft: '', requesting: true, chatFailed: false, chatStopped: false, partialReply: '' }
           return { model: next, commands: persist(next) }
         }
@@ -193,14 +193,12 @@ export const makeUpdate =
         return { model: next, commands: persist(next) }
       },
       AcceptedWorkspaceTask: ({ id, title }) => {
-        if (!model.conversationWorkspace?.sections.some(section =>
-          section.kind === 'checklist' && section.items.some((item, index) => item === title && checklistKey(section, index) === id),
-        )) return { model }
+        if (findChecklistItem(model.conversationWorkspace, id) !== title) return { model }
         if (model.workspaceTasks.some(task => task.id === id)) return { model }
-        const source = model.conversationWorkspace.source ?? ''
+        const source = model.conversationWorkspace?.source ?? ''
         const next = { ...model, workspaceTasks: [...model.workspaceTasks, {
           id, title, source, done: model.checkedChatItems.includes(id),
-        }].slice(-100) }
+        }] }
         return { model: next, commands: persist(next) }
       },
       RenamedWorkspaceTask: ({ id, title }) => {
@@ -212,12 +210,17 @@ export const makeUpdate =
         return { model: next, commands: persist(next) }
       },
       ToggledChatItem: ({ key }) => {
+        if (model.workspaceTasks.some(task => task.id === key)) {
+          const next = { ...model, workspaceTasks: model.workspaceTasks.map(task =>
+            task.id === key ? { ...task, done: !task.done } : task,
+          ) }
+          return { model: next, commands: persist(next) }
+        }
+        if (findChecklistItem(model.conversationWorkspace, key) === undefined) return { model }
         const checkedChatItems = model.checkedChatItems.includes(key)
           ? model.checkedChatItems.filter(item => item !== key)
-          : [...model.checkedChatItems, key].slice(-360)
-        const next = { ...model, checkedChatItems, workspaceTasks: model.workspaceTasks.map(task =>
-          task.id === key ? { ...task, done: checkedChatItems.includes(key) } : task,
-        ) }
+          : [...model.checkedChatItems, key]
+        const next = { ...model, checkedChatItems }
         return { model: next, commands: persist(next) }
       },
       // ------------------------------------------------------------ asking
