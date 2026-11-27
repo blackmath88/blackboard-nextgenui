@@ -49,3 +49,9 @@
 - Idle since the verified Tailscale pass. Clean checkout on `mac-mini-bruh` at status commit `fe43acb`; the application remains at `93bb790`.
 - Latest recorded checks remain TypeScript, 27 tests, and the production build. No checks rerun this hour. Browser delivery of the HTML export is still open.
 - No new UniCorn requests or worker dispatch. Prior live demo token counts and the sustained-use budget remain unknown.
+
+## 2026-11-27 19:33 CET
+
+- Clean checkout on `mac-mini-bruh`; application checkpoint remains `93bb790`. Idle since the verified Tailscale pass.
+- Latest checks remain TypeScript, 27 tests, and the production build. Browser delivery of the HTML export is still open.
+- No new UniCorn requests or implementation worker dispatch. Earlier demo token counts and sustained-use limits remain unknown.
