@@ -14,6 +14,17 @@ import { encodePersisted, decodePersisted, modelOf } from './persistence.js'
 import { resolveFrame, resolveInspector } from './resolve.js'
 import { session } from './harness.js'
 
+it('starts with an empty workspace and preserves it across ordinary replies', async () => {
+  const board = session()
+  expect(board.model().conversation).toEqual([])
+  expect(board.model().conversationWorkspace).toBeNull()
+  const workspace = { title: 'Book swap', sections: [{ title: 'Before the event', items: ['Book a room'] }] }
+  await board.send(Message.ReceivedChat({ result: { reply: 'Here is a plan.', workspace } }))
+  await board.send(Message.ReceivedChat({ result: { reply: 'You’re welcome.', workspace: null } }))
+  expect(board.model().conversationWorkspace).toEqual(workspace)
+  expect(board.model().conversation.at(-1)).toEqual({ role: 'assistant', text: 'You’re welcome.' })
+})
+
 it('routes a typed chat message to the workspace and persists the conversation', async () => {
   const board = session()
   const value = 'Which decisions lack evidence?'

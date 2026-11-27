@@ -460,6 +460,21 @@ blockquote {
   align-items: start;
 }
 
+.blank-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  min-height: 90vh;
+  align-items: stretch;
+}
+
+.blank-workbench .conversation { overflow-wrap: anywhere; }
+.blank-workbench .conversation p { white-space: pre-wrap; }
+
+@media (max-width: 640px) {
+  .blank-workbench { grid-template-columns: minmax(0, 1fr); }
+  .blank-workbench > section { min-height: 35vh; }
+}
+
 .chat-workspace h2 { margin: 0; font-size: 15px; }
 .project-nav { border-right: 1px solid var(--line); padding: 8px; }
 .project-nav p { margin: 0; overflow-wrap: anywhere; }

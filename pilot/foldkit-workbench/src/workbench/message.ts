@@ -11,6 +11,7 @@ import { defineMessageUnion } from 'foldkit/message'
 
 import { Probe, QuestionId } from '../generation/proposal.js'
 import { ProviderMode, Turn } from './model.js'
+import { ChatReply } from './chat.js'
 
 export const Direction = Schema.Literals(['up', 'down', 'front', 'back'])
 export type Direction = typeof Direction.Type
@@ -20,6 +21,8 @@ export const Message = defineMessageUnion({
   ClickedAsk: { question: QuestionId },
   ChangedChatDraft: { value: Schema.String },
   SubmittedChat: {},
+  ReceivedChat: { result: ChatReply },
+  FailedChat: {},
   /** Untrusted provider output, exactly as it arrived. */
   ReceivedProposals: {
     question: QuestionId,

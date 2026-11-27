@@ -14,6 +14,23 @@ import { Probe, QuestionId } from '../generation/proposal.js'
 import { ProgramProvider, providerLayerFor, type RuntimeConfig } from '../generation/provider.js'
 import { TurnRequest } from '../generation/turn.js'
 import { Message } from './message.js'
+import { ChatMessage, ChatReply } from './chat.js'
+
+export const RunChat = Command.define('RunChat', {
+  args: { messages: Schema.Array(ChatMessage) },
+  messages: [Message.ReceivedChat, Message.FailedChat],
+  execute: ({ messages }) => Effect.tryPromise(async () => {
+    const response = await fetch('/api/unibas/chat', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(messages),
+    })
+    if (!response.ok) throw new Error('Chat unavailable')
+    return Schema.decodeUnknownSync(ChatReply)(await response.json())
+  }).pipe(Effect.match({
+    onSuccess: (result) => Message.ReceivedChat({ result }),
+    onFailure: () => Message.FailedChat(),
+  })),
+})
 
 const ProviderArgs = {
   providerMode: Schema.Literals(['fixture', 'runtime']),

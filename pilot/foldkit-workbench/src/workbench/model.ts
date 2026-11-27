@@ -9,6 +9,7 @@
  */
 
 import { Schema } from 'effect'
+import { ChatMessage, ChatWorkspace } from './chat.js'
 
 import { Project } from '../project/records.js'
 import {
@@ -137,6 +138,9 @@ export const Model = Schema.Struct({
   viewNameDraft: Schema.String,
   chatDraft: Schema.String,
   chatHistory: Schema.Array(Schema.String),
+  conversation: Schema.Array(ChatMessage),
+  conversationWorkspace: Schema.NullOr(ChatWorkspace),
+  chatFailed: Schema.Boolean,
   preview: Schema.optional(Preview),
 
   selection: Selection,
@@ -174,6 +178,9 @@ export const initialModel = (project: Project): Model => ({
   viewNameDraft: '',
   chatDraft: '',
   chatHistory: [],
+  conversation: [],
+  conversationWorkspace: null,
+  chatFailed: false,
   selection: {},
   pins: [],
   sharing: true,

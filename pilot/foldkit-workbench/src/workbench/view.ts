@@ -476,6 +476,34 @@ export const view = (model: Model, h: HtmlBuilder<Message>, deps: ViewDeps): Doc
             },
     })
 
+  if (model.providerMode === 'runtime') return {
+    title: 'Blackboard',
+    body: h.main([h.Class('wb blank-workbench')], [
+      h.section([h.Class('col conversation')], [
+        h.h2([], ['Conversation']),
+        h.ol([h.Class('conversation-history'), h.AriaLive('polite')], model.conversation.map(({ role, text }) =>
+          h.li([], [h.strong([], [role === 'user' ? 'You' : 'Blackboard']), h.p([], [text])]),
+        )),
+        ...(model.chatFailed ? [h.p([h.Role('status')], ['Qwen couldn’t reply. Send another message to try again.'])] : []),
+        h.form([h.Class('row'), h.OnSubmit(Message.SubmittedChat())], [
+          h.input([h.Class('name'), h.AriaLabel('Message'), h.Placeholder('Start a conversation…'),
+            h.Value(model.chatDraft), h.OnInput((value) => Message.ChangedChatDraft({ value }))]),
+          h.button([h.Type('submit'), h.Class('primary'), h.Disabled(model.requesting)], [
+            model.requesting ? 'Working…' : 'Send',
+          ]),
+        ]),
+        h.small([h.Class('hint')], ['Messages are sent to UniBas Qwen. Use synthetic or public information.']),
+      ]),
+      h.section([h.Class('col conversation')], model.conversationWorkspace === null ? [] : [
+        h.h2([], [model.conversationWorkspace.title]),
+        ...model.conversationWorkspace.sections.map((section) => h.section([], [
+          h.h3([], [section.title]),
+          h.ul([], section.items.map((item) => h.li([], [item]))),
+        ])),
+      ]),
+    ]),
+  }
+
   return {
     title: 'Blackboard · Conversation and workspace',
     body: h.div([h.Class('wb')], [

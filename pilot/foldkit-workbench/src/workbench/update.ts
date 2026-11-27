@@ -24,7 +24,7 @@ import type { Project } from '../project/records.js'
 import { auditFor, findRecord, markTaskDone } from '../project/records.js'
 import { reviewProposals } from '../generation/validate.js'
 import { type TurnRequest, buildTurnRequest, questionText } from '../generation/turn.js'
-import { AskFrame, RunTurn, SaveFixture } from './command.js'
+import { AskFrame, RunChat, RunTurn, SaveFixture } from './command.js'
 import { type Arrangement, type Model, type Proposal, type SavedView, defaultArrangement } from './model.js'
 import { Message } from './message.js'
 import { StorageKey } from './persistence.js'
@@ -125,6 +125,15 @@ export const makeUpdate =
       SubmittedChat: () => {
         const text = model.chatDraft.trim()
         if (!text || model.requesting) return { model }
+        if (model.providerMode === 'runtime') {
+          const conversation = [...model.conversation, { role: 'user' as const, text }].slice(-30)
+          return {
+            model: { ...model, conversation, chatDraft: '', requesting: true, chatFailed: false },
+            commands: [RunChat({ messages: conversation.slice(-8).map((entry) => ({
+              ...entry, text: entry.text.slice(0, 800),
+            })) })],
+          }
+        }
         const next = { ...model, chatDraft: '', chatHistory: [...model.chatHistory, text].slice(-30) }
         const question = /evidence|sources?|unsupported/i.test(text)
           ? 'q_decisions_without_evidence'
@@ -138,6 +147,15 @@ export const makeUpdate =
         const result = makeUpdate(deps)(next, Message.ClickedAsk({ question }))
         return { ...result, commands: [...persist(next), ...(result.commands ?? [])] }
       },
+      ReceivedChat: ({ result }) => ({
+        model: {
+          ...model,
+          requesting: false,
+          conversation: [...model.conversation, { role: 'assistant' as const, text: result.reply }].slice(-30),
+          conversationWorkspace: result.workspace ?? model.conversationWorkspace,
+        },
+      }),
+      FailedChat: () => ({ model: { ...model, requesting: false, chatFailed: true } }),
       // ------------------------------------------------------------ asking
       ClickedAsk: ({ question }) => ({
         model: { ...model, question, requesting: true },
