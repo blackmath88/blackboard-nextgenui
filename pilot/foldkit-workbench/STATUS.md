@@ -29,3 +29,10 @@
 - Ran the offline checkpoint command. TypeScript, 13 tests, and the production build passed.
 - Zero additional UniCorn requests. Pilot usage remains one engineering request with 1,676 reported tokens and one app request with unknown token count. The authorised budget remains unverified.
 - The two-check-in schedule is complete. Dark palette and contrast verification remain next in MISSION.md.
+
+## 2026-11-27 15:35 CET
+
+- Resumed the product mission on `mac-mini-bruh` with a five-hour reporting window ending at 20:35 CET.
+- Codex implemented the dark palette and keyboard-focus styles in `8ecd638`. TypeScript, 13 tests and build passed. Rendered dark-mode and contrast checks remain pending.
+- Zero new UniCorn calls. Sustained-use permission remains unverified.
+- The existing takt! task is the status surface for 15-minute check-ins.
