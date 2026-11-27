@@ -22,3 +22,10 @@
 - Accepted responsive workspace package `50b1370`. Browser widths 1095, 820, and 390 px had no document overflow after repair. Keyboard evidence selection survived reload.
 - Offline checkpoint `5ab0a30`: TypeScript, 13 tests, and build passed. The checkpoint command locks out duplicate verification in this worktree.
 - No new UniCorn requests. Next package is the dark palette and contrast verification.
+
+## 2026-11-27 12:56 CET
+
+- Second scheduled check-in on `mac-mini-bruh`. Verified clean branch `feat/foldkit-unibas-evaluation` at `b62c3ea`.
+- Ran the offline checkpoint command. TypeScript, 13 tests, and the production build passed.
+- Zero additional UniCorn requests. Pilot usage remains one engineering request with 1,676 reported tokens and one app request with unknown token count. The authorised budget remains unverified.
+- The two-check-in schedule is complete. Dark palette and contrast verification remain next in MISSION.md.
