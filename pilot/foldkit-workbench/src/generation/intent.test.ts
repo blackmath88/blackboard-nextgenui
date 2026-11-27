@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
-import { buildIntentPrompt, expandIntent } from './intent.js'
-import { fixtureProject } from './src/project/fixture.js'
-import { reviewResponse } from './src/generation/validate.js'
+import { buildIntentPrompt, expandIntent } from '../../intent.js'
+import { fixtureProject } from '../project/fixture.js'
+import { reviewResponse } from './validate.js'
 
 it.each(['q_blocking_groups', 'q_decisions_without_evidence'] as const)(
   'expands complete fixture intent and rejects missing or repeated records for %s',
