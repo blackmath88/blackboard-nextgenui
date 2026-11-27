@@ -453,6 +453,75 @@ blockquote {
   display: block;
 }
 
+button:focus-visible,
+input:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --ink: #e8ebf1;
+    --muted: #b2bac9;
+    --line: #414955;
+    --panel: #22262e;
+    --bg: #181b21;
+    --accent: #9bbcff;
+    --warn: #f4c475;
+    --bad: #ffadb9;
+  }
+
+  button,
+  input.name,
+  button.ghost,
+  .badge,
+  .chip,
+  .rec,
+  blockquote,
+  .pane.focused {
+    background: #2b3039;
+    color: var(--ink);
+  }
+
+  button.toggle.on,
+  .badge.busy,
+  .pane.focused {
+    border-color: #6285bf;
+  }
+
+  button.primary,
+  button.probe.on,
+  button.chip.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #18243a;
+  }
+
+  button.primary.on {
+    outline-color: var(--accent);
+  }
+
+  button.link {
+    background: transparent;
+    color: var(--accent);
+  }
+
+  .badge.fixture,
+  .chip.warn {
+    background: #3e3120;
+    border-color: #846a41;
+    color: var(--warn);
+  }
+
+  .badge.bad {
+    background: #412832;
+    border-color: #895461;
+    color: var(--bad);
+  }
+}
+
 @media (max-width: 980px) {
   .grid {
     grid-template-columns: minmax(200px, 1fr) minmax(0, 2fr);
