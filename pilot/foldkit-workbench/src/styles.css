@@ -463,7 +463,7 @@ blockquote {
 .blank-workbench {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
-  min-height: 90vh;
+  height: 100dvh;
   align-items: stretch;
 }
 
@@ -471,6 +471,20 @@ blockquote {
 .blank-workbench .conversation p { white-space: pre-wrap; }
 .blank-workbench { gap: 12px; }
 .blank-workbench .conversation { border-radius: 10px; padding: 18px; }
+.blank-workbench > .conversation { min-height: 0; }
+.blank-workbench > .conversation:first-child > :not(.conversation-history) { flex-shrink: 0; }
+.blank-workbench .conversation-history {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.blank-workbench > .conversation:last-child {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
 .blank-workbench .conversation-history p { margin: 4px 0 0; }
 .workspace-proposal { border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
 .accepted-work { list-style: none; padding: 0; }
@@ -478,8 +492,10 @@ blockquote {
 .blank-workbench input[type='checkbox'] { accent-color: var(--accent); }
 
 @media (max-width: 640px) {
-  .blank-workbench { grid-template-columns: minmax(0, 1fr); }
-  .blank-workbench > section { min-height: 35vh; }
+  .blank-workbench {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
 }
 
 .chat-workspace h2 { margin: 0; font-size: 15px; }
