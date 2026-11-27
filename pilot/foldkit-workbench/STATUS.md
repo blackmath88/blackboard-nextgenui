@@ -55,3 +55,9 @@
 - Clean checkout on `mac-mini-bruh`; application checkpoint remains `93bb790`. Idle since the verified Tailscale pass.
 - Latest checks remain TypeScript, 27 tests, and the production build. Browser delivery of the HTML export is still open.
 - No new UniCorn requests or implementation worker dispatch. Earlier demo token counts and sustained-use limits remain unknown.
+
+## 2026-11-27 20:33 CET
+
+- Final scheduled checkpoint in the five-hour reporting window. Clean checkout on `mac-mini-bruh`, application checkpoint `93bb790`.
+- Latest verification remains TypeScript, 27 tests, production build, and the Tailscale task workflow. Browser delivery of the standalone HTML export remains open.
+- No worker dispatch or new UniCorn requests during the reporting check-in. The authorised sustained-use budget remains unknown.
