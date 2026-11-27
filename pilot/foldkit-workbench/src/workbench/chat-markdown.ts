@@ -2,6 +2,25 @@ type Block =
   | { kind: 'heading' | 'paragraph' | 'code'; text: string }
   | { kind: 'ordered' | 'unordered'; items: string[] }
 
+export function recoverIdeaMap(question: string, reply: string) {
+  if (!/\b(mind map|idea map|brainstorm)\b/i.test(question)) return null
+  const ideas = chatMarkdown(reply).flatMap(block =>
+    block.kind === 'ordered' || block.kind === 'unordered' ? block.items : [],
+  ).slice(0, 8)
+  if (ideas.length < 2) return null
+  return {
+    title: 'Idea map',
+    layout: 'map' as const,
+    sections: ideas.map((idea, index) => {
+      const [label, ...details] = idea.replaceAll('**', '').split(':')
+      return {
+        title: (details.length ? label : `Idea ${index + 1}`)?.slice(0, 120) ?? 'Idea',
+        items: [(details.length ? details.join(':').trim() : idea.replaceAll('**', '')).slice(0, 500)],
+      }
+    }),
+  }
+}
+
 export function chatMarkdown(text: string): Block[] {
   const blocks: Block[] = []
   let fenced = false

@@ -8,6 +8,7 @@ import { fixtureProject } from './src/project/fixture.js'
 import { buildIntentPrompt, expandIntent } from './intent.js'
 import { Schema } from 'effect'
 import { ChatMessage, ChatWorkspace, WorkspaceMarker } from './src/workbench/chat.js'
+import { recoverIdeaMap } from './src/workbench/chat-markdown.js'
 
 const run = promisify(execFile)
 
@@ -106,6 +107,7 @@ export const unibas = (): Plugin => ({
                   // Preserve the streamed reply and last usable workspace.
                 }
               }
+              scene ??= recoverIdeaMap(decoded.success.at(-1)?.text ?? '', reply)
               response.end(JSON.stringify({ type: 'done', result: { reply: reply.trim(), workspace: scene } }) + '\n')
             } finally {
               response.off('close', cancel)

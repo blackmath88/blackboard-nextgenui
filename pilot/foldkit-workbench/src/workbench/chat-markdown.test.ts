@@ -1,5 +1,14 @@
 import { expect, it } from 'vitest'
-import { chatMarkdown } from './chat-markdown.js'
+import { chatMarkdown, recoverIdeaMap } from './chat-markdown.js'
+
+it('recovers an explicit idea map from a model reply with a list', () => {
+  const reply = '- **Logistics:** Book a room\n- **Ideas:** Swap by theme'
+  expect(recoverIdeaMap('Give me an idea map', reply)?.sections).toEqual([
+    { title: 'Logistics', items: ['Book a room'] },
+    { title: 'Ideas', items: ['Swap by theme'] },
+  ])
+  expect(recoverIdeaMap('Give me two tips', reply)).toBeNull()
+})
 
 it('renders headings, numbered lists and an unfinished code fence during streaming', () => {
   expect(chatMarkdown('# Plan\n\n1. First\n2. Second\n\n```ts\nconst x')).toEqual([
