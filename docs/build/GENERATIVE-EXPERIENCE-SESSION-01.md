@@ -7,7 +7,7 @@ Durable checkpoint for the eight-hour Blackboard build session on bruh. Engineer
 | Field | Value |
 | --- | --- |
 | Session start (T0) | 2026-11-28 09:07 CET (08:07 UTC) |
-| Session end | 2026-11-28 ≈10:25 CET — finished early, objectives met; no new feature in the final stretch |
+| Session end | 2026-11-28 10:15 CET (09:15 UTC) — finished early, objectives met; dev server stopped |
 | Hard stop | 17:07 CET · feature freeze 16:37 CET |
 | Host | `mac-mini-bruh` (`Macmini.galaxus.box`), user `admin` — verified with `hostname` / `scutil --get ComputerName` |
 | Harness | Claude Code, Claude desktop app (Code tab), local session |
@@ -61,7 +61,7 @@ Mandatory gates: security boundary tested (sandbox self-check, CSP refusal, rogu
 
 **Biggest remaining experience gap:** the workspace is rich inside the three fixtures but cannot yet turn *arbitrary* conversation content into persistent visual objects, and there is no standing “overview” that accumulates what we decided and changed. Cycle B priorities follow from that.
 
-## Cycle B (09:50–10:20) — interactive visual intelligence
+## Cycle B (09:50–10:15) — interactive visual intelligence
 
 Driven by the midpoint gap and by a fresh-context model review of the Cycle A screenshots, which rated visual quality lower than the self-review (2, not 3) and listed eight concrete defects. All eight were addressed.
 
@@ -140,13 +140,13 @@ Two read-only subagents with no prior context reviewed the screenshots against t
 
 | Review | Visual | Interaction | Richness | Continuity | Usability | Reliability | Weighted |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| After Cycle A (09:58) | 2 | 3 | 3 | 3 | 2 | — | not computed |
-| After Cycle B (10:18) | 2.5 | 3 | 2.5 | 3.5 | 2.5 | 3 | **70 / 100** |
+| After Cycle A (≈10:00) | 2 | 3 | 3 | 3 | 2 | — | not computed |
+| After Cycle B (≈10:12) | 2.5 | 3 | 2.5 | 3.5 | 2.5 | 3 | **70 / 100** |
 | Self-assessment (final) | 3 | 3 | 2 | 4 | 3 | 4 | 75 / 100 |
 
 Verdict of the second review (paraphrased): the work sits between a scripted demo and the vision. The persistence, provenance and typed-interaction foundations are real, but replies and most representations are authored fixtures. The single biggest next step is a live model on the existing composition contract.
 
-Defects from the second review, fixed after it (10:18–10:25) and covered by the 46-check run:
+Defects from the second review, fixed after it (≈10:12–10:15) and covered by the 46-check run:
 - The budget reading text contradicted the state. Callouts now take a generic `showIf` on a derived value, so an *Überzeichnet* or *Reserve knapp* warning replaces stale advice.
 - The developer log appeared in screenshots. It is off by default, and the acceptance run now closes it after its one screenshot.
 - The simulator chart was weak. It now has a comparison baseline, a chosen-week marker, axis labels and the delta to the baseline.
@@ -166,9 +166,9 @@ Not addressed, and carried to the next mission:
 
 - **Security boundary:** tested as above. Generated HTML gets no credentials, storage, DOM, network or authority, only the allow-listed event names.
 - **Data preservation:** no real project data was touched. The original worktrees (`blackboard-source`, `blackboard-foldkit-worktree`, `blackboard-unibas-eval`) and their branches are unchanged. The legacy `pilot/app` verification scripts (which delete `.pilot/`) were not run.
-- **Cost:** no application inference and no paid API. Claude plan usage observed at 10:15 CET: 5-hour window 25 %, weekly 65 %, extra usage disabled.
+- **Cost:** no application inference and no paid API. Claude plan usage observed at ≈10:12 CET: 5-hour window 25 %, weekly 65 %, extra usage disabled.
 - **Ownership:** one implementation worker (this session) plus two read-only research/review subagents. The dev server on 4330 was stopped at the end of the session; no owned processes remain. Knowledge Lab, TAKT and the other listeners were not touched.
-- **Open gate — supervision:** no external watchdog enforced the deadline. The session ended well inside it (≈ 1 h 20 min of the 8 h maximum) because the objectives were met. Future unattended sessions still need the runbook's external supervisor.
+- **Open gate — supervision:** no external watchdog enforced the deadline. The session ended well inside it (1 h 08 min of the 8 h maximum) because the objectives were met. Future unattended sessions still need the runbook's external supervisor.
 - **TAKT reporting:** not used. No verified scoped session-reporting operation was established, and the runbook says not to build one mid-session.
 
 ## Known limitations
