@@ -167,7 +167,7 @@ Not addressed, and carried to the next mission:
 - **Security boundary:** tested as above. Generated HTML gets no credentials, storage, DOM, network or authority, only the allow-listed event names.
 - **Data preservation:** no real project data was touched. The original worktrees (`blackboard-source`, `blackboard-foldkit-worktree`, `blackboard-unibas-eval`) and their branches are unchanged. The legacy `pilot/app` verification scripts (which delete `.pilot/`) were not run.
 - **Cost:** no application inference and no paid API. Claude plan usage observed at 10:15 CET: 5-hour window 25 %, weekly 65 %, extra usage disabled.
-- **Ownership:** one implementation worker (this session) plus two read-only research/review subagents. No processes left besides the dev server on 4330 (stop it from the Claude app or with `lsof -ti:4330 | xargs kill`). Knowledge Lab, TAKT and the other listeners were not touched.
+- **Ownership:** one implementation worker (this session) plus two read-only research/review subagents. The dev server on 4330 was stopped at the end of the session; no owned processes remain. Knowledge Lab, TAKT and the other listeners were not touched.
 - **Open gate — supervision:** no external watchdog enforced the deadline. The session ended well inside it (≈ 1 h 20 min of the 8 h maximum) because the objectives were met. Future unattended sessions still need the runbook's external supervisor.
 - **TAKT reporting:** not used. No verified scoped session-reporting operation was established, and the runbook says not to build one mid-session.
 
@@ -213,5 +213,6 @@ Goal: replace the director with an **authorised model route**, keeping every bou
 | `1341ebf` | Live matrix weights, learning-plan scenario, review fixes |
 | `3c484a9` | Replay route through the model contract, generic weight explanations |
 | `90bb7a4` | Pane reordering, persisted drafts, legibility, accessible diagram names, dark mode |
+| `37442a3` | Review fixes (state-aware callouts, simulator baseline, timeline legend), final evidence, this record |
 
 Draft PR: https://github.com/blackmath88/blackboard-nextgenui/pull/18 (not merged, not deployed).
