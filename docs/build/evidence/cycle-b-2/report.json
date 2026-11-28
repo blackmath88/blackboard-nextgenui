@@ -1,6 +1,6 @@
 {
   "base": "http://127.0.0.1:4330/studio.html",
-  "startedAt": "2026-11-28T09:09:34.302Z",
+  "startedAt": "2026-11-28T09:13:56.082Z",
   "checks": [
     {
       "name": "architecture: options pane composed",
@@ -66,6 +66,11 @@
       "name": "assumption edit makes no turn",
       "ok": true,
       "detail": ""
+    },
+    {
+      "name": "interpretive copy follows the state (overdrawn warning, no stale advice)",
+      "ok": true,
+      "detail": "Überzeichnet"
     },
     {
       "name": "implications cite the human value",
@@ -259,7 +264,7 @@
       "Fetch API cannot load https://example.org/. Refused to connect because it violates the document's Content Security Policy."
     ]
   },
-  "finishedAt": "2026-11-28T09:10:12.808Z",
-  "passed": 45,
+  "finishedAt": "2026-11-28T09:14:34.589Z",
+  "passed": 46,
   "failed": 0
 }

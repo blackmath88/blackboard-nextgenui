@@ -51,7 +51,7 @@ export const promoteBlock = (entry: ChatEntry, index: number, at: string): Repre
     }
     return {
       id: base,
-      title: heading && heading.kind === 'heading' ? plain(heading.text).slice(0, 60) : `${columns.slice(0, 2).map((c) => c.label).join(' & ')} (aus dem Chat)`,
+      title: heading && heading.kind === 'heading' ? plain(heading.text).slice(0, 60) : `${columns.slice(0, 2).map((c) => c.label).join(' & ')}`,
       purpose: 'Aus dem Gespräch übernommen — bleibt hier, auch wenn der Chat weiterläuft',
       root: { type: 'section', children },
     }
@@ -59,7 +59,7 @@ export const promoteBlock = (entry: ChatEntry, index: number, at: string): Repre
   if (block.kind === 'list') {
     return {
       id: base,
-      title: heading && heading.kind === 'heading' ? plain(heading.text).slice(0, 60) : `${plain(block.items[0] ?? 'Punkte').split(/\s+—\s+|:\s+/)[0]!.slice(0, 32)} … (aus dem Chat)`,
+      title: heading && heading.kind === 'heading' ? plain(heading.text).slice(0, 60) : `${plain(block.items[0] ?? 'Punkte').split(/\s+—\s+|:\s+/)[0]!.slice(0, 28)} …`,
       purpose: 'Aus dem Gespräch übernommen — einzeln auswählbar',
       root: {
         type: 'records', id: `${base}.list`, variant: 'finding',

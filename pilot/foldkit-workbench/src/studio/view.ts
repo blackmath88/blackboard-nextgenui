@@ -277,11 +277,16 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
         return h.div([h.Class('n-grid'), h.Style({ '--cols': String(Math.min(4, Math.max(1, node.columns))) })], node.children.map((child) => render(child, pane)))
       case 'text':
         return prose(node.markdown)
-      case 'callout':
-        return h.div([h.Class(`n-callout${toneClass(node.tone)}`)], [
+      case 'callout': {
+        if (node.showIf) {
+          const v = valueOf(node.showIf.ref)
+          if (!Number.isFinite(v) || (node.showIf.min !== undefined && v < node.showIf.min) || (node.showIf.max !== undefined && v >= node.showIf.max)) return h.span([h.Hidden(true)], [])
+        }
+        return h.div([h.Class(`n-callout${toneClass(node.tone)}`), ...(node.showIf ? [h.Role('status')] : [])], [
           ...(node.title ? [h.strong([], [node.title])] : []),
           prose(node.markdown),
         ])
+      }
       case 'metric': {
         const value = node.derived ? valueOf(node.derived) : (node.value ?? Number.NaN)
         const tone = node.tone ?? (node.derived === 'reserve' || node.derived === 'reserveShare' ? (value < 0 ? 'critical' : node.derived === 'reserveShare' && value < 8 ? 'caution' : undefined) : undefined)
@@ -353,7 +358,13 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
       case 'diagram': return diagram(h, node, paneId, selected)
       case 'timeline': {
         const weeks = Array.from({ length: Math.max(1, node.span) }, (_, i) => i)
+        const tones = new Set<string>(node.items.map((i) => i.tone ?? 'none'))
+        const legend: Array<[string, string]> = ([['positive', 'erledigt'], ['accent', 'in Arbeit'], ['none', 'geplant'], ['caution', 'Risiko']] as Array<[string, string]>).filter(([t]) => tones.has(t))
         return h.div([h.Class('n-timeline'), h.Style({ '--span': String(node.span) })], [
+          ...(legend.length > 1 || node.items.some((i) => i.milestone) ? [h.div([h.Class('tl-legend')], [
+            ...legend.map(([t, l]) => h.span([], [h.span([h.Class(`sw tone-${t}`)], []), l])),
+            ...(node.items.some((i) => i.milestone) ? [h.span([], [h.span([h.Class('sw milestone')], []), 'Meilenstein'])] : []),
+          ])] : []),
           h.div([h.Class('tl-head')], [h.span([], []), ...weeks.map((w) => h.span([], [`W${w + 1}`]))]),
           ...node.items.flatMap((item, index) => [
             ...(item.lane && item.lane !== node.items[index - 1]?.lane ? [h.div([h.Class('tl-group')], [item.lane])] : []),

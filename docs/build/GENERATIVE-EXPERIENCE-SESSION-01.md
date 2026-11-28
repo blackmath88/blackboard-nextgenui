@@ -7,6 +7,7 @@ Durable checkpoint for the eight-hour Blackboard build session on bruh. Engineer
 | Field | Value |
 | --- | --- |
 | Session start (T0) | 2026-11-28 09:07 CET (08:07 UTC) |
+| Session end | 2026-11-28 ≈10:25 CET — finished early, objectives met; no new feature in the final stretch |
 | Hard stop | 17:07 CET · feature freeze 16:37 CET |
 | Host | `mac-mini-bruh` (`Macmini.galaxus.box`), user `admin` — verified with `hostname` / `scutil --get ComputerName` |
 | Harness | Claude Code, Claude desktop app (Code tab), local session |
@@ -60,14 +61,145 @@ Mandatory gates: security boundary tested (sandbox self-check, CSP refusal, rogu
 
 **Biggest remaining experience gap:** the workspace is rich inside the three fixtures but cannot yet turn *arbitrary* conversation content into persistent visual objects, and there is no standing “overview” that accumulates what we decided and changed. Cycle B priorities follow from that.
 
-## Cycle B plan (from the midpoint)
+## Cycle B (09:50–10:20) — interactive visual intelligence
 
-1. Promote structure from any assistant reply (tables, lists) into native Blackboard panes — emancipating in-chat visuals into the workspace.
-2. A host-derived **Überblick** pane: decisions, human edits, pins, open questions — continuity without a model call.
-3. Side-by-side view of a pinned pane next to the focused one (IDE split).
-4. Artifact continuity: the host re-initialises an artifact with its last accepted state; artifact-reported size.
-5. A model-ready catalogue contract (JSON Schema from the same Effect Schema) so a future authorised route can compose with the identical validator.
-6. Visual fixes noted above.
+Driven by the midpoint gap and by a fresh-context model review of the Cycle A screenshots, which rated visual quality lower than the self-review (2, not 3) and listed eight concrete defects. All eight were addressed.
+
+Built:
+- **Promote to Blackboard.** Any table or list in an assistant reply becomes a native, persistent pane with stable ids, plus a chart when a column is numeric. This is the "emancipate in-chat visuals" move (`derive.ts`).
+- **Überblick.** A pane the host derives itself: turns, panes, human edits (proposal → now), decisions, open questions and pins. It is recomputed from state, with no model call.
+- **Split view.** A pinned pane sits beside the focused one (IDE style). Board width is clamped to the viewport and restored when split closes.
+- **Pane rearranging.** Tab drag-and-drop and Alt+←/→. Pane order persists.
+- **Live matrix weights.** Criteria weights bind to human-owned assumptions, so editing them re-ranks options locally. "Auswirkungen besprechen" then explains whether the recommendation flips, and the weighting persists into later turns.
+- **Learning-plan scenario.** The fourth materially different composition: hours calculator, topic split, timeline, practice board and resources. Plan reassessment now works for any board pane.
+- **Artifact continuity.** On re-initialisation the host replays the last accepted artifact state (`ui/notifications/host-context`). The artifact reports its own height (`ui/notifications/size-changed`), bounded to 120–720 px.
+- **Model contract** (`catalogue.ts`). The JSON Schema is generated from the same Effect Schema the host decodes with, alongside a German prompt builder and `parseModelReply`.
+- **Replay route** (`replay.ts`). Model-format replies for questions the scripted director cannot answer (PostgreSQL vs SQLite, the turn lifecycle, a deliberately invalid iframe representation) travel *only* through `parseModelReply` → `decodePatch`. They are labelled "Wiedergabe · Modellformat" in the UI. They were authored during development and are not output of an application model.
+- **Review fixes.**
+  - Inline reference chips no longer break text (they are now `span[role=button]`).
+  - Consistent de-CH numbers with a Unicode minus.
+  - A calmer composition with fewer bordered boxes.
+  - A dismissible restore banner.
+  - Hover-only secondary actions.
+  - Semantic titles for promoted panes.
+  - Tab overflow fade.
+  - Text at least 12 px.
+  - The bridge log is scoped to the current conversation.
+  - Persisted drafts.
+  - Accessible names for diagram nodes.
+
+## Final evidence
+
+| Check | Result |
+| --- | --- |
+| `npm run check` | TypeScript clean · **53 tests pass** (27 legacy + 26 studio) · production build |
+| Browser acceptance `scripts/studio-acceptance.mjs` (headless Chrome, fresh context, 1440×900 / 390×844 / 1024×768, light + dark) | **46 / 46 pass** — [report.json](evidence/cycle-b-2/report.json), [trace.json](evidence/cycle-b-2/trace.json), [shots](evidence/cycle-b-2/shots) |
+| axe-core 4.14.1 | **0 violations** in empty, architecture, budget, research, learning and dark-architecture states |
+| Artifact isolation | in-frame probe: storage, host DOM and network blocked; 8 CSP `connect-src 'none'` refusals logged; host cannot read the artifact document (opaque origin); a rogue frame's event is rejected and the pending value is unchanged; unknown events, nested payloads, oversized and malformed messages are rejected (unit tests) |
+| Continuity | reload byte-identical; human budget edit, moved card, pins, focus and draft survive; artifact state survives remount and reload |
+| Overflow | none at 390, 1024 or 1440 px, nor in split view |
+
+Interaction recordings: video capture needs Playwright's ffmpeg download, which was not fetched. The numbered screenshot sequence in `evidence/cycle-b-2/shots` (00 → 17) is the recording, and `trace.json` holds every typed interaction with the exact context packet each turn received.
+
+### Reproducible chat ↔ workspace loop (manual)
+
+1. Open `http://127.0.0.1:4330/studio.html` and choose **Architektur erkunden**.
+2. On *Alternativen*, click options A and B. The tray shows both; nothing is sent.
+3. Choose **Vergleichen**. The reply names both, and a *Gegenüberstellung* pane opens. Open **Was die KI sieht** to see the packet.
+4. Move the *Mehrbenutzer* weight to 5 and *Nachvollziehbarkeit* and *Schutz menschlicher Änderungen* to 1. The matrix re-ranks immediately.
+5. Choose **Auswirkungen besprechen**. The reply says the recommendation flips to CRDT.
+6. Reload: weights, panes and focus are intact, and *Überblick* lists your edits.
+
+## Cycle A vs Cycle B
+
+| Aspect | Midpoint (A) | End (B) |
+| --- | --- | --- |
+| Scenarios | 3 fixture conversations | 4 fixture conversations, plus 3 replayed model-format replies through the model contract |
+| Workspace → chat | select, compare, why, investigate, relevance, budget edit, card move, artifact event | plus weight edits that flip recommendations, promote from chat, learning edits |
+| Continuity | reload, pins, revisions, human values | plus Überblick, split, reorder, drafts, artifact state replay |
+| Model readiness | none | JSON Schema contract, prompt builder, reply parser, refusal shown in the UI |
+| Visual | first pass; review found card nesting, chip wrapping, number inconsistencies | review fixes applied; dark mode verified |
+| Checks | 44 tests · 28 browser checks · axe clean (4 states) | 53 tests · 45 browser checks · axe clean (6 states) |
+
+## Rubric — final self-assessment (not independent)
+
+| Dimension (weight) | Rating | Evidence / limitation |
+| --- | --- | --- |
+| Visual quality (25) | 3 | Calm, typographic, consistent in light, dark and phone; distinct forms per question. Still a recognisable shared pane template (title / purpose / Rev.), and the system-map details truncate. |
+| Bidirectional interaction (25) | 3 | Every vision example is implemented and tested: click decision → why; select several → compare; change value → recalculate → discuss; select chart item → investigate; move task → reassess; click source → relevance; pin; modify an assumption and keep it across turns. All replies are scripted. |
+| Generative richness (20) | 2 | 16 primitives, 4 + 3 materially different compositions, promote from chat, a bespoke HTML artifact. No model chooses compositions live; free text outside the fixtures is shallow. |
+| Persistence & continuity (15) | 4 | Stable ids, human-owned values beside representations, frozen pins, revision history, Überblick, split, reorder, drafts, artifact state — all verified across reload. |
+| Usability & accessibility (10) | 3 | axe clean in 6 states; keyboard selection, resize and reorder; reduced motion; no overflow. No screen-reader walkthrough; drag-and-drop has keyboard alternatives but no announced feedback. |
+| Technical reliability (5) | 4 | 53 tests, 45 browser checks, invalid representations refused in the UI with the last view kept. |
+
+Weighted: 18.75 + 18.75 + 10 + 15 + 7.5 + 5 = **75 / 100** (self-assessed; see the fresh-context review below).
+
+## Fresh-context model reviews (not independent human acceptance)
+
+Two read-only subagents with no prior context reviewed the screenshots against the product vision. They are a different context of the same model family: useful for catching blind spots, but **not independent validation**. Codex was not available on this host (`codex` not installed), so no cross-vendor review was run.
+
+| Review | Visual | Interaction | Richness | Continuity | Usability | Reliability | Weighted |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| After Cycle A (09:58) | 2 | 3 | 3 | 3 | 2 | — | not computed |
+| After Cycle B (10:18) | 2.5 | 3 | 2.5 | 3.5 | 2.5 | 3 | **70 / 100** |
+| Self-assessment (final) | 3 | 3 | 2 | 4 | 3 | 4 | 75 / 100 |
+
+Verdict of the second review (paraphrased): the work sits between a scripted demo and the vision. The persistence, provenance and typed-interaction foundations are real, but replies and most representations are authored fixtures. The single biggest next step is a live model on the existing composition contract.
+
+Defects from the second review, fixed after it (10:18–10:25) and covered by the 46-check run:
+- The budget reading text contradicted the state. Callouts now take a generic `showIf` on a derived value, so an *Überzeichnet* or *Reserve knapp* warning replaces stale advice.
+- The developer log appeared in screenshots. It is off by default, and the acceptance run now closes it after its one screenshot.
+- The simulator chart was weak. It now has a comparison baseline, a chosen-week marker, axis labels and the delta to the baseline.
+- The timeline had no legend. A legend now appears when tones or milestones are present.
+- The comparison sign was confusing. It now reads "+2 für CRDT-Dokument".
+- Promoted pane titles were long. They are now short.
+
+Not addressed, and carried to the next mission:
+- The learning plan still reuses the board + timeline form.
+- The timeline has no dependency arrows, and its bars don't move with edits.
+- Split view narrows the chat to about 440 px at 1440 px.
+- There is no tab overflow menu (only an edge fade).
+- The Überblick is thin in early turns.
+
+
+## Mandatory gates
+
+- **Security boundary:** tested as above. Generated HTML gets no credentials, storage, DOM, network or authority, only the allow-listed event names.
+- **Data preservation:** no real project data was touched. The original worktrees (`blackboard-source`, `blackboard-foldkit-worktree`, `blackboard-unibas-eval`) and their branches are unchanged. The legacy `pilot/app` verification scripts (which delete `.pilot/`) were not run.
+- **Cost:** no application inference and no paid API. Claude plan usage observed at 10:15 CET: 5-hour window 25 %, weekly 65 %, extra usage disabled.
+- **Ownership:** one implementation worker (this session) plus two read-only research/review subagents. No processes left besides the dev server on 4330 (stop it from the Claude app or with `lsof -ti:4330 | xargs kill`). Knowledge Lab, TAKT and the other listeners were not touched.
+- **Open gate — supervision:** no external watchdog enforced the deadline. The session ended well inside it (≈ 1 h 20 min of the 8 h maximum) because the objectives were met. Future unattended sessions still need the runbook's external supervisor.
+- **TAKT reporting:** not used. No verified scoped session-reporting operation was established, and the runbook says not to build one mid-session.
+
+## Known limitations
+
+- All assistant intelligence is scripted (director) or replayed (authored model-format). Real-model composition quality is **unverified**.
+- Free-text questions outside the fixtures get a generic answer. The replay table matches by keyword.
+- Artifact sandbox relies on `srcdoc` + `sandbox="allow-scripts"` + meta CSP in the same top-level origin. A separate artifact origin (as MCP Apps requires for `allow-same-origin`) would add defence in depth.
+- Host-side DOM code could still forge an iframe with a `data-artifact-id` attribute. The threat model covers generated HTML, not host-side script injection.
+- The Szenarien table is a snapshot of its turn; it does not live-update when sliders move afterwards (deliberate, but can surprise).
+- Diagram layout is a simple layered layout without edge-crossing minimisation; node details truncate.
+- No multi-user sync, no server persistence (localStorage only), no undo for pane closing.
+- Video recordings not produced (ffmpeg download avoided).
+- Pre-existing: `pilot/foldkit-workbench/.gitignore` contains `> node_modules` / `> dist` (with a stray `>`), so build output is tracked. This branch restores `dist/` to its base content; it does not change the `.gitignore`.
+
+## Launch and reproduction
+
+See `pilot/foldkit-workbench/README.md` § Blackboard studio. In short: `npm ci && npm run dev -- --port 4330`, open `/studio.html`; `node scripts/studio-acceptance.mjs` reproduces all evidence into `docs/build/evidence/run`.
+
+## Proposed next mission — session 02: real composition
+
+Goal: replace the director with an **authorised model route**, keeping every boundary.
+
+1. Obtain an explicit, budgeted model route for application inference: a provider, a spend cap and data-handling approval.
+2. Wire `catalogPrompt` + `parseModelReply` into a Command with streaming (the existing NDJSON path in `chat-stream.ts`). Keep the director as the offline fallback.
+3. Evaluate the same four scenarios plus five unseen questions on these measures:
+   - schema acceptance rate;
+   - representation fit (blind-rated against the fixtures);
+   - human-edit preservation (does the model respect `humanEdits`?);
+   - latency and tokens per turn.
+4. Serve artifacts from a separate origin and add a model-generated artifact path with the same bridge.
+5. Add an external deadline supervisor before any unattended run.
 
 ## Commits
 
@@ -75,3 +207,11 @@ Mandatory gates: security boundary tested (sandbox self-check, CSP refusal, rogu
 | --- | --- |
 | `361298b` | Studio: catalogue, director, interaction loop, artifact bridge |
 | `f905c79` | Tests, budget recomposition, diagram legibility, source excerpts |
+| `768a5c8` | Cycle A midpoint: acceptance script, accessibility fixes, evidence, this record |
+| `fe3ea03` | Promote to Blackboard, Überblick, split view, artifact state and size |
+| `3e7e3f9` | Model contract, Cycle B tests and acceptance |
+| `1341ebf` | Live matrix weights, learning-plan scenario, review fixes |
+| `3c484a9` | Replay route through the model contract, generic weight explanations |
+| `90bb7a4` | Pane reordering, persisted drafts, legibility, accessible diagram names, dark mode |
+
+Draft PR: https://github.com/blackmath88/blackboard-nextgenui/pull/18 (not merged, not deployed).

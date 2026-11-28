@@ -218,10 +218,19 @@ export const budgetPlan = (total = 480_000): Representation => ({
         ],
       },
       {
-        type: 'callout',
-        tone: 'neutral',
-        title: 'Lesart',
+        type: 'callout', tone: 'critical', title: 'Überzeichnet',
+        markdown: 'Die Posten übersteigen das Gesamtbudget. Kürzen Sie einen Posten oder erhöhen Sie das Gesamtbudget — oder fragen Sie mit **Auswirkungen besprechen**, wo es am wenigsten schmerzt.',
+        showIf: { ref: 'reserve', max: 0 },
+      },
+      {
+        type: 'callout', tone: 'caution', title: 'Reserve knapp',
+        markdown: 'Unter 8 % Reserve fängt der Plan eine ungeplante Stelle oder höhere Lizenzkosten nicht mehr ab.',
+        showIf: { ref: 'reserveShare', min: 0, max: 8 },
+      },
+      {
+        type: 'callout', tone: 'neutral', title: 'Lesart',
         markdown: 'Eine Reserve von 10–15 % fängt eine ungeplante Stelle oder Lizenzkosten ab. Verschieben Sie Beträge direkt; die Kennzahlen rechnen sofort mit. Erst **Auswirkungen besprechen** schickt die Änderung ins Gespräch.',
+        showIf: { ref: 'reserveShare', min: 8 },
       },
     ],
   },

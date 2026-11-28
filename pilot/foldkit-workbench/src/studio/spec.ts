@@ -30,6 +30,8 @@ export const CalloutNode = Schema.Struct({
   tone: Tone,
   title: Schema.optional(Label),
   markdown: Text,
+  /** Shown only while a live value is inside the range — interpretive copy follows the state. */
+  showIf: Schema.optional(Schema.Struct({ ref: Id, min: Schema.optional(Schema.Number), max: Schema.optional(Schema.Number) })),
 })
 
 /** A single figure. `value` may be a literal or the name of a derived value. */

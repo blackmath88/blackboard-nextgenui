@@ -199,7 +199,7 @@ const compare = (conversation: Conversation, packet: Packet): Turn => {
         `**[[${best.id}]]** liegt mit ${best.score} von ${best.max} Punkten vor **[[${other.id}]]** (${other.score}).`,
         '',
         'Den grössten Unterschied machen:',
-        ...gaps.slice(0, 3).map(({ c, d }) => `- **${c.label}** (Gewicht ${c.weight}): ${d > 0 ? '+' : ''}${d} für ${d >= 0 ? best.label : other.label}`),
+        ...gaps.slice(0, 3).map(({ c, d }) => `- **${c.label}** (Gewicht ${c.weight}): ${d === 0 ? 'gleichauf' : `+${Math.abs(d)} für ${d > 0 ? best.label : other.label}`}`),
         '',
         gaps[0] && gaps[0].d < 0 ? '' : `Wenn Mehrbenutzerfähigkeit später wichtiger wird, lohnt es sich, das Gewicht dieses Kriteriums zu erhöhen — die Gegenüberstellung liegt als eigenes Fenster neben den Alternativen.`,
       ].join('\n'),

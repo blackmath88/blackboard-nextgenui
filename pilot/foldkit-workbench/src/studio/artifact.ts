@@ -128,10 +128,10 @@ button:hover{border-color:var(--accent)}
     <label>Teamgrösse <input type="range" id="team" min="3" max="20" value="8"><span id="teamv">8</span></label>
   </div>
   <div class="row" style="justify-content:space-between">
-    <div><div class="big" id="weeks">8</div><div class="muted">Wochen bis zur vollen Produktivität</div></div>
+    <div><div class="big" id="weeks">8</div><div class="muted">Wochen bis zur vollen Produktivität · <span id="delta"></span></div></div>
     <button id="choose">Szenario übernehmen</button>
   </div>
-  <canvas id="curve" width="560" height="150"></canvas>
+  <canvas id="curve" width="560" height="150" aria-label="Produktivitätskurve: gewähltes Szenario gegenüber ohne Struktur"></canvas>
   <div id="probe"></div>
 </div>
 <script>
@@ -146,13 +146,22 @@ const weeksFor = () => {
 const draw = () => {
   const c = $('curve'), g = c.getContext('2d'), w = weeksFor();
   const css = getComputedStyle(document.documentElement);
+  const muted = css.getPropertyValue('--muted'), line = css.getPropertyValue('--line'), accent = css.getPropertyValue('--accent'), fg = css.getPropertyValue('--fg');
+  const X = (t) => 44 + t / 16 * 496, Y = (p) => 122 - p * 104;
   g.clearRect(0, 0, c.width, c.height);
-  g.strokeStyle = css.getPropertyValue('--line'); g.lineWidth = 1;
-  for (let i = 0; i <= 16; i += 4) { const x = 20 + i / 16 * 520; g.beginPath(); g.moveTo(x, 10); g.lineTo(x, 135); g.stroke(); g.fillStyle = css.getPropertyValue('--muted'); g.fillText(i + ' W', x - 8, 148); }
-  g.strokeStyle = css.getPropertyValue('--accent'); g.lineWidth = 2.5; g.beginPath();
-  for (let t = 0; t <= 16; t += 0.25) { const p = 1 - Math.exp(-3 * t / w); const x = 20 + t / 16 * 520, y = 130 - p * 115; t ? g.lineTo(x, y) : g.moveTo(x, y); }
-  g.stroke();
+  g.font = '11px -apple-system, sans-serif'; g.lineWidth = 1;
+  for (let i = 0; i <= 16; i += 4) { g.strokeStyle = line; g.beginPath(); g.moveTo(X(i), 14); g.lineTo(X(i), 122); g.stroke(); g.fillStyle = muted; g.fillText(i + ' W', X(i) - 8, 140); }
+  g.fillStyle = muted; g.fillText('100 %', 4, Y(1) + 4); g.fillText('0 %', 16, Y(0) + 4);
+  const curve = (weeks, color, dash) => { g.setLineDash(dash); g.strokeStyle = color; g.lineWidth = dash.length ? 1.5 : 2.5; g.beginPath(); for (let t = 0; t <= 16; t += 0.25) { const p = 1 - Math.exp(-3 * t / weeks); t ? g.lineTo(X(t), Y(p)) : g.moveTo(X(t), Y(p)); } g.stroke(); g.setLineDash([]); };
+  curve(14, muted, [4, 4]);
+  curve(w, accent, []);
+  const p = 1 - Math.exp(-3);
+  g.fillStyle = accent; g.beginPath(); g.arc(X(w), Y(p), 4.5, 0, Math.PI * 2); g.fill();
+  g.fillStyle = fg; g.fillText(String(w).replace('.', ',') + ' W', X(w) + 8, Y(p) + 16);
+  g.fillStyle = muted; g.beginPath(); g.arc(X(14), Y(p), 3.5, 0, Math.PI * 2); g.fill(); g.fillText('ohne Struktur: 14 W', X(14) - 50, Y(p) - 10);
+  g.strokeStyle = accent; g.globalAlpha = 0.35; g.beginPath(); g.moveTo(X(w), Y(p) + 6); g.lineTo(X(w), 122); g.stroke(); g.globalAlpha = 1;
   $('weeks').textContent = String(w).replace('.', ',');
+  $('delta').textContent = w < 14 ? (14 - w).toFixed(0) + ' Wochen schneller als ohne Struktur' : 'so langsam wie ohne Struktur';
   $('teamv').textContent = $('team').value;
 };
 ['buddy', 'docs', 'team'].forEach((id) => $(id).addEventListener('input', draw));
