@@ -85,17 +85,32 @@ export const archOptions: Representation = {
           { id: 'opt.direct', label: 'Direkte Aufrufe' },
         ],
         criteria: [
-          { id: 'c.trace', label: 'Nachvollziehbarkeit', weight: 3 },
-          { id: 'c.edit', label: 'Schutz menschlicher Änderungen', weight: 3 },
-          { id: 'c.cost', label: 'Modellkosten', weight: 2 },
-          { id: 'c.collab', label: 'Mehrbenutzer', weight: 1 },
-          { id: 'c.effort', label: 'Umsetzungsaufwand', weight: 2 },
+          { id: 'c.trace', label: 'Nachvollziehbarkeit', weight: 3, assumption: 'w.trace' },
+          { id: 'c.edit', label: 'Schutz menschlicher Änderungen', weight: 3, assumption: 'w.edit' },
+          { id: 'c.cost', label: 'Modellkosten', weight: 2, assumption: 'w.cost' },
+          { id: 'c.collab', label: 'Mehrbenutzer', weight: 1, assumption: 'w.collab' },
+          { id: 'c.effort', label: 'Umsetzungsaufwand', weight: 2, assumption: 'w.effort' },
         ],
         scores: {
           'opt.events': { 'c.trace': 5, 'c.edit': 5, 'c.cost': 4, 'c.collab': 3, 'c.effort': 3 },
           'opt.shared': { 'c.trace': 3, 'c.edit': 4, 'c.cost': 4, 'c.collab': 5, 'c.effort': 2 },
           'opt.direct': { 'c.trace': 2, 'c.edit': 1, 'c.cost': 1, 'c.collab': 2, 'c.effort': 5 },
         },
+      },
+      {
+        type: 'section',
+        title: 'Gewichtung — verschieben Sie, was Ihnen wichtig ist',
+        children: [{
+          type: 'assumptions',
+          id: 'arch.weights',
+          items: [
+            { id: 'w.trace', label: 'Nachvollziehbarkeit', value: 3, min: 0, max: 5, step: 1 },
+            { id: 'w.edit', label: 'Schutz menschlicher Änderungen', value: 3, min: 0, max: 5, step: 1 },
+            { id: 'w.cost', label: 'Modellkosten', value: 2, min: 0, max: 5, step: 1 },
+            { id: 'w.collab', label: 'Mehrbenutzer', value: 1, min: 0, max: 5, step: 1 },
+            { id: 'w.effort', label: 'Umsetzungsaufwand', value: 2, min: 0, max: 5, step: 1 },
+          ],
+        }],
       },
       {
         type: 'records',
@@ -295,6 +310,80 @@ export const researchEvidence: Representation = {
         items: [
           { id: 'q.senior', title: 'Gilt der Buddy-Effekt auch für erfahrene Fachkräfte?', detail: 'Alle Studien betrachten überwiegend Berufseinsteigende.' },
           { id: 'q.measure', title: 'Wie messen wir „volle Produktivität“ bei uns?', detail: 'Die Studien verwenden Selbsteinschätzung und Ticketdurchsatz.' },
+        ],
+      },
+    ],
+  },
+}
+
+// ---------------------------------------------------------------- learning
+
+export const learnPlan: Representation = {
+  id: 'learn.plan',
+  title: 'Lernplan Effect',
+  purpose: 'Sechs Wochen, abends — Zeit und Übungen gehören Ihnen',
+  derived: {
+    total: { op: 'mul', args: [{ ref: 'l.hours' }, { ref: 'l.weeks' }] },
+    'h.basics': { op: 'mul', args: [{ ref: 'total' }, { num: 0.15 }] },
+    'h.effects': { op: 'mul', args: [{ ref: 'total' }, { num: 0.3 }] },
+    'h.schema': { op: 'mul', args: [{ ref: 'total' }, { num: 0.2 }] },
+    'h.foldkit': { op: 'mul', args: [{ ref: 'total' }, { num: 0.2 }] },
+    'h.project': { op: 'mul', args: [{ ref: 'total' }, { num: 0.15 }] },
+  },
+  root: {
+    type: 'section',
+    children: [
+      {
+        type: 'grid', columns: 3, children: [
+          { type: 'metric', id: 'lm.total', label: 'Lernzeit gesamt', derived: 'total', unit: 'Std.' },
+          { type: 'metric', id: 'lm.effects', label: 'Davon Effects & Fehler', derived: 'h.effects', unit: 'Std.' },
+          { type: 'metric', id: 'lm.project', label: 'Abschlussprojekt', derived: 'h.project', unit: 'Std.' },
+        ],
+      },
+      {
+        type: 'grid', columns: 2, children: [
+          {
+            type: 'assumptions', id: 'learn.inputs', items: [
+              { id: 'l.hours', label: 'Stunden pro Woche', value: 6, min: 2, max: 15, step: 1, unit: 'Std.' },
+              { id: 'l.weeks', label: 'Wochen', value: 6, min: 3, max: 12, step: 1 },
+            ],
+          },
+          {
+            type: 'bars', id: 'learn.split', title: 'Zeit pro Thema', unit: 'Std.', items: [
+              { id: 'lb.basics', label: 'Grundlagen', assumption: 'h.basics' },
+              { id: 'lb.effects', label: 'Effects & Fehler', assumption: 'h.effects', tone: 'accent' },
+              { id: 'lb.schema', label: 'Schema', assumption: 'h.schema' },
+              { id: 'lb.foldkit', label: 'Foldkit', assumption: 'h.foldkit' },
+              { id: 'lb.project', label: 'Projekt', assumption: 'h.project', tone: 'positive' },
+            ],
+          },
+        ],
+      },
+      {
+        type: 'timeline', id: 'learn.timeline', span: 6, items: [
+          { id: 'lt.basics', label: 'Grundlagen & Pipe', start: 0, length: 1, lane: 'Verstehen' },
+          { id: 'lt.effects', label: 'Effects & Fehler', start: 1, length: 2, lane: 'Verstehen' },
+          { id: 'lt.schema', label: 'Schema', start: 2, length: 1, lane: 'Anwenden' },
+          { id: 'lt.foldkit', label: 'Foldkit-App', start: 3, length: 2, lane: 'Anwenden' },
+          { id: 'lt.project', label: 'Eigenes Projekt', start: 4, length: 2, lane: 'Festigen' },
+          { id: 'lt.review', label: 'Rückblick', start: 5, length: 1, lane: 'Festigen', milestone: true },
+        ],
+      },
+      {
+        type: 'board', id: 'learn.board',
+        lanes: [{ id: 'open', label: 'Geplant' }, { id: 'doing', label: 'Läuft' }, { id: 'done', label: 'Geschafft' }],
+        cards: [
+          { id: 'lc.basics', title: 'Pipe-Übungen', lane: 'open', detail: 'Woche 1' },
+          { id: 'lc.effects', title: 'Fehlerkanal verstehen', lane: 'open', detail: 'Woche 2–3' },
+          { id: 'lc.schema', title: 'API mit Schema validieren', lane: 'open', detail: 'Woche 3' },
+          { id: 'lc.foldkit', title: 'Zähler-App in Foldkit', lane: 'open', detail: 'Woche 4' },
+          { id: 'lc.project', title: 'Eigenes Projekt', lane: 'open', detail: 'Woche 5–6' },
+        ],
+      },
+      {
+        type: 'sources', id: 'learn.resources', items: [
+          { id: 'r.effect', title: 'Effect-Dokumentation', origin: 'effect.website', kind: 'Offizielle Doku', excerpt: 'Einstieg, Effects, Fehlerbehandlung, Schema.' },
+          { id: 'r.foldkit', title: 'Foldkit-Beispiele', origin: 'foldkit.dev', kind: 'Offizielle Doku', excerpt: 'Model, Message, Update, Commands — mit kleinen Apps.' },
         ],
       },
     ],

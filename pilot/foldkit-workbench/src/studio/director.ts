@@ -13,7 +13,7 @@
 import type { Packet } from './context.js'
 import type { Conversation, Scenario } from './model.js'
 import { assumptionValues } from './model.js'
-import { archMap, archOptions, archPlan, budgetPlan, researchEvidence, researchFindings } from './scenarios.js'
+import { archMap, archOptions, archPlan, budgetPlan, learnPlan, researchEvidence, researchFindings } from './scenarios.js'
 import { evaluate, type Representation } from './spec.js'
 import { findObject } from './context.js'
 import { onboardingSimulator } from './artifact.js'
@@ -27,17 +27,19 @@ export type Turn = {
 }
 
 const chf = (value: number) =>
-  Number.isFinite(value) ? `${Math.round(value).toLocaleString('de-CH')} CHF` : '—'
-const pct = (value: number) => (Number.isFinite(value) ? `${value.toFixed(1).replace('.', ',')} %` : '—')
+  Number.isFinite(value) ? `${Math.round(value).toLocaleString('de-CH').replace('-', '−')} CHF` : '—'
+const pct = (value: number) => (Number.isFinite(value) ? `${value.toFixed(1).replace('-', '−')} %` : '—')
 
 export const starters: ReadonlyArray<{ scenario: Scenario; label: string; prompt: string }> = [
   { scenario: 'architecture', label: 'Architektur erkunden', prompt: 'Wie sollten wir die Synchronisation zwischen Chat und Arbeitsfläche architektonisch aufbauen?' },
-  { scenario: 'budget', label: 'Budget planen', prompt: 'Wir haben 480 000 CHF für das Produktteam 2027. Wie sollten wir das Budget aufteilen?' },
+  { scenario: 'budget', label: 'Budget planen', prompt: 'Wir haben 480’000 CHF für das Produktteam 2027. Wie sollten wir das Budget aufteilen?' },
   { scenario: 'research', label: 'Forschung verdichten', prompt: 'Fasse zusammen, was wir über Remote-Onboarding und die Produktivität neuer Mitarbeitender wissen.' },
+  { scenario: 'learning', label: 'Lernplan entwerfen', prompt: 'Ich möchte in sechs Wochen Effect und Foldkit lernen, abends neben der Arbeit. Wie gehe ich vor?' },
 ]
 
 const detect = (text: string): Scenario => {
   const t = text.toLowerCase()
+  if (/lernen|lernplan|kurs|lerne\b/.test(t)) return 'learning'
   if (/budget|chf|kosten|aufteil|geld/.test(t)) return 'budget'
   if (/onboarding|studie|forschung|evidenz|wissen wir|befund/.test(t)) return 'research'
   if (/architektur|synchron|system|komponent|event|protokoll/.test(t)) return 'architecture'
@@ -78,15 +80,15 @@ const opening = (scenario: Scenario): Turn => {
       return {
         scenario, title: 'Budget Produktteam 2027',
         markdown: [
-          'Hier ist ein ausgewogener Startpunkt für **480 000 CHF**. Er setzt auf Entwicklung als grössten Posten und hält rund 15 % Reserve.',
+          'Hier ist ein ausgewogener Startpunkt für **480’000 CHF**. Er setzt auf Entwicklung als grössten Posten und hält rund 15 % Reserve.',
           '',
           '| Posten | Betrag | Anteil |',
           '| --- | ---: | ---: |',
-          '| Entwicklung | 210 000 CHF | 43,8 % |',
-          '| Design | 80 000 CHF | 16,7 % |',
-          '| Infrastruktur | 50 000 CHF | 10,4 % |',
-          '| Nutzerforschung | 45 000 CHF | 9,4 % |',
-          '| Weiterbildung | 25 000 CHF | 5,2 % |',
+          '| Entwicklung | 210’000 CHF | 43.8 % |',
+          '| Design | 80’000 CHF | 16.7 % |',
+          '| Infrastruktur | 50’000 CHF | 10.4 % |',
+          '| Nutzerforschung | 45’000 CHF | 9.4 % |',
+          '| Weiterbildung | 25’000 CHF | 5.2 % |',
           '',
           'Die [[budget.inputs]] auf der Arbeitsfläche gehören Ihnen: Schieben Sie Beträge, und [[m.reserve]] sowie die Verteilung rechnen ohne Modellaufruf mit. Wenn Sie wissen wollen, was eine Änderung bedeutet, tippen Sie auf **Auswirkungen besprechen**.',
         ].join('\n'),
@@ -107,10 +109,25 @@ const opening = (scenario: Scenario): Turn => {
         ].join('\n'),
         patch: { upsert: [researchFindings, researchEvidence], focus: 'research.findings' },
       }
+    case 'learning':
+      return {
+        scenario, title: 'Lernplan Effect & Foldkit',
+        markdown: [
+          'Sechs Wochen abends reichen, wenn Sie **früh bauen** statt lange zu lesen. Mein Vorschlag:',
+          '',
+          '1. **Woche 1** — [[lt.basics]]: kleine Programme mit `pipe`, ohne Framework.',
+          '2. **Woche 2–3** — [[lt.effects]]: der Fehlerkanal ist das, was Effect von Promises unterscheidet.',
+          '3. **Woche 3** — [[lt.schema]]: echte Daten validieren.',
+          '4. **Woche 4–5** — [[lt.foldkit]], dann ein [[lc.project]] mit eigener Fragestellung.',
+          '',
+          'Mit 6 Stunden pro Woche sind das [[lm.total]]. Passen Sie [[learn.inputs]] an Ihre Abende an — die Verteilung rechnet sofort mit. Verschieben Sie Übungen auf dem Board, wenn Sie vorankommen; **Plan neu bewerten** sagt Ihnen dann, ob es noch reicht.',
+        ].join('\n'),
+        patch: { upsert: [learnPlan], focus: 'learn.plan' },
+      }
     case 'open':
       return {
         scenario,
-        markdown: 'Im synthetischen Modus kenne ich drei Gesprächstypen: **Architektur**, **Budget** und **Forschung**. Wählen Sie einen Einstieg unten oder formulieren Sie Ihre Frage mit einem dieser Themen.',
+        markdown: 'Im synthetischen Modus kenne ich vier Gesprächstypen: **Architektur**, **Budget**, **Forschung** und **Lernplan**. Wählen Sie einen Einstieg unten oder formulieren Sie Ihre Frage mit einem dieser Themen.',
         patch: null,
       }
   }
@@ -122,12 +139,19 @@ const weighted = (conversation: Conversation, optionId: string) => {
   const found = findObject(conversation, 'arch.matrix')
   const matrix = conversation.panes.flatMap((p) => collect(p.rep.root)).find((n) => n.type === 'matrix')
   if (!matrix || matrix.type !== 'matrix') return { score: 0, max: 0, found }
+  const vals = values(conversation)
   let score = 0, max = 0
   for (const c of matrix.criteria) {
-    score += (matrix.scores[optionId]?.[c.id] ?? 0) * c.weight
-    max += 5 * c.weight
+    const w = c.assumption && vals[c.assumption] !== undefined ? vals[c.assumption]! : c.weight
+    score += (matrix.scores[optionId]?.[c.id] ?? 0) * w
+    max += 5 * w
   }
   return { score, max, matrix }
+}
+
+const weightIn = (conversation: Conversation, c: { weight: number; assumption?: string | undefined }) => {
+  const vals = values(conversation)
+  return c.assumption && vals[c.assumption] !== undefined ? vals[c.assumption]! : c.weight
 }
 
 const collect = (node: Representation['root']): Representation['root'][] =>
@@ -142,7 +166,7 @@ const compare = (conversation: Conversation, packet: Packet): Turn => {
     const ranked = [...rows].sort((a, b) => b.score - a.score)
     const best = ranked[0]!, other = ranked[1]!
     const gaps = matrix.criteria
-      .map((c) => ({ c, d: (matrix.scores[best.id]?.[c.id] ?? 0) - (matrix.scores[other.id]?.[c.id] ?? 0) }))
+      .map((c) => ({ c: { ...c, weight: weightIn(conversation, c) }, d: (matrix.scores[best.id]?.[c.id] ?? 0) - (matrix.scores[other.id]?.[c.id] ?? 0) }))
       .sort((a, b) => Math.abs(b.d) - Math.abs(a.d))
     const rep: Representation = {
       id: 'arch.compare',
@@ -160,7 +184,7 @@ const compare = (conversation: Conversation, packet: Packet): Turn => {
             columns: [{ key: 'criterion', label: 'Kriterium' }, ...ranked.map((r) => ({ key: r.id.replace('opt.', ''), label: r.label, align: 'end' as const })), { key: 'weight', label: 'Gewicht', align: 'end' as const }],
             rows: matrix.criteria.map((c) => ({
               id: `row.${c.id}`,
-              cells: Object.fromEntries([['criterion', c.label], ...ranked.map((r) => [r.id.replace('opt.', ''), matrix.scores[r.id]?.[c.id] ?? 0]), ['weight', `×${c.weight}`]]),
+              cells: Object.fromEntries([['criterion', c.label], ...ranked.map((r) => [r.id.replace('opt.', ''), matrix.scores[r.id]?.[c.id] ?? 0]), ['weight', `×${weightIn(conversation, c)}`]]),
             })),
           },
         ],
@@ -391,50 +415,100 @@ const budgetImplications = (conversation: Conversation, packet: Packet, question
 const labelFor = (id: string) => ({ 'b.total': 'Gesamtbudget', 'b.dev': 'Entwicklung', 'b.design': 'Design', 'b.research': 'Nutzerforschung', 'b.infra': 'Infrastruktur', 'b.events': 'Weiterbildung' })[id] ?? id
 
 const reassess = (conversation: Conversation, packet: Packet): Turn => {
-  const board = conversation.panes.flatMap((p) => collect(p.rep.root)).find((n) => n.type === 'board')
-  if (!board || board.type !== 'board') return { markdown: 'Es liegt kein Plan auf der Arbeitsfläche.', patch: null }
+  const pane = conversation.panes.find((p) => collect(p.rep.root).some((n) => n.type === 'board'))
+  const board = pane && collect(pane.rep.root).find((n) => n.type === 'board')
+  if (!pane || !board || board.type !== 'board') return { markdown: 'Es liegt kein Plan auf der Arbeitsfläche.', patch: null }
   const lane = (id: string) => conversation.cards[id] ?? board.cards.find((c) => c.id === id)?.lane ?? 'open'
+  const laneName = (id: string) => board.lanes.find((l) => l.id === id)?.label ?? id
   const done = board.cards.filter((c) => lane(c.id) === 'done')
   const doing = board.cards.filter((c) => lane(c.id) === 'doing')
   const moved = packet.movedCards
   const warnings: string[] = []
-  if (lane('t.bridge') !== 'open' && lane('t.schema') !== 'done') warnings.push('Die [[t.bridge]] hängt vom Ereignisschema ab, das noch nicht fertig ist.')
-  if (lane('t.replay') === 'done' && lane('t.log') !== 'done') warnings.push('[[t.replay]] ist erledigt, obwohl [[t.log]] noch offen ist — der Test prüft dann nichts Echtes.')
-  if (doing.length > 2) warnings.push(`${doing.length} Aufgaben sind gleichzeitig in Arbeit; bei drei Personen erhöht das die Wechselkosten.`)
-  const weeksLeft = Math.max(1, 8 - done.length * 1.5)
-  const tlTone = (cardId: string) => lane(cardId) === 'done' ? 'positive' as const : lane(cardId) === 'doing' ? 'accent' as const : undefined
-  const plan = archPlan.root.type === 'section' ? archPlan.root : null
-  const timeline = plan?.children.find((n) => n.type === 'timeline')
-  const updated: Representation | null = timeline && timeline.type === 'timeline' ? {
-    ...archPlan,
+  const learning = conversation.scenario === 'learning'
+  if (!learning) {
+    if (lane('t.bridge') !== 'open' && lane('t.schema') !== 'done') warnings.push('Die [[t.bridge]] hängt vom Ereignisschema ab, das noch nicht fertig ist.')
+    if (lane('t.replay') === 'done' && lane('t.log') !== 'done') warnings.push('[[t.replay]] ist erledigt, obwohl [[t.log]] noch offen ist — der Test prüft dann nichts Echtes.')
+    if (doing.length > 2) warnings.push(`${doing.length} Aufgaben sind gleichzeitig in Arbeit; bei drei Personen erhöht das die Wechselkosten.`)
+  } else {
+    if (lane('lc.project') !== 'open' && lane('lc.effects') !== 'done') warnings.push('Das [[lc.project]] setzt die Grundlagen von [[lc.effects]] voraus — sonst bleibt es beim Abschreiben.')
+    if (doing.length > 1) warnings.push('Mehr als eine Übung gleichzeitig zerstreut die knappe Lernzeit.')
+  }
+  const vals = values(conversation)
+  const span = learning ? (vals['l.weeks'] ?? 6) : 8
+  const remaining = board.cards.length - done.length
+  const weeksLeft = Math.max(1, Math.round((span * remaining) / board.cards.length))
+  const suffix = (id: string) => id.split('.').slice(1).join('.')
+  const toneFor = (itemId: string) => {
+    const card = board.cards.find((c) => suffix(c.id) === suffix(itemId))
+    if (!card) return undefined
+    return lane(card.id) === 'done' ? 'positive' as const : lane(card.id) === 'doing' ? 'accent' as const : undefined
+  }
+  const retone = (node: Representation['root']): Representation['root'] => {
+    if (node.type === 'section' || node.type === 'grid') {
+      return { ...node, children: node.children.filter((n) => !(n.type === 'callout' && n.title === 'Neu bewertet')).map(retone) }
+    }
+    if (node.type === 'timeline') return { ...node, items: node.items.map((item) => { const tone = toneFor(item.id); return tone ? { ...item, tone } : item }) }
+    return node
+  }
+  const root = retone(pane.rep.root)
+  const note = { type: 'callout' as const, tone: (warnings.length ? 'caution' : 'positive') as 'caution' | 'positive', title: 'Neu bewertet', markdown: warnings.length ? warnings.join(' ').replace(/\[\[|\]\]/g, '') : `${done.length} von ${board.cards.length} erledigt, keine Konflikte.` }
+  const updated: Representation = {
+    ...pane.rep,
     purpose: `Neu bewertet: ${done.length} von ${board.cards.length} erledigt`,
-    root: {
-      type: 'section',
-      children: [
-        board,
-        {
-          ...timeline,
-          items: timeline.items.map((item) => {
-            const tone = tlTone(item.id.replace('tl.', 't.'))
-            return tone ? { ...item, tone } : item
-          }),
-        },
-        ...(warnings.length ? [{ type: 'callout' as const, tone: 'caution' as const, title: 'Abhängigkeiten', markdown: warnings.join(' ').replace(/\[\[|\]\]/g, '') }] : []),
-      ],
-    },
-  } : null
+    root: root.type === 'section' ? { ...root, children: [...root.children, note] } : { type: 'section', children: [root, note] },
+  }
   return {
     markdown: [
-      moved.length ? `Sie haben ${moved.map((m) => `[[${m.id}]] → **${laneLabel(m.lane)}**`).join(', ')} verschoben.` : 'Der Plan ist unverändert.',
+      moved.length ? `Sie haben ${moved.map((m) => `[[${m.id}]] → **${laneName(m.lane)}**`).join(', ')} verschoben.` : 'Der Plan ist unverändert.',
       '',
-      `Stand: ${done.length} erledigt, ${doing.length} in Arbeit. Bei gleichem Tempo bleiben etwa **${weeksLeft.toFixed(0)} Wochen**.`,
+      `Stand: ${done.length} ${learning ? 'geschafft' : 'erledigt'}, ${doing.length} ${learning ? 'laufen' : 'in Arbeit'}. Bei gleichem Tempo bleiben etwa **${weeksLeft} Wochen**.`,
       ...(warnings.length ? ['', ...warnings.map((w) => `- ${w}`)] : ['', 'Keine Abhängigkeitskonflikte. Die Zeitleiste ist entsprechend eingefärbt.']),
     ].join('\n'),
-    patch: updated ? { upsert: [updated], focus: 'arch.plan' } : null,
+    patch: { upsert: [updated], focus: pane.rep.id },
   }
 }
 
-const laneLabel = (id: string) => ({ open: 'Offen', doing: 'In Arbeit', done: 'Erledigt' })[id] ?? id
+const weightsChanged = (conversation: Conversation, packet: Packet): Turn => {
+  const options = ['opt.events', 'opt.shared', 'opt.direct']
+  const now = options.map((id) => ({ id, ...weighted(conversation, id) })).sort((a, b) => b.score - a.score)
+  const proposed = { ...conversation, assumptions: {} }
+  const before = options.map((id) => ({ id, ...weighted(proposed, id) })).sort((a, b) => b.score - a.score)
+  const flipped = now[0]!.id !== before[0]!.id
+  const edits = packet.humanEdits.filter((e) => e.id.startsWith('w.'))
+  return {
+    markdown: [
+      edits.length ? `Sie gewichten ${edits.map((e) => `[[${e.id}]] mit **${e.value}** statt ${e.proposed}`).join(', ')}.` : 'Die Gewichtung entspricht meinem Vorschlag.',
+      '',
+      flipped
+        ? `Damit **kippt die Empfehlung**: [[${now[0]!.id}]] liegt jetzt mit ${now[0]!.score} von ${now[0]!.max} Punkten vorn, vor [[${now[1]!.id}]] (${now[1]!.score}). Mit meiner Gewichtung lag [[${before[0]!.id}]] vorn.`
+        : `Die Empfehlung bleibt stabil: [[${now[0]!.id}]] führt mit ${now[0]!.score} von ${now[0]!.max} Punkten, Abstand zu [[${now[1]!.id}]]: ${now[0]!.score - now[1]!.score}.`,
+      '',
+      flipped
+        ? 'Das ist eine echte Wertentscheidung, keine technische. Ich halte sie als Ihre Gewichtung fest; sie gilt in den folgenden Antworten weiter.'
+        : 'Ihre Gewichtung bleibt gespeichert und fliesst in jeden weiteren Vergleich ein.',
+    ].join('\n'),
+    patch: null,
+  }
+}
+
+const learningImplications = (conversation: Conversation, packet: Packet): Turn => {
+  const vals = values(conversation)
+  const hours = vals['l.hours'] ?? 6, weeks = vals['l.weeks'] ?? 6
+  const total = hours * weeks
+  const edits = packet.humanEdits.filter((e) => e.id.startsWith('l.'))
+  return {
+    markdown: [
+      edits.length ? `Mit ${edits.map((e) => `[[${e.id}]] **${e.value}** (statt ${e.proposed})`).join(' und ')} kommen Sie auf **${total} Stunden**.` : `Sie planen ${total} Stunden.`,
+      '',
+      total < 30
+        ? 'Das ist knapp. Ich würde das [[lc.project]] streichen und stattdessen die [[lc.foldkit]] gründlich bauen — ein fertiges kleines Ding lehrt mehr als ein halbes grosses.'
+        : total > 60
+          ? 'Das ist grosszügig. Nutzen Sie die zusätzliche Zeit für das [[lc.project]], nicht für mehr Lektüre.'
+          : 'Das reicht für alle fünf Übungen, wenn Sie jede Woche mindestens eine abschliessen.',
+    ].join('\n'),
+    patch: null,
+  }
+}
 
 // ---------------------------------------------------------------- free text
 
@@ -478,7 +552,10 @@ export const respond = (conversation: Conversation, packet: Packet): Turn => {
     case 'ask-why': return why(conversation, packet)
     case 'investigate': return investigate(conversation, packet)
     case 'inspect-source': return inspectSource(conversation, packet)
-    case 'edit-assumption': return budgetImplications(conversation, packet)
+    case 'edit-assumption':
+      return conversation.scenario === 'architecture' ? weightsChanged(conversation, packet)
+        : conversation.scenario === 'learning' ? learningImplications(conversation, packet)
+        : budgetImplications(conversation, packet)
     case 'move-card': return reassess(conversation, packet)
     case 'artifact-event': return artifactFollowUp(packet)
     default: return freeText(conversation, packet)

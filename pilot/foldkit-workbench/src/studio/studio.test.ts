@@ -53,7 +53,8 @@ describe('director compositions', () => {
       expect(c.messages.at(-1)?.refused, s.label).toBeUndefined()
       return c.panes.map((p) => JSON.stringify(p.rep.root).match(/"type":"(\w+)"/g)?.join()).join('|')
     })
-    expect(new Set(shapes).size).toBe(3)
+    expect(new Set(shapes).size).toBe(starters.length)
+    expect(starters.length).toBe(4)
   })
 })
 
@@ -247,5 +248,30 @@ describe('cycle B', () => {
     expect(reinit.model.bridgeLog[0]!.detail).toContain('letzter Zustand')
     m = run(m, event({ jsonrpc: '2.0', method: 'ui/notifications/size-changed', params: { height: 99999 } }))
     expect(m.artifactHeights['research.simulator/art.onboarding']).toBe(720)
+  })
+})
+
+describe('weights and learning', () => {
+  it('a human weight change can flip the recommendation and is explained on request', () => {
+    let m = start(starters[0]!.prompt)
+    m = run(m,
+      Message.ChangedAssumption({ paneId: 'arch.options', id: 'w.collab', value: 5 }),
+      Message.ChangedAssumption({ paneId: 'arch.options', id: 'w.trace', value: 1 }),
+      Message.ChangedAssumption({ paneId: 'arch.options', id: 'w.edit', value: 1 }))
+    expect(m.streaming).toBeNull()
+    m = settle(run(m, Message.ClickedAction({ action: 'edit-assumption' })))
+    const reply = active(m).messages.at(-1)!.markdown
+    expect(reply).toContain('kippt die Empfehlung')
+    expect(reply).toContain('[[opt.shared]]')
+  })
+  it('learning plan reassessment uses the learning board, not the architecture plan', () => {
+    let m = start(starters[3]!.prompt)
+    expect(active(m).scenario).toBe('learning')
+    m = run(m, Message.MovedCard({ paneId: 'learn.plan', cardId: 'lc.project', lane: 'doing' }))
+    m = settle(run(m, Message.ClickedAction({ action: 'move-card' })))
+    const c = active(m)
+    expect(c.panes.map((p) => p.rep.id)).toEqual(['learn.plan'])
+    expect(c.panes[0]!.revision).toBe(2)
+    expect(c.messages.at(-1)!.markdown).toContain('[[lc.project]]')
   })
 })

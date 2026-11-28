@@ -215,7 +215,7 @@ export const makeStudioUpdate = (deps: StudioDeps) => (model: Model, message: Me
   return Message.match(message, {
     // ------------------------------------------------------------ navigation
     SelectedConversation: ({ id }) => model.conversations.some((x) => x.id === id) && !model.streaming
-      ? save({ ...model, activeId: id, inspectPacket: null })
+      ? save({ ...model, activeId: id, inspectPacket: null, ...(model.split ? { split: false, boardWidth: model.widthBeforeSplit ?? model.boardWidth, widthBeforeSplit: null } : {}) })
       : { model },
     StartedConversation: () => {
       if (model.streaming) return { model }
@@ -362,7 +362,10 @@ export const makeStudioUpdate = (deps: StudioDeps) => (model: Model, message: Me
         : p),
     }))),
     ToggledLog: () => ({ model: { ...model, showLog: !model.showLog } }),
-    ToggledSplit: () => save({ ...model, split: !model.split, boardWidth: !model.split ? Math.max(model.boardWidth, 900) : model.boardWidth }),
+    ToggledSplit: () => save(model.split
+      ? { ...model, split: false, boardWidth: model.widthBeforeSplit ?? model.boardWidth, widthBeforeSplit: null }
+      : { ...model, split: true, boardWidth: Math.max(model.boardWidth, 900), widthBeforeSplit: model.boardWidth }),
+    DismissedRestore: () => ({ model: { ...model, restoreDismissed: true } }),
     SentArtifactState: () => ({ model }),
     PromotedBlock: ({ messageId, block }) => {
       const entry = c.messages.find((m) => m.id === messageId && m.role === 'assistant')

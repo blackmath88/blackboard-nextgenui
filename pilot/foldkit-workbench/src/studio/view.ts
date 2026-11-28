@@ -27,16 +27,17 @@ const nf = new Intl.NumberFormat('de-CH', { maximumFractionDigits: 1 })
 const fmt = (value: number, unit?: string) => {
   if (!Number.isFinite(value)) return '—'
   const compact = unit === 'CHF' && Math.abs(value) >= 10_000 ? `${nf.format(value / 1000)}k` : nf.format(value)
-  return unit && unit !== '%' ? `${compact} ${unit}` : unit === '%' ? `${compact} %` : compact
+  const signed = compact.replace('-', '−')
+  return unit && unit !== '%' ? `${signed} ${unit}` : unit === '%' ? `${signed} %` : signed
 }
-const fmtFull = (value: number, unit?: string) => (Number.isFinite(value) ? `${nf.format(value)}${unit ? (unit === '%' ? ' %' : ` ${unit}`) : ''}` : '—')
+const fmtFull = (value: number, unit?: string) => (Number.isFinite(value) ? `${nf.format(value).replace('-', '−')}${unit ? (unit === '%' ? ' %' : ` ${unit}`) : ''}` : '—')
 
 const time = (iso: string) => {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' })
 }
 
-const scenarioGlyph: Record<Conversation['scenario'], string> = { architecture: '◇', budget: '◐', research: '◎', open: '○' }
+const scenarioGlyph: Record<Conversation['scenario'], string> = { architecture: '◇', budget: '◐', research: '◎', learning: '△', open: '○' }
 
 export const studioView = (model: Model, h: H, deps: { restoreNote: string | undefined; bootedAt: string }): Document => {
   const c = active(model)
@@ -54,10 +55,11 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
         case 'ref': {
           const label = labelOf(c, part.id)
           if (!label) return h.span([h.Class('ref missing'), h.Title('Nicht mehr auf der Arbeitsfläche')], [part.id])
-          return h.button([
-            h.Type('button'), h.Class(`ref${selected.has(part.id) ? ' on' : ''}`),
+          return h.span([
+            h.Role('button'), h.Tabindex(0), h.Class(`ref${selected.has(part.id) ? ' on' : ''}`),
             h.Title(`${label.kind} auf der Arbeitsfläche zeigen`),
             h.OnClick(Message.ClickedRef({ objectId: part.id })),
+            h.OnKeyDownPreventDefault((key) => (key === 'Enter' || key === ' ' ? Option.some(Message.ClickedRef({ objectId: part.id })) : Option.none())),
           ], [label.label])
         }
       }
@@ -233,7 +235,10 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
         h.button([h.Type('button'), h.Role('tab'), h.AriaSelected(model.narrowView === 'board'), h.Class(model.narrowView === 'board' ? 'on' : ''), h.OnClick(Message.SelectedNarrowView({ view: 'board' }))], [`Blackboard${c.panes.length ? ` · ${c.panes.length}` : ''}`]),
       ]),
     ]),
-    ...(deps.restoreNote && c.messages.length && (c.messages.at(-1)?.at ?? '') < deps.bootedAt ? [h.p([h.Class('restore')], [deps.restoreNote])] : []),
+    ...(deps.restoreNote && !model.restoreDismissed && c.messages.length && (c.messages.at(-1)?.at ?? '') < deps.bootedAt ? [h.div([h.Class('restore'), h.Role('status')], [
+      h.span([], [deps.restoreNote]),
+      h.button([h.Type('button'), h.Class('icon'), h.AriaLabel('Hinweis schliessen'), h.OnClick(Message.DismissedRestore())], ['×']),
+    ])] : []),
     c.messages.length === 0 && !streaming
       ? emptyChat
       : h.ol([h.Class('messages'), h.OnMount(FollowStudioChat())], [
@@ -282,7 +287,7 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
         return h.button([h.Type('button'), h.Class(`n-metric${sel(node.id)}${toneClass(tone)}`), h.AriaPressed(String(selected.has(node.id))), h.OnClick(pick(paneId, node.id))], [
           h.span([h.Class('metric-label')], [node.label]),
           h.span([h.Class('metric-value')], [
-            node.unit === 'CHF' && Math.abs(value) >= 10_000 ? nf.format(value / 1000) + 'k' : nf.format(Number.isFinite(value) ? value : NaN).replace('NaN', '—'),
+            (node.unit === 'CHF' && Math.abs(value) >= 10_000 ? nf.format(value / 1000) + 'k' : nf.format(Number.isFinite(value) ? value : NaN).replace('NaN', '—')).replace('-', '−'),
             ...(node.unit ? [h.small([], [node.unit === 'CHF' ? ' CHF' : ` ${node.unit}`])] : []),
           ]),
           ...(node.note ? [h.span([h.Class('metric-note')], [node.note])] : []),
@@ -300,8 +305,9 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
           })))),
         ])])
       case 'matrix': {
-        const total = (id: string) => node.criteria.reduce((sum, cr) => sum + (node.scores[id]?.[cr.id] ?? 0) * cr.weight, 0)
-        const max = node.criteria.reduce((sum, cr) => sum + 5 * cr.weight, 0)
+        const weightOf = (cr: (typeof node.criteria)[number]) => (cr.assumption && values[cr.assumption] !== undefined ? values[cr.assumption]! : cr.weight)
+        const total = (id: string) => node.criteria.reduce((sum, cr) => sum + (node.scores[id]?.[cr.id] ?? 0) * weightOf(cr), 0)
+        const max = Math.max(1, node.criteria.reduce((sum, cr) => sum + 5 * weightOf(cr), 0))
         const best = [...node.options].sort((a, b) => total(b.id) - total(a.id))[0]?.id
         return h.div([h.Class('n-matrix')], [h.table([], [
           h.thead([], [h.tr([], [
@@ -310,7 +316,7 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
           ])]),
           h.tbody([], [
             ...node.criteria.map((cr) => h.tr([], [
-              h.th([h.Class('crit')], [cr.label, h.span([h.Class('weight')], [`×${cr.weight}`])]),
+              h.th([h.Class('crit')], [cr.label, h.span([h.Class(`weight${cr.assumption && c.assumptions[cr.assumption] ? ' edited' : ''}`)], [`×${weightOf(cr)}`])]),
               ...node.options.map((o) => {
                 const s = node.scores[o.id]?.[cr.id] ?? 0
                 return h.td([h.Class(`score${sel(o.id)}`), h.Title(`${s} von 5`)], [

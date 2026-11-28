@@ -67,7 +67,7 @@ export const MatrixNode = Schema.Struct({
   type: Schema.Literal('matrix'),
   id: Id,
   options: Schema.Array(Schema.Struct({ id: Id, label: Label, summary: Schema.optional(Label) })).check(Schema.isMaxLength(6)),
-  criteria: Schema.Array(Schema.Struct({ id: Id, label: Label, weight: Schema.Number })).check(Schema.isMaxLength(8)),
+  criteria: Schema.Array(Schema.Struct({ id: Id, label: Label, weight: Schema.Number, assumption: Schema.optional(Id) })).check(Schema.isMaxLength(8)),
   scores: Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Number)),
 })
 

@@ -1,5 +1,199 @@
 [
   {
+    "title": "Lernplan Effect & Foldkit",
+    "scenario": "learning",
+    "interactions": [
+      {
+        "type": "edit-assumption",
+        "paneId": "learn.plan",
+        "objectIds": [
+          "l.hours"
+        ],
+        "payload": {
+          "from": 6,
+          "to": 3
+        },
+        "explicit": false,
+        "id": "i-56",
+        "at": "2026-11-28T09:02:50.754Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "learn.plan",
+        "objectIds": [
+          "l.hours"
+        ],
+        "payload": {
+          "count": 1
+        },
+        "explicit": true,
+        "id": "i-57",
+        "at": "2026-11-28T09:02:51.029Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "move-card",
+        "paneId": "learn.plan",
+        "objectIds": [
+          "lc.project"
+        ],
+        "payload": {
+          "from": "open",
+          "to": "doing"
+        },
+        "explicit": false,
+        "id": "i-60",
+        "at": "2026-11-28T09:02:51.747Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "move-card",
+        "paneId": "learn.plan",
+        "objectIds": [
+          "lc.project"
+        ],
+        "payload": {
+          "count": 1
+        },
+        "explicit": true,
+        "id": "i-61",
+        "at": "2026-11-28T09:02:52.031Z",
+        "paneRevision": 1
+      }
+    ],
+    "turns": [
+      {
+        "text": "Ich möchte in sechs Wochen Effect und Foldkit lernen, abends neben der Arbeit. Wie gehe ich vor?",
+        "packet": {
+          "request": "Ich möchte in sechs Wochen Effect und Foldkit lernen, abends neben der Arbeit. Wie gehe ich vor?",
+          "interaction": null,
+          "selection": [],
+          "humanEdits": [],
+          "movedCards": [],
+          "values": {},
+          "workspace": [],
+          "focus": null,
+          "recent": []
+        }
+      },
+      {
+        "text": "Was bedeuten meine Änderungen an „Stunden pro Woche“?",
+        "packet": {
+          "request": "Was bedeuten meine Änderungen an „Stunden pro Woche“?",
+          "interaction": {
+            "type": "edit-assumption",
+            "pane": "learn.plan",
+            "paneRevision": 1,
+            "payload": {
+              "count": 1
+            }
+          },
+          "selection": [],
+          "humanEdits": [
+            {
+              "id": "l.hours",
+              "label": "Stunden pro Woche",
+              "proposed": 6,
+              "value": 3
+            }
+          ],
+          "movedCards": [],
+          "values": {
+            "l.hours": 3,
+            "l.weeks": 6
+          },
+          "workspace": [
+            {
+              "id": "learn.plan",
+              "title": "Lernplan Effect",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "learn.plan",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Ich möchte in sechs Wochen Effect und Foldkit lernen, abends neben der Arbeit. Wie gehe ich vor?"
+            },
+            {
+              "role": "assistant",
+              "text": "Sechs Wochen abends reichen, wenn Sie **früh bauen** statt lange zu lesen. Mein Vorschlag:\n\n1. **Woche 1** — [[lt.basics]]: kleine Programme mit `pipe`, ohne Framework.\n2. **Woche 2–3** — [[lt.effects]]: der Fehlerkanal ist das, was Effect von Promises unterscheidet.\n3. **Woche …"
+            }
+          ]
+        }
+      },
+      {
+        "text": "Ich habe eine Aufgabe verschoben. Bitte bewerte den Plan neu.",
+        "packet": {
+          "request": "Ich habe eine Aufgabe verschoben. Bitte bewerte den Plan neu.",
+          "interaction": {
+            "type": "move-card",
+            "pane": "learn.plan",
+            "paneRevision": 1,
+            "payload": {
+              "count": 1
+            }
+          },
+          "selection": [],
+          "humanEdits": [
+            {
+              "id": "l.hours",
+              "label": "Stunden pro Woche",
+              "proposed": 6,
+              "value": 3
+            }
+          ],
+          "movedCards": [
+            {
+              "id": "lc.project",
+              "title": "Eigenes Projekt",
+              "lane": "doing"
+            }
+          ],
+          "values": {
+            "l.hours": 3,
+            "l.weeks": 6
+          },
+          "workspace": [
+            {
+              "id": "learn.plan",
+              "title": "Lernplan Effect",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "learn.plan",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Ich möchte in sechs Wochen Effect und Foldkit lernen, abends neben der Arbeit. Wie gehe ich vor?"
+            },
+            {
+              "role": "assistant",
+              "text": "Sechs Wochen abends reichen, wenn Sie **früh bauen** statt lange zu lesen. Mein Vorschlag:\n\n1. **Woche 1** — [[lt.basics]]: kleine Programme mit `pipe`, ohne Framework.\n2. **Woche 2–3** — [[lt.effects]]: der Fehlerkanal ist das, was Effect von Promises unterscheidet.\n3. **Woche …"
+            },
+            {
+              "role": "user",
+              "text": "Was bedeuten meine Änderungen an „Stunden pro Woche“?"
+            },
+            {
+              "role": "assistant",
+              "text": "Mit [[l.hours]] **3** (statt 6) kommen Sie auf **18 Stunden**.\n\nDas ist knapp. Ich würde das [[lc.project]] streichen und stattdessen die [[lc.foldkit]] gründlich bauen — ein fertiges kleines Ding lehrt mehr als ein halbes grosses."
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
     "title": "Remote-Onboarding",
     "scenario": "research",
     "interactions": [
@@ -13,8 +207,8 @@
           "selected": true
         },
         "explicit": false,
-        "id": "i-37",
-        "at": "2026-11-28T08:57:56.578Z",
+        "id": "i-43",
+        "at": "2026-11-28T09:02:44.716Z",
         "paneRevision": 1
       },
       {
@@ -27,8 +221,8 @@
           "count": 1
         },
         "explicit": true,
-        "id": "i-38",
-        "at": "2026-11-28T08:57:56.861Z",
+        "id": "i-44",
+        "at": "2026-11-28T09:02:45.000Z",
         "paneRevision": 1
       },
       {
@@ -45,8 +239,8 @@
           "team": 8
         },
         "explicit": false,
-        "id": "i-43",
-        "at": "2026-11-28T08:57:58.459Z",
+        "id": "i-49",
+        "at": "2026-11-28T09:02:46.602Z",
         "paneRevision": 1
       },
       {
@@ -63,8 +257,8 @@
           "team": 8
         },
         "explicit": true,
-        "id": "i-44",
-        "at": "2026-11-28T08:57:59.124Z",
+        "id": "i-50",
+        "at": "2026-11-28T09:02:47.263Z",
         "paneRevision": 1
       }
     ],
@@ -273,8 +467,8 @@
           "to": 320000
         },
         "explicit": false,
-        "id": "i-26",
-        "at": "2026-11-28T08:57:50.586Z",
+        "id": "i-32",
+        "at": "2026-11-28T09:02:37.724Z",
         "paneRevision": 1
       },
       {
@@ -287,8 +481,8 @@
           "count": 1
         },
         "explicit": true,
-        "id": "i-27",
-        "at": "2026-11-28T08:57:50.941Z",
+        "id": "i-33",
+        "at": "2026-11-28T09:02:38.113Z",
         "paneRevision": 1
       },
       {
@@ -297,29 +491,29 @@
         "objectIds": [],
         "payload": {},
         "explicit": false,
-        "id": "i-32",
-        "at": "2026-11-28T08:57:53.144Z",
+        "id": "i-38",
+        "at": "2026-11-28T09:02:40.333Z",
         "paneRevision": 1
       },
       {
         "type": "promote",
-        "paneId": "chat.m-25.b1",
+        "paneId": "chat.m-31.b1",
         "objectIds": [],
         "payload": {
-          "message": "m-25",
+          "message": "m-31",
           "block": 1
         },
         "explicit": false,
-        "id": "i-33",
-        "at": "2026-11-28T08:57:53.257Z",
+        "id": "i-39",
+        "at": "2026-11-28T09:02:40.463Z",
         "paneRevision": 0
       }
     ],
     "turns": [
       {
-        "text": "Wir haben 480 000 CHF für das Produktteam 2027. Wie sollten wir das Budget aufteilen?",
+        "text": "Wir haben 480’000 CHF für das Produktteam 2027. Wie sollten wir das Budget aufteilen?",
         "packet": {
-          "request": "Wir haben 480 000 CHF für das Produktteam 2027. Wie sollten wir das Budget aufteilen?",
+          "request": "Wir haben 480’000 CHF für das Produktteam 2027. Wie sollten wir das Budget aufteilen?",
           "interaction": null,
           "selection": [],
           "humanEdits": [],
@@ -375,11 +569,11 @@
           "recent": [
             {
               "role": "user",
-              "text": "Wir haben 480 000 CHF für das Produktteam 2027. Wie sollten wir das Budget aufteilen?"
+              "text": "Wir haben 480’000 CHF für das Produktteam 2027. Wie sollten wir das Budget aufteilen?"
             },
             {
               "role": "assistant",
-              "text": "Hier ist ein ausgewogener Startpunkt für **480 000 CHF**. Er setzt auf Entwicklung als grössten Posten und hält rund 15 % Reserve.\n\n| Posten | Betrag | Anteil |\n| --- | ---: | ---: |\n| Entwicklung | 210 000 CHF | 43,8 % |\n| Design | 80 000 CHF | 16,7 % |\n| Infrastruktur | 50 000…"
+              "text": "Hier ist ein ausgewogener Startpunkt für **480’000 CHF**. Er setzt auf Entwicklung als grössten Posten und hält rund 15 % Reserve.\n\n| Posten | Betrag | Anteil |\n| --- | ---: | ---: |\n| Entwicklung | 210’000 CHF | 43.8 % |\n| Design | 80’000 CHF | 16.7 % |\n| Infrastruktur | 50’000…"
             }
           ]
         }
@@ -428,11 +622,11 @@
           "recent": [
             {
               "role": "user",
-              "text": "Wir haben 480 000 CHF für das Produktteam 2027. Wie sollten wir das Budget aufteilen?"
+              "text": "Wir haben 480’000 CHF für das Produktteam 2027. Wie sollten wir das Budget aufteilen?"
             },
             {
               "role": "assistant",
-              "text": "Hier ist ein ausgewogener Startpunkt für **480 000 CHF**. Er setzt auf Entwicklung als grössten Posten und hält rund 15 % Reserve.\n\n| Posten | Betrag | Anteil |\n| --- | ---: | ---: |\n| Entwicklung | 210 000 CHF | 43,8 % |\n| Design | 80 000 CHF | 16,7 % |\n| Infrastruktur | 50 000…"
+              "text": "Hier ist ein ausgewogener Startpunkt für **480’000 CHF**. Er setzt auf Entwicklung als grössten Posten und hält rund 15 % Reserve.\n\n| Posten | Betrag | Anteil |\n| --- | ---: | ---: |\n| Entwicklung | 210’000 CHF | 43.8 % |\n| Design | 80’000 CHF | 16.7 % |\n| Infrastruktur | 50’000…"
             },
             {
               "role": "user",
@@ -462,7 +656,7 @@
         },
         "explicit": false,
         "id": "i-3",
-        "at": "2026-11-28T08:57:42.325Z",
+        "at": "2026-11-28T09:02:27.580Z",
         "paneRevision": 1
       },
       {
@@ -476,7 +670,7 @@
         },
         "explicit": false,
         "id": "i-4",
-        "at": "2026-11-28T08:57:42.359Z",
+        "at": "2026-11-28T09:02:27.631Z",
         "paneRevision": 1
       },
       {
@@ -491,7 +685,7 @@
         },
         "explicit": true,
         "id": "i-5",
-        "at": "2026-11-28T08:57:42.543Z",
+        "at": "2026-11-28T09:02:27.814Z",
         "paneRevision": 1
       },
       {
@@ -505,7 +699,7 @@
         },
         "explicit": false,
         "id": "i-8",
-        "at": "2026-11-28T08:57:44.133Z",
+        "at": "2026-11-28T09:02:29.323Z",
         "paneRevision": 1
       },
       {
@@ -519,7 +713,7 @@
         },
         "explicit": true,
         "id": "i-9",
-        "at": "2026-11-28T08:57:44.396Z",
+        "at": "2026-11-28T09:02:29.600Z",
         "paneRevision": 1
       },
       {
@@ -533,7 +727,7 @@
         },
         "explicit": false,
         "id": "i-12",
-        "at": "2026-11-28T08:57:45.662Z",
+        "at": "2026-11-28T09:02:30.881Z",
         "paneRevision": 1
       },
       {
@@ -547,7 +741,68 @@
         },
         "explicit": true,
         "id": "i-13",
-        "at": "2026-11-28T08:57:45.941Z",
+        "at": "2026-11-28T09:02:31.168Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "arch.options",
+        "objectIds": [
+          "w.collab"
+        ],
+        "payload": {
+          "from": 1,
+          "to": 5
+        },
+        "explicit": false,
+        "id": "i-16",
+        "at": "2026-11-28T09:02:32.414Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "arch.options",
+        "objectIds": [
+          "w.trace"
+        ],
+        "payload": {
+          "from": 3,
+          "to": 1
+        },
+        "explicit": false,
+        "id": "i-17",
+        "at": "2026-11-28T09:02:32.427Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "arch.options",
+        "objectIds": [
+          "w.edit"
+        ],
+        "payload": {
+          "from": 3,
+          "to": 1
+        },
+        "explicit": false,
+        "id": "i-18",
+        "at": "2026-11-28T09:02:32.436Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "arch.options",
+        "objectIds": [
+          "w.collab",
+          "w.trace",
+          "w.edit"
+        ],
+        "payload": {
+          "count": 3
+        },
+        "explicit": true,
+        "id": "i-19",
+        "at": "2026-11-28T09:02:32.812Z",
         "paneRevision": 1
       },
       {
@@ -561,8 +816,8 @@
           "to": "doing"
         },
         "explicit": false,
-        "id": "i-18",
-        "at": "2026-11-28T08:57:47.994Z",
+        "id": "i-24",
+        "at": "2026-11-28T09:02:34.615Z",
         "paneRevision": 1
       },
       {
@@ -575,8 +830,8 @@
           "count": 1
         },
         "explicit": true,
-        "id": "i-19",
-        "at": "2026-11-28T08:57:48.280Z",
+        "id": "i-25",
+        "at": "2026-11-28T09:02:34.900Z",
         "paneRevision": 1
       },
       {
@@ -585,8 +840,8 @@
         "objectIds": [],
         "payload": {},
         "explicit": false,
-        "id": "i-22",
-        "at": "2026-11-28T08:57:48.959Z",
+        "id": "i-28",
+        "at": "2026-11-28T09:02:35.566Z",
         "paneRevision": 2
       }
     ],
@@ -635,7 +890,13 @@
           ],
           "humanEdits": [],
           "movedCards": [],
-          "values": {},
+          "values": {
+            "w.trace": 3,
+            "w.edit": 3,
+            "w.cost": 2,
+            "w.collab": 1,
+            "w.effort": 2
+          },
           "workspace": [
             {
               "id": "arch.map",
@@ -689,7 +950,13 @@
           ],
           "humanEdits": [],
           "movedCards": [],
-          "values": {},
+          "values": {
+            "w.trace": 3,
+            "w.edit": 3,
+            "w.cost": 2,
+            "w.collab": 1,
+            "w.effort": 2
+          },
           "workspace": [
             {
               "id": "arch.map",
@@ -757,7 +1024,13 @@
           ],
           "humanEdits": [],
           "movedCards": [],
-          "values": {},
+          "values": {
+            "w.trace": 3,
+            "w.edit": 3,
+            "w.cost": 2,
+            "w.collab": 1,
+            "w.effort": 2
+          },
           "workspace": [
             {
               "id": "arch.map",
@@ -811,14 +1084,46 @@
         }
       },
       {
-        "text": "Mach daraus einen Umsetzungsplan.",
+        "text": "Was bedeuten meine Änderungen an „Mehrbenutzer“, „Nachvollziehbarkeit“ und „Schutz menschlicher Änderungen“?",
         "packet": {
-          "request": "Mach daraus einen Umsetzungsplan.",
-          "interaction": null,
+          "request": "Was bedeuten meine Änderungen an „Mehrbenutzer“, „Nachvollziehbarkeit“ und „Schutz menschlicher Änderungen“?",
+          "interaction": {
+            "type": "edit-assumption",
+            "pane": "arch.options",
+            "paneRevision": 1,
+            "payload": {
+              "count": 3
+            }
+          },
           "selection": [],
-          "humanEdits": [],
+          "humanEdits": [
+            {
+              "id": "w.collab",
+              "label": "Mehrbenutzer",
+              "proposed": 1,
+              "value": 5
+            },
+            {
+              "id": "w.trace",
+              "label": "Nachvollziehbarkeit",
+              "proposed": 3,
+              "value": 1
+            },
+            {
+              "id": "w.edit",
+              "label": "Schutz menschlicher Änderungen",
+              "proposed": 3,
+              "value": 1
+            }
+          ],
           "movedCards": [],
-          "values": {},
+          "values": {
+            "w.trace": 1,
+            "w.edit": 1,
+            "w.cost": 2,
+            "w.collab": 5,
+            "w.effort": 2
+          },
           "workspace": [
             {
               "id": "arch.map",
@@ -872,6 +1177,92 @@
         }
       },
       {
+        "text": "Mach daraus einen Umsetzungsplan.",
+        "packet": {
+          "request": "Mach daraus einen Umsetzungsplan.",
+          "interaction": null,
+          "selection": [],
+          "humanEdits": [
+            {
+              "id": "w.collab",
+              "label": "Mehrbenutzer",
+              "proposed": 1,
+              "value": 5
+            },
+            {
+              "id": "w.trace",
+              "label": "Nachvollziehbarkeit",
+              "proposed": 3,
+              "value": 1
+            },
+            {
+              "id": "w.edit",
+              "label": "Schutz menschlicher Änderungen",
+              "proposed": 3,
+              "value": 1
+            }
+          ],
+          "movedCards": [],
+          "values": {
+            "w.trace": 1,
+            "w.edit": 1,
+            "w.cost": 2,
+            "w.collab": 5,
+            "w.effort": 2
+          },
+          "workspace": [
+            {
+              "id": "arch.map",
+              "title": "Systemlandkarte",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "arch.options",
+              "title": "Alternativen",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "arch.compare",
+              "title": "Gegenüberstellung",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "arch.options",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Untersuche „Artefakt-Brücke“."
+            },
+            {
+              "role": "assistant",
+              "text": "**[[n.bridge]]** — Absender + Schema geprüft\n\nErhält Eingaben von [[n.artifact]].\nLiefert an [[n.intents]].\n\nDas ist eine **Vertrauensgrenze**: generiertes HTML läuft ohne Zugriff auf Speicher, Zugangsdaten oder Netzwerk, und nur erlaubte, schema-geprüfte Ereignisse passieren di…"
+            },
+            {
+              "role": "user",
+              "text": "Warum „Interaktionen als Ereignisse protokollieren“?"
+            },
+            {
+              "role": "assistant",
+              "text": "[[dec.log]] folgt aus zwei Anforderungen der Produktvision:\n\n1. **Menschliche Änderungen dürfen nicht verloren gehen.** Ein angehängtes Ereignis überschreibt nichts; ein späterer Modellvorschlag kann geprüft und abgelehnt werden.\n2. **Das Gespräch muss wissen, worauf Sie zeigen.…"
+            },
+            {
+              "role": "user",
+              "text": "Was bedeuten meine Änderungen an „Mehrbenutzer“, „Nachvollziehbarkeit“ und „Schutz menschlicher Änderungen“?"
+            },
+            {
+              "role": "assistant",
+              "text": "Sie gewichten [[w.collab]] mit **5** statt 1, [[w.trace]] mit **1** statt 3, [[w.edit]] mit **1** statt 3.\n\nDamit **kippt die Empfehlung**: [[opt.shared]] liegt jetzt mit 44 von 55 Punkten vorn, vor [[opt.events]] (39). Mit meiner Gewichtung lag [[opt.events]] vorn.\n\nDas ist ein…"
+            }
+          ]
+        }
+      },
+      {
         "text": "Ich habe eine Aufgabe verschoben. Bitte bewerte den Plan neu.",
         "packet": {
           "request": "Ich habe eine Aufgabe verschoben. Bitte bewerte den Plan neu.",
@@ -884,7 +1275,26 @@
             }
           },
           "selection": [],
-          "humanEdits": [],
+          "humanEdits": [
+            {
+              "id": "w.collab",
+              "label": "Mehrbenutzer",
+              "proposed": 1,
+              "value": 5
+            },
+            {
+              "id": "w.trace",
+              "label": "Nachvollziehbarkeit",
+              "proposed": 3,
+              "value": 1
+            },
+            {
+              "id": "w.edit",
+              "label": "Schutz menschlicher Änderungen",
+              "proposed": 3,
+              "value": 1
+            }
+          ],
           "movedCards": [
             {
               "id": "t.bridge",
@@ -892,7 +1302,13 @@
               "lane": "doing"
             }
           ],
-          "values": {},
+          "values": {
+            "w.trace": 1,
+            "w.edit": 1,
+            "w.cost": 2,
+            "w.collab": 5,
+            "w.effort": 2
+          },
           "workspace": [
             {
               "id": "arch.map",
@@ -926,19 +1342,19 @@
           "recent": [
             {
               "role": "user",
-              "text": "Untersuche „Artefakt-Brücke“."
-            },
-            {
-              "role": "assistant",
-              "text": "**[[n.bridge]]** — Absender + Schema geprüft\n\nErhält Eingaben von [[n.artifact]].\nLiefert an [[n.intents]].\n\nDas ist eine **Vertrauensgrenze**: generiertes HTML läuft ohne Zugriff auf Speicher, Zugangsdaten oder Netzwerk, und nur erlaubte, schema-geprüfte Ereignisse passieren di…"
-            },
-            {
-              "role": "user",
               "text": "Warum „Interaktionen als Ereignisse protokollieren“?"
             },
             {
               "role": "assistant",
               "text": "[[dec.log]] folgt aus zwei Anforderungen der Produktvision:\n\n1. **Menschliche Änderungen dürfen nicht verloren gehen.** Ein angehängtes Ereignis überschreibt nichts; ein späterer Modellvorschlag kann geprüft und abgelehnt werden.\n2. **Das Gespräch muss wissen, worauf Sie zeigen.…"
+            },
+            {
+              "role": "user",
+              "text": "Was bedeuten meine Änderungen an „Mehrbenutzer“, „Nachvollziehbarkeit“ und „Schutz menschlicher Änderungen“?"
+            },
+            {
+              "role": "assistant",
+              "text": "Sie gewichten [[w.collab]] mit **5** statt 1, [[w.trace]] mit **1** statt 3, [[w.edit]] mit **1** statt 3.\n\nDamit **kippt die Empfehlung**: [[opt.shared]] liegt jetzt mit 44 von 55 Punkten vorn, vor [[opt.events]] (39). Mit meiner Gewichtung lag [[opt.events]] vorn.\n\nDas ist ein…"
             },
             {
               "role": "user",

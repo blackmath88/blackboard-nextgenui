@@ -1,6 +1,6 @@
 {
   "base": "http://127.0.0.1:4330/studio.html",
-  "startedAt": "2026-11-28T08:57:38.056Z",
+  "startedAt": "2026-11-28T09:02:22.815Z",
   "checks": [
     {
       "name": "architecture: options pane composed",
@@ -38,6 +38,16 @@
       "detail": ""
     },
     {
+      "name": "weight edit re-ranks the matrix locally",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "weight change explained as a flipped recommendation",
+      "ok": true,
+      "detail": ""
+    },
+    {
       "name": "card move is local",
       "ok": true,
       "detail": ""
@@ -50,7 +60,7 @@
     {
       "name": "assumption edit recalculates locally",
       "ok": true,
-      "detail": "Reserve 70k CHF → Reserve -40k CHF"
+      "detail": "Reserve 70k CHF → Reserve −40k CHF"
     },
     {
       "name": "assumption edit makes no turn",
@@ -128,6 +138,26 @@
       "detail": "weeks=12 buddy=false"
     },
     {
+      "name": "learning plan composed (calculator + timeline + board + resources)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "learning hours recalculate locally",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "learning implications use the edited hours",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "learning reassessment warns about the dependency",
+      "ok": true,
+      "detail": ""
+    },
+    {
       "name": "reload keeps state byte-identical",
       "ok": true,
       "detail": ""
@@ -170,7 +200,7 @@
     {
       "name": "artifact network attempt refused by CSP (console evidence)",
       "ok": true,
-      "detail": "8 CSP refusals"
+      "detail": "6 CSP refusals"
     },
     {
       "name": "no page errors",
@@ -182,17 +212,8 @@
     "empty": [],
     "architecture": [],
     "budget": [],
-    "research": [
-      {
-        "id": "color-contrast",
-        "impact": "serious",
-        "nodes": 1,
-        "help": "Elements must meet minimum color contrast ratio thresholds",
-        "targets": [
-          ".provenance"
-        ]
-      }
-    ]
+    "research": [],
+    "learning": []
   },
   "overflow": {
     "split": 1440,
@@ -212,12 +233,10 @@
       "Connecting to 'https://example.org/' violates the following Content Security Policy directive: \"connect-src 'none'\". The action has been blocked.",
       "Fetch API cannot load https://example.org/. Refused to connect because it violates the document's Content Security Policy.",
       "Connecting to 'https://example.org/' violates the following Content Security Policy directive: \"connect-src 'none'\". The action has been blocked.",
-      "Fetch API cannot load https://example.org/. Refused to connect because it violates the document's Content Security Policy.",
-      "Connecting to 'https://example.org/' violates the following Content Security Policy directive: \"connect-src 'none'\". The action has been blocked.",
       "Fetch API cannot load https://example.org/. Refused to connect because it violates the document's Content Security Policy."
     ]
   },
-  "finishedAt": "2026-11-28T08:58:03.080Z",
-  "passed": 35,
+  "finishedAt": "2026-11-28T09:02:55.938Z",
+  "passed": 41,
   "failed": 0
 }

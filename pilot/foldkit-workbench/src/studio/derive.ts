@@ -31,7 +31,7 @@ export const promoteBlock = (entry: ChatEntry, index: number, at: string): Repre
   const block = all[index]
   if (!block) return undefined
   const base = `chat.${entry.id}.b${index}`
-  const time = new Date(at).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' })
+  void at
   const heading = all.slice(0, index).reverse().find((b) => b.kind === 'heading')
   if (block.kind === 'table') {
     const columns = block.head.map((label, i) => ({ key: `c${i}`, label: plain(label) || `Spalte ${i + 1}`, ...(block.align[i] === 'end' ? { align: 'end' as const } : {}) }))
@@ -51,7 +51,7 @@ export const promoteBlock = (entry: ChatEntry, index: number, at: string): Repre
     }
     return {
       id: base,
-      title: heading && heading.kind === 'heading' ? plain(heading.text).slice(0, 60) : `Tabelle · ${time}`,
+      title: heading && heading.kind === 'heading' ? plain(heading.text).slice(0, 60) : `${columns.slice(0, 2).map((c) => c.label).join(' & ')} (aus dem Chat)`,
       purpose: 'Aus dem Gespräch übernommen — bleibt hier, auch wenn der Chat weiterläuft',
       root: { type: 'section', children },
     }
@@ -59,7 +59,7 @@ export const promoteBlock = (entry: ChatEntry, index: number, at: string): Repre
   if (block.kind === 'list') {
     return {
       id: base,
-      title: heading && heading.kind === 'heading' ? plain(heading.text).slice(0, 60) : `Punkte · ${time}`,
+      title: heading && heading.kind === 'heading' ? plain(heading.text).slice(0, 60) : `${plain(block.items[0] ?? 'Punkte').split(/\s+—\s+|:\s+/)[0]!.slice(0, 32)} … (aus dem Chat)`,
       purpose: 'Aus dem Gespräch übernommen — einzeln auswählbar',
       root: {
         type: 'records', id: `${base}.list`, variant: 'finding',

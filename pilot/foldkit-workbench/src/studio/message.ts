@@ -13,6 +13,7 @@ export const Message = defineMessageUnion({
   OpenedRecentPane: { conversationId: Schema.String, paneId: Schema.String },
   ResetStudio: {},
   DismissedNotice: {},
+  DismissedRestore: {},
 
   // conversation
   ChangedDraft: { value: Schema.String },
