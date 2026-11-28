@@ -8,6 +8,11 @@ export default defineConfig({
     port: 4320,
     strictPort: true,
   },
+  build: {
+    rollupOptions: {
+      input: { main: 'index.html', studio: 'studio.html' },
+    },
+  },
   preview: {
     host: '127.0.0.1',
     port: 4321,
