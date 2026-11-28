@@ -218,7 +218,7 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
   const chat = h.main([h.Class('chat'), h.AriaLabel('Gespräch')], [
     h.header([h.Class('chat-head')], [
       h.button([h.Type('button'), h.Class('icon rail-toggle'), h.AriaLabel('Navigation ein- oder ausblenden'), h.OnClick(Message.ToggledRail())], ['☰']),
-      h.div([h.Class('chat-title')], [h.strong([], [c.title]), h.span([h.Class('faint')], [c.project])]),
+      h.div([h.Class('chat-title')], [h.h1([], [c.title]), h.span([h.Class('faint')], [c.project])]),
       h.div([h.Class('segmented narrow-only'), h.Role('tablist')], [
         h.button([h.Type('button'), h.Role('tab'), h.AriaSelected(model.narrowView === 'chat'), h.Class(model.narrowView === 'chat' ? 'on' : ''), h.OnClick(Message.SelectedNarrowView({ view: 'chat' }))], ['Chat']),
         h.button([h.Type('button'), h.Role('tab'), h.AriaSelected(model.narrowView === 'board'), h.Class(model.narrowView === 'board' ? 'on' : ''), h.OnClick(Message.SelectedNarrowView({ view: 'board' }))], [`Blackboard${c.panes.length ? ` · ${c.panes.length}` : ''}`]),
@@ -339,15 +339,19 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
         const weeks = Array.from({ length: Math.max(1, node.span) }, (_, i) => i)
         return h.div([h.Class('n-timeline'), h.Style({ '--span': String(node.span) })], [
           h.div([h.Class('tl-head')], [h.span([], []), ...weeks.map((w) => h.span([], [`W${w + 1}`]))]),
-          ...node.items.map((item) => h.div([h.Class('tl-row')], [
-            h.span([h.Class('tl-lane')], [item.lane ?? '']),
-            h.button([
-              h.Type('button'),
-              h.Class(`tl-bar${item.milestone ? ' milestone' : ''}${toneClass(item.tone)}${sel(item.id)}`),
-              h.Style({ gridColumn: `${item.start + 2} / span ${Math.max(1, item.length)}` }),
-              h.OnClick(pick(paneId, item.id)),
-            ], [item.label]),
-          ])),
+          ...node.items.flatMap((item, index) => [
+            ...(item.lane && item.lane !== node.items[index - 1]?.lane ? [h.div([h.Class('tl-group')], [item.lane])] : []),
+            h.div([h.Class('tl-row')], [
+              h.span([h.Class(`tl-label${sel(item.id)}`)], [item.label]),
+              h.button([
+                h.Type('button'),
+                h.Class(`tl-bar${item.milestone ? ' milestone' : ''}${toneClass(item.tone)}${sel(item.id)}`),
+                h.Style({ gridColumn: `${item.start + 2} / span ${Math.max(1, item.length)}` }),
+                h.AriaLabel(`${item.label}: Woche ${item.start + 1} bis ${item.start + item.length}`),
+                h.OnClick(pick(paneId, item.id)),
+              ], [item.milestone ? '◆' : '']),
+            ]),
+          ]),
         ])
       }
       case 'board': {
@@ -357,7 +361,7 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
             h.Class(`lane${model.dragCard ? ' droppable' : ''}`), h.AriaLabel(lane.label),
             h.AllowDrop(), h.OnDrop(Message.DroppedCard({ paneId, lane: lane.id })),
           ], [
-            h.h4([], [lane.label, h.span([h.Class('count')], [String(node.cards.filter((card) => laneOf(card.id, card.lane) === lane.id).length)])]),
+            h.h3([], [lane.label, h.span([h.Class('count')], [String(node.cards.filter((card) => laneOf(card.id, card.lane) === lane.id).length)])]),
             ...node.cards.filter((card) => laneOf(card.id, card.lane) === lane.id).map((card) => {
               const moved = c.cards[card.id] !== undefined
               return h.div([
@@ -431,7 +435,7 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
       case 'artifact':
         return h.figure([h.Class('n-artifact')], [
           h.figcaption([], [h.span([], [node.title]), h.span([h.Class('sandbox-tag')], ['Sandbox'])]),
-          h.keyed('iframe')(`${paneId}/${node.id}/${pane.revision}`, [
+          h.keyed('iframe')(`${paneId}/${node.id}/${pane.revision}/${prefersDark() ? 'd' : 'l'}`, [
             h.Title(node.title),
             h.Sandbox('allow-scripts'),
             h.Attribute('referrerpolicy', 'no-referrer'),
@@ -501,14 +505,14 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
           ]),
         ]),
     ...(model.showLog ? [h.div([h.Class('log'), h.AriaLabel('Interaktionsprotokoll')], [
-      h.h4([], ['Interaktionen', h.span([h.Class('faint')], [' · typisiert, neueste zuerst'])]),
+      h.h3([], ['Interaktionen', h.span([h.Class('faint')], [' · typisiert, neueste zuerst'])]),
       h.ol([], [...c.interactions].reverse().slice(0, 14).map((i) => h.li([h.Class(i.explicit ? 'explicit' : '')], [
         h.code([], [i.type]),
         ' ', i.objectIds.map((id) => labelOf(c, id)?.label ?? id).join(', '),
         h.span([h.Class('faint')], [` · ${i.paneId || '—'} r${i.paneRevision} · ${time(i.at)}${i.explicit ? ' · Turn' : ''}`]),
       ]))),
       ...(model.bridgeLog.length ? [
-        h.h4([], ['Artefakt-Brücke']),
+        h.h3([], ['Artefakt-Brücke']),
         h.ol([], model.bridgeLog.slice(0, 6).map((b) => h.li([h.Class(b.accepted ? '' : 'rejected')], [b.accepted ? '✓ ' : '✕ ', b.detail, h.span([h.Class('faint')], [` · ${b.artifactId}`])]))),
       ] : []),
     ])] : []),
