@@ -1,0 +1,175 @@
+{
+  "base": "http://127.0.0.1:4330/studio.html",
+  "startedAt": "2026-11-28T08:45:55.981Z",
+  "checks": [
+    {
+      "name": "architecture: options pane composed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "architecture: reply references workspace objects",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "selection does not start a turn",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "compare: new pane focused",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "compare: reply names both options",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "investigate diagram node",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "ask why on a decision",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "card move is local",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reassess plan after move",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "assumption edit recalculates locally",
+      "ok": true,
+      "detail": "Reserve 70k CHF → Reserve -40k CHF"
+    },
+    {
+      "name": "assumption edit makes no turn",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "implications cite the human value",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "later turn still uses the edit",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "source relevance",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "artifact: storage, host DOM and network blocked",
+      "ok": true,
+      "detail": "Sandbox · Speicher: gesperrt · Host-DOM: gesperrt · Netzwerk: gesperrt"
+    },
+    {
+      "name": "artifact event becomes pending context, no turn",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "rogue frame cannot inject an event",
+      "ok": true,
+      "detail": "ArtefaktSzenario: 12 WochenVerwerfenIm Gespräch aufgreifen"
+    },
+    {
+      "name": "host cannot read artifact document (opaque origin)",
+      "ok": true,
+      "detail": "null"
+    },
+    {
+      "name": "artifact context reaches the reply",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reload keeps state byte-identical",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reload keeps human budget edit",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reload keeps moved card",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reload keeps pins",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reopened budget shows the edit",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "no horizontal overflow at 390 px",
+      "ok": true,
+      "detail": "{\"phoneChat\":390,\"phoneBoard\":390}"
+    },
+    {
+      "name": "no horizontal overflow at 1024 px",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "artifact network attempt refused by CSP (console evidence)",
+      "ok": true,
+      "detail": "6 CSP refusals"
+    },
+    {
+      "name": "no page errors",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "axe": {
+    "empty": [],
+    "architecture": [],
+    "budget": [],
+    "research": []
+  },
+  "overflow": {
+    "phoneChat": 390,
+    "phoneBoard": 390,
+    "tablet": 1024
+  },
+  "security": {
+    "artifactSelfCheck": "Sandbox · Speicher: gesperrt · Host-DOM: gesperrt · Netzwerk: gesperrt",
+    "rogue": {
+      "tray": "ArtefaktSzenario: 12 WochenVerwerfenIm Gespräch aufgreifen",
+      "hostRead": "null"
+    },
+    "cspBlocks": [
+      "Connecting to 'https://example.org/' violates the following Content Security Policy directive: \"connect-src 'none'\". The action has been blocked.",
+      "Fetch API cannot load https://example.org/. Refused to connect because it violates the document's Content Security Policy.",
+      "Connecting to 'https://example.org/' violates the following Content Security Policy directive: \"connect-src 'none'\". The action has been blocked.",
+      "Fetch API cannot load https://example.org/. Refused to connect because it violates the document's Content Security Policy.",
+      "Connecting to 'https://example.org/' violates the following Content Security Policy directive: \"connect-src 'none'\". The action has been blocked.",
+      "Fetch API cannot load https://example.org/. Refused to connect because it violates the document's Content Security Policy."
+    ]
+  },
+  "finishedAt": "2026-11-28T08:46:18.351Z",
+  "passed": 28,
+  "failed": 0
+}

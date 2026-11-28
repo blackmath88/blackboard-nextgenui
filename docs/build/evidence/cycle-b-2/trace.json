@@ -1,0 +1,1570 @@
+[
+  {
+    "title": "Sitzungsspeicher",
+    "scenario": "open",
+    "interactions": [
+      {
+        "type": "select",
+        "paneId": "db.decision",
+        "objectIds": [
+          "db.postgres"
+        ],
+        "payload": {
+          "selected": true
+        },
+        "explicit": false,
+        "id": "i-67",
+        "at": "2026-11-28T09:14:27.774Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "db.decision",
+        "objectIds": [
+          "dw.multi"
+        ],
+        "payload": {
+          "from": 1,
+          "to": 5
+        },
+        "explicit": false,
+        "id": "i-68",
+        "at": "2026-11-28T09:14:27.993Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "db.decision",
+        "objectIds": [
+          "dw.ops"
+        ],
+        "payload": {
+          "from": 3,
+          "to": 1
+        },
+        "explicit": false,
+        "id": "i-69",
+        "at": "2026-11-28T09:14:28.004Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "db.decision",
+        "objectIds": [
+          "dw.multi",
+          "dw.ops"
+        ],
+        "payload": {
+          "count": 2
+        },
+        "explicit": true,
+        "id": "i-70",
+        "at": "2026-11-28T09:14:28.232Z",
+        "paneRevision": 1
+      }
+    ],
+    "turns": [
+      {
+        "text": "Sollen wir für den Sitzungsspeicher PostgreSQL oder SQLite verwenden?",
+        "packet": {
+          "request": "Sollen wir für den Sitzungsspeicher PostgreSQL oder SQLite verwenden?",
+          "interaction": null,
+          "selection": [],
+          "humanEdits": [],
+          "movedCards": [],
+          "values": {},
+          "workspace": [],
+          "focus": null,
+          "recent": []
+        }
+      },
+      {
+        "text": "Was bedeuten meine Änderungen an „Gleichzeitige Nutzer“ und „Betriebsaufwand“?",
+        "packet": {
+          "request": "Was bedeuten meine Änderungen an „Gleichzeitige Nutzer“ und „Betriebsaufwand“?",
+          "interaction": {
+            "type": "edit-assumption",
+            "pane": "db.decision",
+            "paneRevision": 1,
+            "payload": {
+              "count": 2
+            }
+          },
+          "selection": [],
+          "humanEdits": [
+            {
+              "id": "dw.multi",
+              "label": "Gleichzeitige Nutzer",
+              "proposed": 1,
+              "value": 5
+            },
+            {
+              "id": "dw.ops",
+              "label": "Betriebsaufwand",
+              "proposed": 3,
+              "value": 1
+            }
+          ],
+          "movedCards": [],
+          "values": {
+            "dw.ops": 1,
+            "dw.multi": 5,
+            "dw.backup": 2,
+            "dw.query": 1
+          },
+          "workspace": [
+            {
+              "id": "db.decision",
+              "title": "Sitzungsspeicher",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "db.decision",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Sollen wir für den Sitzungsspeicher PostgreSQL oder SQLite verwenden?"
+            },
+            {
+              "role": "assistant",
+              "text": "Für **einen Nutzer auf einem Rechner** spricht fast alles für [[db.sqlite]]: keine laufende Instanz, Datei-Backup, Transaktionen sind trotzdem da.\n\n[[db.postgres]] lohnt sich erst, wenn mehrere Personen gleichzeitig dieselbe Sitzung bearbeiten oder der Speicher auf einen Server …"
+            }
+          ]
+        }
+      },
+      {
+        "text": "Teste bitte eine ungültige Darstellung.",
+        "packet": {
+          "request": "Teste bitte eine ungültige Darstellung.",
+          "interaction": null,
+          "selection": [],
+          "humanEdits": [
+            {
+              "id": "dw.multi",
+              "label": "Gleichzeitige Nutzer",
+              "proposed": 1,
+              "value": 5
+            },
+            {
+              "id": "dw.ops",
+              "label": "Betriebsaufwand",
+              "proposed": 3,
+              "value": 1
+            }
+          ],
+          "movedCards": [],
+          "values": {
+            "dw.ops": 1,
+            "dw.multi": 5,
+            "dw.backup": 2,
+            "dw.query": 1
+          },
+          "workspace": [
+            {
+              "id": "db.decision",
+              "title": "Sitzungsspeicher",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "db.decision",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Sollen wir für den Sitzungsspeicher PostgreSQL oder SQLite verwenden?"
+            },
+            {
+              "role": "assistant",
+              "text": "Für **einen Nutzer auf einem Rechner** spricht fast alles für [[db.sqlite]]: keine laufende Instanz, Datei-Backup, Transaktionen sind trotzdem da.\n\n[[db.postgres]] lohnt sich erst, wenn mehrere Personen gleichzeitig dieselbe Sitzung bearbeiten oder der Speicher auf einen Server …"
+            },
+            {
+              "role": "user",
+              "text": "Was bedeuten meine Änderungen an „Gleichzeitige Nutzer“ und „Betriebsaufwand“?"
+            },
+            {
+              "role": "assistant",
+              "text": "Sie gewichten [[dw.multi]] mit **5** statt 1, [[dw.ops]] mit **1** statt 3.\n\nDamit **kippt die Empfehlung**: [[db.postgres]] liegt jetzt mit 38 von 45 Punkten vorn, vor [[db.sqlite]] (28). Mit meiner Gewichtung lag [[db.sqlite]] vorn.\n\nDas ist eine echte Wertentscheidung, keine …"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "title": "Lernplan Effect & Foldkit",
+    "scenario": "learning",
+    "interactions": [
+      {
+        "type": "edit-assumption",
+        "paneId": "learn.plan",
+        "objectIds": [
+          "l.hours"
+        ],
+        "payload": {
+          "from": 6,
+          "to": 3
+        },
+        "explicit": false,
+        "id": "i-56",
+        "at": "2026-11-28T09:14:23.974Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "learn.plan",
+        "objectIds": [
+          "l.hours"
+        ],
+        "payload": {
+          "count": 1
+        },
+        "explicit": true,
+        "id": "i-57",
+        "at": "2026-11-28T09:14:24.250Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "move-card",
+        "paneId": "learn.plan",
+        "objectIds": [
+          "lc.project"
+        ],
+        "payload": {
+          "from": "open",
+          "to": "doing"
+        },
+        "explicit": false,
+        "id": "i-60",
+        "at": "2026-11-28T09:14:24.966Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "move-card",
+        "paneId": "learn.plan",
+        "objectIds": [
+          "lc.project"
+        ],
+        "payload": {
+          "count": 1
+        },
+        "explicit": true,
+        "id": "i-61",
+        "at": "2026-11-28T09:14:25.253Z",
+        "paneRevision": 1
+      }
+    ],
+    "turns": [
+      {
+        "text": "Ich möchte in sechs Wochen Effect und Foldkit lernen, abends neben der Arbeit. Wie gehe ich vor?",
+        "packet": {
+          "request": "Ich möchte in sechs Wochen Effect und Foldkit lernen, abends neben der Arbeit. Wie gehe ich vor?",
+          "interaction": null,
+          "selection": [],
+          "humanEdits": [],
+          "movedCards": [],
+          "values": {},
+          "workspace": [],
+          "focus": null,
+          "recent": []
+        }
+      },
+      {
+        "text": "Was bedeuten meine Änderungen an „Stunden pro Woche“?",
+        "packet": {
+          "request": "Was bedeuten meine Änderungen an „Stunden pro Woche“?",
+          "interaction": {
+            "type": "edit-assumption",
+            "pane": "learn.plan",
+            "paneRevision": 1,
+            "payload": {
+              "count": 1
+            }
+          },
+          "selection": [],
+          "humanEdits": [
+            {
+              "id": "l.hours",
+              "label": "Stunden pro Woche",
+              "proposed": 6,
+              "value": 3
+            }
+          ],
+          "movedCards": [],
+          "values": {
+            "l.hours": 3,
+            "l.weeks": 6
+          },
+          "workspace": [
+            {
+              "id": "learn.plan",
+              "title": "Lernplan Effect",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "learn.plan",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Ich möchte in sechs Wochen Effect und Foldkit lernen, abends neben der Arbeit. Wie gehe ich vor?"
+            },
+            {
+              "role": "assistant",
+              "text": "Sechs Wochen abends reichen, wenn Sie **früh bauen** statt lange zu lesen. Mein Vorschlag:\n\n1. **Woche 1** — [[lt.basics]]: kleine Programme mit `pipe`, ohne Framework.\n2. **Woche 2–3** — [[lt.effects]]: der Fehlerkanal ist das, was Effect von Promises unterscheidet.\n3. **Woche …"
+            }
+          ]
+        }
+      },
+      {
+        "text": "Ich habe eine Aufgabe verschoben. Bitte bewerte den Plan neu.",
+        "packet": {
+          "request": "Ich habe eine Aufgabe verschoben. Bitte bewerte den Plan neu.",
+          "interaction": {
+            "type": "move-card",
+            "pane": "learn.plan",
+            "paneRevision": 1,
+            "payload": {
+              "count": 1
+            }
+          },
+          "selection": [],
+          "humanEdits": [
+            {
+              "id": "l.hours",
+              "label": "Stunden pro Woche",
+              "proposed": 6,
+              "value": 3
+            }
+          ],
+          "movedCards": [
+            {
+              "id": "lc.project",
+              "title": "Eigenes Projekt",
+              "lane": "doing"
+            }
+          ],
+          "values": {
+            "l.hours": 3,
+            "l.weeks": 6
+          },
+          "workspace": [
+            {
+              "id": "learn.plan",
+              "title": "Lernplan Effect",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "learn.plan",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Ich möchte in sechs Wochen Effect und Foldkit lernen, abends neben der Arbeit. Wie gehe ich vor?"
+            },
+            {
+              "role": "assistant",
+              "text": "Sechs Wochen abends reichen, wenn Sie **früh bauen** statt lange zu lesen. Mein Vorschlag:\n\n1. **Woche 1** — [[lt.basics]]: kleine Programme mit `pipe`, ohne Framework.\n2. **Woche 2–3** — [[lt.effects]]: der Fehlerkanal ist das, was Effect von Promises unterscheidet.\n3. **Woche …"
+            },
+            {
+              "role": "user",
+              "text": "Was bedeuten meine Änderungen an „Stunden pro Woche“?"
+            },
+            {
+              "role": "assistant",
+              "text": "Mit [[l.hours]] **3** (statt 6) kommen Sie auf **18 Stunden**.\n\nDas ist knapp. Ich würde das [[lc.project]] streichen und stattdessen die [[lc.foldkit]] gründlich bauen — ein fertiges kleines Ding lehrt mehr als ein halbes grosses."
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "title": "Remote-Onboarding",
+    "scenario": "research",
+    "interactions": [
+      {
+        "type": "select",
+        "paneId": "research.evidence",
+        "objectIds": [
+          "s.blog"
+        ],
+        "payload": {
+          "selected": true
+        },
+        "explicit": false,
+        "id": "i-43",
+        "at": "2026-11-28T09:14:17.983Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "inspect-source",
+        "paneId": "research.evidence",
+        "objectIds": [
+          "s.blog"
+        ],
+        "payload": {
+          "count": 1
+        },
+        "explicit": true,
+        "id": "i-44",
+        "at": "2026-11-28T09:14:18.269Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "artifact-event",
+        "paneId": "research.simulator",
+        "objectIds": [
+          "art.onboarding"
+        ],
+        "payload": {
+          "event": "scenario.chosen",
+          "weeks": 12,
+          "buddy": false,
+          "docs": true,
+          "team": 8
+        },
+        "explicit": false,
+        "id": "i-49",
+        "at": "2026-11-28T09:14:19.849Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "artifact-event",
+        "paneId": "research.simulator",
+        "objectIds": [
+          "art.onboarding"
+        ],
+        "payload": {
+          "event": "scenario.chosen",
+          "weeks": 12,
+          "buddy": false,
+          "docs": true,
+          "team": 8
+        },
+        "explicit": true,
+        "id": "i-50",
+        "at": "2026-11-28T09:14:20.514Z",
+        "paneRevision": 1
+      }
+    ],
+    "turns": [
+      {
+        "text": "Fasse zusammen, was wir über Remote-Onboarding und die Produktivität neuer Mitarbeitender wissen.",
+        "packet": {
+          "request": "Fasse zusammen, was wir über Remote-Onboarding und die Produktivität neuer Mitarbeitender wissen.",
+          "interaction": null,
+          "selection": [],
+          "humanEdits": [],
+          "movedCards": [],
+          "values": {},
+          "workspace": [],
+          "focus": null,
+          "recent": []
+        }
+      },
+      {
+        "text": "Wie relevant ist „Erfahrungsbericht“?",
+        "packet": {
+          "request": "Wie relevant ist „Erfahrungsbericht“?",
+          "interaction": {
+            "type": "inspect-source",
+            "pane": "research.evidence",
+            "paneRevision": 1,
+            "payload": {
+              "count": 1
+            }
+          },
+          "selection": [
+            {
+              "id": "s.blog",
+              "kind": "Quelle",
+              "label": "Erfahrungsbericht",
+              "pane": "research.evidence",
+              "data": "{\"id\":\"s.blog\",\"cells\":{\"name\":\"Erfahrungsbericht\",\"method\":\"Einzelfall\",\"n\":1,\"quality\":\"niedrig\"},\"tone\":\"caution\"}"
+            }
+          ],
+          "humanEdits": [],
+          "movedCards": [],
+          "values": {},
+          "workspace": [
+            {
+              "id": "research.findings",
+              "title": "Befunde",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "research.evidence",
+              "title": "Evidenz",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "research.evidence",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Fasse zusammen, was wir über Remote-Onboarding und die Produktivität neuer Mitarbeitender wissen."
+            },
+            {
+              "role": "assistant",
+              "text": "Kurzfassung der (synthetischen) Evidenz:\n\n- [[f.buddy]] ist der robusteste Befund — zwei unabhängige Quellen, darunter eine Längsschnittstudie.\n- [[f.async]] — Dokumentation hilft, aber erst nach den ersten zwei Wochen.\n- [[f.cohort]] stärkt Zugehörigkeit; ein Produktivitätseffe…"
+            }
+          ]
+        }
+      },
+      {
+        "text": "Baue mir einen interaktiven Simulator für die Einarbeitungszeit.",
+        "packet": {
+          "request": "Baue mir einen interaktiven Simulator für die Einarbeitungszeit.",
+          "interaction": null,
+          "selection": [],
+          "humanEdits": [],
+          "movedCards": [],
+          "values": {},
+          "workspace": [
+            {
+              "id": "research.findings",
+              "title": "Befunde",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "research.evidence",
+              "title": "Evidenz",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "research.evidence",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Fasse zusammen, was wir über Remote-Onboarding und die Produktivität neuer Mitarbeitender wissen."
+            },
+            {
+              "role": "assistant",
+              "text": "Kurzfassung der (synthetischen) Evidenz:\n\n- [[f.buddy]] ist der robusteste Befund — zwei unabhängige Quellen, darunter eine Längsschnittstudie.\n- [[f.async]] — Dokumentation hilft, aber erst nach den ersten zwei Wochen.\n- [[f.cohort]] stärkt Zugehörigkeit; ein Produktivitätseffe…"
+            },
+            {
+              "role": "user",
+              "text": "Wie relevant ist „Erfahrungsbericht“?"
+            },
+            {
+              "role": "assistant",
+              "text": "**[[s.blog]]** ist relevant für [[f.tools]].\n\n> Zwei Tage ohne Laptop-Zugang am Start.\n\nEin Einzelfall ohne Vergleichsgruppe — er illustriert ein Problem, belegt aber keine Grösse. Ich würde [[f.tools]] deshalb als Hypothese führen."
+            }
+          ]
+        }
+      },
+      {
+        "text": "Ich habe im Simulator ein Szenario gewählt. Was heisst das für uns?",
+        "packet": {
+          "request": "Ich habe im Simulator ein Szenario gewählt. Was heisst das für uns?",
+          "interaction": {
+            "type": "artifact-event",
+            "pane": "research.simulator",
+            "paneRevision": 1,
+            "payload": {
+              "event": "scenario.chosen",
+              "weeks": 12,
+              "buddy": false,
+              "docs": true,
+              "team": 8
+            }
+          },
+          "selection": [],
+          "humanEdits": [],
+          "movedCards": [],
+          "values": {},
+          "workspace": [
+            {
+              "id": "research.findings",
+              "title": "Befunde",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "research.evidence",
+              "title": "Evidenz",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "research.simulator",
+              "title": "Simulator",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "research.simulator",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Fasse zusammen, was wir über Remote-Onboarding und die Produktivität neuer Mitarbeitender wissen."
+            },
+            {
+              "role": "assistant",
+              "text": "Kurzfassung der (synthetischen) Evidenz:\n\n- [[f.buddy]] ist der robusteste Befund — zwei unabhängige Quellen, darunter eine Längsschnittstudie.\n- [[f.async]] — Dokumentation hilft, aber erst nach den ersten zwei Wochen.\n- [[f.cohort]] stärkt Zugehörigkeit; ein Produktivitätseffe…"
+            },
+            {
+              "role": "user",
+              "text": "Wie relevant ist „Erfahrungsbericht“?"
+            },
+            {
+              "role": "assistant",
+              "text": "**[[s.blog]]** ist relevant für [[f.tools]].\n\n> Zwei Tage ohne Laptop-Zugang am Start.\n\nEin Einzelfall ohne Vergleichsgruppe — er illustriert ein Problem, belegt aber keine Grösse. Ich würde [[f.tools]] deshalb als Hypothese führen."
+            },
+            {
+              "role": "user",
+              "text": "Baue mir einen interaktiven Simulator für die Einarbeitungszeit."
+            },
+            {
+              "role": "assistant",
+              "text": "Ich habe einen kleinen **Simulator** gebaut: Wählen Sie Buddy, Dokumentation und Teamgrösse, und übernehmen Sie ein Szenario. Er läuft als isoliertes HTML-Artefakt; nur das gewählte Szenario kommt als geprüftes Ereignis zurück ins Gespräch.\n\nDie Kurve folgt den Effektgrössen aus…"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "title": "Budget Produktteam 2027",
+    "scenario": "budget",
+    "interactions": [
+      {
+        "type": "edit-assumption",
+        "paneId": "budget.plan",
+        "objectIds": [
+          "b.dev"
+        ],
+        "payload": {
+          "from": 210000,
+          "to": 320000
+        },
+        "explicit": false,
+        "id": "i-32",
+        "at": "2026-11-28T09:14:11.056Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "budget.plan",
+        "objectIds": [
+          "b.dev"
+        ],
+        "payload": {
+          "count": 1
+        },
+        "explicit": true,
+        "id": "i-33",
+        "at": "2026-11-28T09:14:11.414Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "pin",
+        "paneId": "budget.plan",
+        "objectIds": [],
+        "payload": {},
+        "explicit": false,
+        "id": "i-38",
+        "at": "2026-11-28T09:14:13.650Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "promote",
+        "paneId": "chat.m-31.b1",
+        "objectIds": [],
+        "payload": {
+          "message": "m-31",
+          "block": 1
+        },
+        "explicit": false,
+        "id": "i-39",
+        "at": "2026-11-28T09:14:13.783Z",
+        "paneRevision": 0
+      }
+    ],
+    "turns": [
+      {
+        "text": "Wir haben 480’000 CHF für das Produktteam 2027. Wie sollten wir das Budget aufteilen?",
+        "packet": {
+          "request": "Wir haben 480’000 CHF für das Produktteam 2027. Wie sollten wir das Budget aufteilen?",
+          "interaction": null,
+          "selection": [],
+          "humanEdits": [],
+          "movedCards": [],
+          "values": {},
+          "workspace": [],
+          "focus": null,
+          "recent": []
+        }
+      },
+      {
+        "text": "Was bedeuten meine Änderungen an „Entwicklung“?",
+        "packet": {
+          "request": "Was bedeuten meine Änderungen an „Entwicklung“?",
+          "interaction": {
+            "type": "edit-assumption",
+            "pane": "budget.plan",
+            "paneRevision": 1,
+            "payload": {
+              "count": 1
+            }
+          },
+          "selection": [],
+          "humanEdits": [
+            {
+              "id": "b.dev",
+              "label": "Entwicklung",
+              "proposed": 210000,
+              "value": 320000
+            }
+          ],
+          "movedCards": [],
+          "values": {
+            "b.total": 480000,
+            "b.dev": 320000,
+            "b.design": 80000,
+            "b.research": 45000,
+            "b.infra": 50000,
+            "b.events": 25000
+          },
+          "workspace": [
+            {
+              "id": "budget.plan",
+              "title": "Budget 2027",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "budget.plan",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Wir haben 480’000 CHF für das Produktteam 2027. Wie sollten wir das Budget aufteilen?"
+            },
+            {
+              "role": "assistant",
+              "text": "Hier ist ein ausgewogener Startpunkt für **480’000 CHF**. Er setzt auf Entwicklung als grössten Posten und hält rund 15 % Reserve.\n\n| Posten | Betrag | Anteil |\n| --- | ---: | ---: |\n| Entwicklung | 210’000 CHF | 43.8 % |\n| Design | 80’000 CHF | 16.7 % |\n| Infrastruktur | 50’000…"
+            }
+          ]
+        }
+      },
+      {
+        "text": "Was passiert, wenn wir zwei Personen einstellen?",
+        "packet": {
+          "request": "Was passiert, wenn wir zwei Personen einstellen?",
+          "interaction": null,
+          "selection": [],
+          "humanEdits": [
+            {
+              "id": "b.dev",
+              "label": "Entwicklung",
+              "proposed": 210000,
+              "value": 320000
+            }
+          ],
+          "movedCards": [],
+          "values": {
+            "b.total": 480000,
+            "b.dev": 320000,
+            "b.design": 80000,
+            "b.research": 45000,
+            "b.infra": 50000,
+            "b.events": 25000
+          },
+          "workspace": [
+            {
+              "id": "budget.plan",
+              "title": "Budget 2027",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "budget.compare",
+              "title": "Szenarien",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "budget.compare",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Wir haben 480’000 CHF für das Produktteam 2027. Wie sollten wir das Budget aufteilen?"
+            },
+            {
+              "role": "assistant",
+              "text": "Hier ist ein ausgewogener Startpunkt für **480’000 CHF**. Er setzt auf Entwicklung als grössten Posten und hält rund 15 % Reserve.\n\n| Posten | Betrag | Anteil |\n| --- | ---: | ---: |\n| Entwicklung | 210’000 CHF | 43.8 % |\n| Design | 80’000 CHF | 16.7 % |\n| Infrastruktur | 50’000…"
+            },
+            {
+              "role": "user",
+              "text": "Was bedeuten meine Änderungen an „Entwicklung“?"
+            },
+            {
+              "role": "assistant",
+              "text": "Sie haben [[b.dev]] von 210'000 CHF auf **320'000 CHF** geändert.\n\nDer Plan ist **überzeichnet** um 40'000 CHF. Ohne Kürzung geht das nicht auf.\nVerplant sind 520'000 CHF, also 43'333 CHF pro Monat.\n\nDie Gegenüberstellung auf der Arbeitsfläche zeigt Vorschlag und Ihre Werte nebe…"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "title": "Synchronisation Chat ↔ Arbeitsfläche",
+    "scenario": "architecture",
+    "interactions": [
+      {
+        "type": "select",
+        "paneId": "arch.options",
+        "objectIds": [
+          "opt.events"
+        ],
+        "payload": {
+          "selected": true
+        },
+        "explicit": false,
+        "id": "i-3",
+        "at": "2026-11-28T09:14:00.948Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "select",
+        "paneId": "arch.options",
+        "objectIds": [
+          "opt.shared"
+        ],
+        "payload": {
+          "selected": true
+        },
+        "explicit": false,
+        "id": "i-4",
+        "at": "2026-11-28T09:14:00.983Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "compare",
+        "paneId": "arch.options",
+        "objectIds": [
+          "opt.events",
+          "opt.shared"
+        ],
+        "payload": {
+          "count": 2
+        },
+        "explicit": true,
+        "id": "i-5",
+        "at": "2026-11-28T09:14:01.165Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "select",
+        "paneId": "arch.map",
+        "objectIds": [
+          "n.bridge"
+        ],
+        "payload": {
+          "selected": true
+        },
+        "explicit": false,
+        "id": "i-8",
+        "at": "2026-11-28T09:14:02.706Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "investigate",
+        "paneId": "arch.map",
+        "objectIds": [
+          "n.bridge"
+        ],
+        "payload": {
+          "count": 1
+        },
+        "explicit": true,
+        "id": "i-9",
+        "at": "2026-11-28T09:14:02.969Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "select",
+        "paneId": "arch.options",
+        "objectIds": [
+          "dec.log"
+        ],
+        "payload": {
+          "selected": true
+        },
+        "explicit": false,
+        "id": "i-12",
+        "at": "2026-11-28T09:14:04.269Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "ask-why",
+        "paneId": "arch.options",
+        "objectIds": [
+          "dec.log"
+        ],
+        "payload": {
+          "count": 1
+        },
+        "explicit": true,
+        "id": "i-13",
+        "at": "2026-11-28T09:14:04.553Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "arch.options",
+        "objectIds": [
+          "w.collab"
+        ],
+        "payload": {
+          "from": 1,
+          "to": 5
+        },
+        "explicit": false,
+        "id": "i-16",
+        "at": "2026-11-28T09:14:05.798Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "arch.options",
+        "objectIds": [
+          "w.trace"
+        ],
+        "payload": {
+          "from": 3,
+          "to": 1
+        },
+        "explicit": false,
+        "id": "i-17",
+        "at": "2026-11-28T09:14:05.815Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "arch.options",
+        "objectIds": [
+          "w.edit"
+        ],
+        "payload": {
+          "from": 3,
+          "to": 1
+        },
+        "explicit": false,
+        "id": "i-18",
+        "at": "2026-11-28T09:14:05.820Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "arch.options",
+        "objectIds": [
+          "w.collab",
+          "w.trace",
+          "w.edit"
+        ],
+        "payload": {
+          "count": 3
+        },
+        "explicit": true,
+        "id": "i-19",
+        "at": "2026-11-28T09:14:06.164Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "move-card",
+        "paneId": "arch.plan",
+        "objectIds": [
+          "t.bridge"
+        ],
+        "payload": {
+          "from": "open",
+          "to": "doing"
+        },
+        "explicit": false,
+        "id": "i-24",
+        "at": "2026-11-28T09:14:07.983Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "move-card",
+        "paneId": "arch.plan",
+        "objectIds": [
+          "t.bridge"
+        ],
+        "payload": {
+          "count": 1
+        },
+        "explicit": true,
+        "id": "i-25",
+        "at": "2026-11-28T09:14:08.266Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "pin",
+        "paneId": "arch.plan",
+        "objectIds": [],
+        "payload": {},
+        "explicit": false,
+        "id": "i-28",
+        "at": "2026-11-28T09:14:08.934Z",
+        "paneRevision": 2
+      }
+    ],
+    "turns": [
+      {
+        "text": "Wie sollten wir die Synchronisation zwischen Chat und Arbeitsfläche architektonisch aufbauen?",
+        "packet": {
+          "request": "Wie sollten wir die Synchronisation zwischen Chat und Arbeitsfläche architektonisch aufbauen?",
+          "interaction": null,
+          "selection": [],
+          "humanEdits": [],
+          "movedCards": [],
+          "values": {},
+          "workspace": [],
+          "focus": null,
+          "recent": []
+        }
+      },
+      {
+        "text": "Vergleiche „Ereignisprotokoll“ und „CRDT-Dokument“.",
+        "packet": {
+          "request": "Vergleiche „Ereignisprotokoll“ und „CRDT-Dokument“.",
+          "interaction": {
+            "type": "compare",
+            "pane": "arch.options",
+            "paneRevision": 1,
+            "payload": {
+              "count": 2
+            }
+          },
+          "selection": [
+            {
+              "id": "opt.events",
+              "kind": "Option",
+              "label": "Ereignisprotokoll",
+              "pane": "arch.options",
+              "data": "{\"id\":\"opt.events\",\"title\":\"Ereignisprotokoll mit abgeleitetem Zustand\",\"detail\":\"Jede Interaktion wird als typisiertes Ereignis angehängt; Ansichten und Modellkontext werden daraus abgeleitet.\",\"meta\":\"Empfohlen\"}"
+            },
+            {
+              "id": "opt.shared",
+              "kind": "Option",
+              "label": "CRDT-Dokument",
+              "pane": "arch.options",
+              "data": "{\"id\":\"opt.shared\",\"title\":\"Gemeinsames Dokument (CRDT)\",\"detail\":\"Chat und Arbeitsfläche schreiben in ein gemeinsames, zusammenführbares Dokument.\",\"meta\":\"Stark für Mehrbenutzer\"}"
+            }
+          ],
+          "humanEdits": [],
+          "movedCards": [],
+          "values": {
+            "w.trace": 3,
+            "w.edit": 3,
+            "w.cost": 2,
+            "w.collab": 1,
+            "w.effort": 2
+          },
+          "workspace": [
+            {
+              "id": "arch.map",
+              "title": "Systemlandkarte",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "arch.options",
+              "title": "Alternativen",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "arch.options",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Wie sollten wir die Synchronisation zwischen Chat und Arbeitsfläche architektonisch aufbauen?"
+            },
+            {
+              "role": "assistant",
+              "text": "Der Kern ist eine Frage der **Autorität**: Wer darf den gemeinsamen Zustand verändern, und wie bleibt nachvollziehbar, was Mensch und Modell beigetragen haben?\n\nIch sehe drei tragfähige Wege. Auf der Arbeitsfläche liegen jetzt eine [[arch.diagram]]-Landkarte und die Alternativen…"
+            }
+          ]
+        }
+      },
+      {
+        "text": "Untersuche „Artefakt-Brücke“.",
+        "packet": {
+          "request": "Untersuche „Artefakt-Brücke“.",
+          "interaction": {
+            "type": "investigate",
+            "pane": "arch.map",
+            "paneRevision": 1,
+            "payload": {
+              "count": 1
+            }
+          },
+          "selection": [
+            {
+              "id": "n.bridge",
+              "kind": "Komponente",
+              "label": "Artefakt-Brücke",
+              "pane": "arch.map",
+              "data": "{\"id\":\"n.bridge\",\"label\":\"Artefakt-Brücke\",\"layer\":1,\"detail\":\"Absender + Schema geprüft\",\"tone\":\"caution\"}"
+            }
+          ],
+          "humanEdits": [],
+          "movedCards": [],
+          "values": {
+            "w.trace": 3,
+            "w.edit": 3,
+            "w.cost": 2,
+            "w.collab": 1,
+            "w.effort": 2
+          },
+          "workspace": [
+            {
+              "id": "arch.map",
+              "title": "Systemlandkarte",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "arch.options",
+              "title": "Alternativen",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "arch.compare",
+              "title": "Gegenüberstellung",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "arch.map",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Wie sollten wir die Synchronisation zwischen Chat und Arbeitsfläche architektonisch aufbauen?"
+            },
+            {
+              "role": "assistant",
+              "text": "Der Kern ist eine Frage der **Autorität**: Wer darf den gemeinsamen Zustand verändern, und wie bleibt nachvollziehbar, was Mensch und Modell beigetragen haben?\n\nIch sehe drei tragfähige Wege. Auf der Arbeitsfläche liegen jetzt eine [[arch.diagram]]-Landkarte und die Alternativen…"
+            },
+            {
+              "role": "user",
+              "text": "Vergleiche „Ereignisprotokoll“ und „CRDT-Dokument“."
+            },
+            {
+              "role": "assistant",
+              "text": "**[[opt.events]]** liegt mit 47 von 55 Punkten vor **[[opt.shared]]** (38).\n\nDen grössten Unterschied machen:\n- **Nachvollziehbarkeit** (Gewicht 3): +2 für Ereignisprotokoll\n- **Mehrbenutzer** (Gewicht 1): +2 für CRDT-Dokument\n- **Schutz menschlicher Änderungen** (Gewicht 3): +1…"
+            }
+          ]
+        }
+      },
+      {
+        "text": "Warum „Interaktionen als Ereignisse protokollieren“?",
+        "packet": {
+          "request": "Warum „Interaktionen als Ereignisse protokollieren“?",
+          "interaction": {
+            "type": "ask-why",
+            "pane": "arch.options",
+            "paneRevision": 1,
+            "payload": {
+              "count": 1
+            }
+          },
+          "selection": [
+            {
+              "id": "dec.log",
+              "kind": "Entscheidung",
+              "label": "Interaktionen als Ereignisse protokollieren",
+              "pane": "arch.options",
+              "data": "{\"id\":\"dec.log\",\"title\":\"Interaktionen als Ereignisse protokollieren\",\"detail\":\"Status: vorgeschlagen. Grundlage für Kontext, Wiederherstellung und Prüfung.\",\"meta\":\"Vorgeschlagen\",\"tone\":\"accent\"}"
+            }
+          ],
+          "humanEdits": [],
+          "movedCards": [],
+          "values": {
+            "w.trace": 3,
+            "w.edit": 3,
+            "w.cost": 2,
+            "w.collab": 1,
+            "w.effort": 2
+          },
+          "workspace": [
+            {
+              "id": "arch.map",
+              "title": "Systemlandkarte",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "arch.options",
+              "title": "Alternativen",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "arch.compare",
+              "title": "Gegenüberstellung",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "arch.options",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Wie sollten wir die Synchronisation zwischen Chat und Arbeitsfläche architektonisch aufbauen?"
+            },
+            {
+              "role": "assistant",
+              "text": "Der Kern ist eine Frage der **Autorität**: Wer darf den gemeinsamen Zustand verändern, und wie bleibt nachvollziehbar, was Mensch und Modell beigetragen haben?\n\nIch sehe drei tragfähige Wege. Auf der Arbeitsfläche liegen jetzt eine [[arch.diagram]]-Landkarte und die Alternativen…"
+            },
+            {
+              "role": "user",
+              "text": "Vergleiche „Ereignisprotokoll“ und „CRDT-Dokument“."
+            },
+            {
+              "role": "assistant",
+              "text": "**[[opt.events]]** liegt mit 47 von 55 Punkten vor **[[opt.shared]]** (38).\n\nDen grössten Unterschied machen:\n- **Nachvollziehbarkeit** (Gewicht 3): +2 für Ereignisprotokoll\n- **Mehrbenutzer** (Gewicht 1): +2 für CRDT-Dokument\n- **Schutz menschlicher Änderungen** (Gewicht 3): +1…"
+            },
+            {
+              "role": "user",
+              "text": "Untersuche „Artefakt-Brücke“."
+            },
+            {
+              "role": "assistant",
+              "text": "**[[n.bridge]]** — Absender + Schema geprüft\n\nErhält Eingaben von [[n.artifact]].\nLiefert an [[n.intents]].\n\nDas ist eine **Vertrauensgrenze**: generiertes HTML läuft ohne Zugriff auf Speicher, Zugangsdaten oder Netzwerk, und nur erlaubte, schema-geprüfte Ereignisse passieren di…"
+            }
+          ]
+        }
+      },
+      {
+        "text": "Was bedeuten meine Änderungen an „Mehrbenutzer“, „Nachvollziehbarkeit“ und „Schutz menschlicher Änderungen“?",
+        "packet": {
+          "request": "Was bedeuten meine Änderungen an „Mehrbenutzer“, „Nachvollziehbarkeit“ und „Schutz menschlicher Änderungen“?",
+          "interaction": {
+            "type": "edit-assumption",
+            "pane": "arch.options",
+            "paneRevision": 1,
+            "payload": {
+              "count": 3
+            }
+          },
+          "selection": [],
+          "humanEdits": [
+            {
+              "id": "w.collab",
+              "label": "Mehrbenutzer",
+              "proposed": 1,
+              "value": 5
+            },
+            {
+              "id": "w.trace",
+              "label": "Nachvollziehbarkeit",
+              "proposed": 3,
+              "value": 1
+            },
+            {
+              "id": "w.edit",
+              "label": "Schutz menschlicher Änderungen",
+              "proposed": 3,
+              "value": 1
+            }
+          ],
+          "movedCards": [],
+          "values": {
+            "w.trace": 1,
+            "w.edit": 1,
+            "w.cost": 2,
+            "w.collab": 5,
+            "w.effort": 2
+          },
+          "workspace": [
+            {
+              "id": "arch.map",
+              "title": "Systemlandkarte",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "arch.options",
+              "title": "Alternativen",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "arch.compare",
+              "title": "Gegenüberstellung",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "arch.options",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Vergleiche „Ereignisprotokoll“ und „CRDT-Dokument“."
+            },
+            {
+              "role": "assistant",
+              "text": "**[[opt.events]]** liegt mit 47 von 55 Punkten vor **[[opt.shared]]** (38).\n\nDen grössten Unterschied machen:\n- **Nachvollziehbarkeit** (Gewicht 3): +2 für Ereignisprotokoll\n- **Mehrbenutzer** (Gewicht 1): +2 für CRDT-Dokument\n- **Schutz menschlicher Änderungen** (Gewicht 3): +1…"
+            },
+            {
+              "role": "user",
+              "text": "Untersuche „Artefakt-Brücke“."
+            },
+            {
+              "role": "assistant",
+              "text": "**[[n.bridge]]** — Absender + Schema geprüft\n\nErhält Eingaben von [[n.artifact]].\nLiefert an [[n.intents]].\n\nDas ist eine **Vertrauensgrenze**: generiertes HTML läuft ohne Zugriff auf Speicher, Zugangsdaten oder Netzwerk, und nur erlaubte, schema-geprüfte Ereignisse passieren di…"
+            },
+            {
+              "role": "user",
+              "text": "Warum „Interaktionen als Ereignisse protokollieren“?"
+            },
+            {
+              "role": "assistant",
+              "text": "[[dec.log]] folgt aus zwei Anforderungen der Produktvision:\n\n1. **Menschliche Änderungen dürfen nicht verloren gehen.** Ein angehängtes Ereignis überschreibt nichts; ein späterer Modellvorschlag kann geprüft und abgelehnt werden.\n2. **Das Gespräch muss wissen, worauf Sie zeigen.…"
+            }
+          ]
+        }
+      },
+      {
+        "text": "Mach daraus einen Umsetzungsplan.",
+        "packet": {
+          "request": "Mach daraus einen Umsetzungsplan.",
+          "interaction": null,
+          "selection": [],
+          "humanEdits": [
+            {
+              "id": "w.collab",
+              "label": "Mehrbenutzer",
+              "proposed": 1,
+              "value": 5
+            },
+            {
+              "id": "w.trace",
+              "label": "Nachvollziehbarkeit",
+              "proposed": 3,
+              "value": 1
+            },
+            {
+              "id": "w.edit",
+              "label": "Schutz menschlicher Änderungen",
+              "proposed": 3,
+              "value": 1
+            }
+          ],
+          "movedCards": [],
+          "values": {
+            "w.trace": 1,
+            "w.edit": 1,
+            "w.cost": 2,
+            "w.collab": 5,
+            "w.effort": 2
+          },
+          "workspace": [
+            {
+              "id": "arch.map",
+              "title": "Systemlandkarte",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "arch.options",
+              "title": "Alternativen",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "arch.compare",
+              "title": "Gegenüberstellung",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "arch.options",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Untersuche „Artefakt-Brücke“."
+            },
+            {
+              "role": "assistant",
+              "text": "**[[n.bridge]]** — Absender + Schema geprüft\n\nErhält Eingaben von [[n.artifact]].\nLiefert an [[n.intents]].\n\nDas ist eine **Vertrauensgrenze**: generiertes HTML läuft ohne Zugriff auf Speicher, Zugangsdaten oder Netzwerk, und nur erlaubte, schema-geprüfte Ereignisse passieren di…"
+            },
+            {
+              "role": "user",
+              "text": "Warum „Interaktionen als Ereignisse protokollieren“?"
+            },
+            {
+              "role": "assistant",
+              "text": "[[dec.log]] folgt aus zwei Anforderungen der Produktvision:\n\n1. **Menschliche Änderungen dürfen nicht verloren gehen.** Ein angehängtes Ereignis überschreibt nichts; ein späterer Modellvorschlag kann geprüft und abgelehnt werden.\n2. **Das Gespräch muss wissen, worauf Sie zeigen.…"
+            },
+            {
+              "role": "user",
+              "text": "Was bedeuten meine Änderungen an „Mehrbenutzer“, „Nachvollziehbarkeit“ und „Schutz menschlicher Änderungen“?"
+            },
+            {
+              "role": "assistant",
+              "text": "Sie gewichten [[w.collab]] mit **5** statt 1, [[w.trace]] mit **1** statt 3, [[w.edit]] mit **1** statt 3.\n\nDamit **kippt die Empfehlung**: [[opt.shared]] liegt jetzt mit 44 von 55 Punkten vorn, vor [[opt.events]] (39). Mit meiner Gewichtung lag [[opt.events]] vorn.\n\nDas ist ein…"
+            }
+          ]
+        }
+      },
+      {
+        "text": "Ich habe eine Aufgabe verschoben. Bitte bewerte den Plan neu.",
+        "packet": {
+          "request": "Ich habe eine Aufgabe verschoben. Bitte bewerte den Plan neu.",
+          "interaction": {
+            "type": "move-card",
+            "pane": "arch.plan",
+            "paneRevision": 1,
+            "payload": {
+              "count": 1
+            }
+          },
+          "selection": [],
+          "humanEdits": [
+            {
+              "id": "w.collab",
+              "label": "Mehrbenutzer",
+              "proposed": 1,
+              "value": 5
+            },
+            {
+              "id": "w.trace",
+              "label": "Nachvollziehbarkeit",
+              "proposed": 3,
+              "value": 1
+            },
+            {
+              "id": "w.edit",
+              "label": "Schutz menschlicher Änderungen",
+              "proposed": 3,
+              "value": 1
+            }
+          ],
+          "movedCards": [
+            {
+              "id": "t.bridge",
+              "title": "Artefakt-Brücke härten",
+              "lane": "doing"
+            }
+          ],
+          "values": {
+            "w.trace": 1,
+            "w.edit": 1,
+            "w.cost": 2,
+            "w.collab": 5,
+            "w.effort": 2
+          },
+          "workspace": [
+            {
+              "id": "arch.map",
+              "title": "Systemlandkarte",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "arch.options",
+              "title": "Alternativen",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "arch.compare",
+              "title": "Gegenüberstellung",
+              "revision": 1,
+              "pinned": false
+            },
+            {
+              "id": "arch.plan",
+              "title": "Umsetzungsplan",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "arch.plan",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Warum „Interaktionen als Ereignisse protokollieren“?"
+            },
+            {
+              "role": "assistant",
+              "text": "[[dec.log]] folgt aus zwei Anforderungen der Produktvision:\n\n1. **Menschliche Änderungen dürfen nicht verloren gehen.** Ein angehängtes Ereignis überschreibt nichts; ein späterer Modellvorschlag kann geprüft und abgelehnt werden.\n2. **Das Gespräch muss wissen, worauf Sie zeigen.…"
+            },
+            {
+              "role": "user",
+              "text": "Was bedeuten meine Änderungen an „Mehrbenutzer“, „Nachvollziehbarkeit“ und „Schutz menschlicher Änderungen“?"
+            },
+            {
+              "role": "assistant",
+              "text": "Sie gewichten [[w.collab]] mit **5** statt 1, [[w.trace]] mit **1** statt 3, [[w.edit]] mit **1** statt 3.\n\nDamit **kippt die Empfehlung**: [[opt.shared]] liegt jetzt mit 44 von 55 Punkten vorn, vor [[opt.events]] (39). Mit meiner Gewichtung lag [[opt.events]] vorn.\n\nDas ist ein…"
+            },
+            {
+              "role": "user",
+              "text": "Mach daraus einen Umsetzungsplan."
+            },
+            {
+              "role": "assistant",
+              "text": "Hier ist ein Umsetzungsplan in vier Strängen. Verschieben Sie Aufgaben zwischen den Spalten — **Plan neu bewerten** prüft danach Abhängigkeiten und Zeitbedarf.\n\nDie kritische Kette ist [[t.schema]] → [[t.log]] → [[t.replay]]. Die [[t.bridge]] kann parallel laufen, sobald das Sch…"
+            }
+          ]
+        }
+      }
+    ]
+  }
+]
