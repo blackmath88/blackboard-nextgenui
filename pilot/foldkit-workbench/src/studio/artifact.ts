@@ -31,6 +31,11 @@ export const ArtifactRpc = Schema.Union([
   Schema.Struct({ jsonrpc: Schema.Literal('2.0'), method: Schema.Literal('ui/notifications/initialized') }),
   Schema.Struct({
     jsonrpc: Schema.Literal('2.0'),
+    method: Schema.Literal('ui/notifications/size-changed'),
+    params: Schema.Struct({ height: Schema.Number }),
+  }),
+  Schema.Struct({
+    jsonrpc: Schema.Literal('2.0'),
     method: Schema.Literal('ui/event'),
     params: Schema.Struct({
       name: Schema.String.check(Schema.isMaxLength(64)),
@@ -42,6 +47,7 @@ export type ArtifactRpc = typeof ArtifactRpc.Type
 
 export type BridgeVerdict =
   | { readonly _tag: 'Initialized' }
+  | { readonly _tag: 'Resized'; readonly height: number }
   | { readonly _tag: 'Event'; readonly name: string; readonly payload: Readonly<Record<string, string | number | boolean>> }
   | { readonly _tag: 'Rejected'; readonly reason: string }
 
@@ -58,6 +64,9 @@ export const reviewArtifactMessage = (raw: unknown, allowedEvents: ReadonlyArray
   if (decoded._tag === 'Failure') return { _tag: 'Rejected', reason: 'ungültiges Format' }
   const message = decoded.success
   if (message.method === 'ui/notifications/initialized') return { _tag: 'Initialized' }
+  if (message.method === 'ui/notifications/size-changed') {
+    return Number.isFinite(message.params.height) ? { _tag: 'Resized', height: Math.round(Math.min(720, Math.max(120, message.params.height))) } : { _tag: 'Rejected', reason: 'ungültige Höhe' }
+  }
   if (!allowedEvents.includes(message.params.name)) return { _tag: 'Rejected', reason: `Ereignis „${message.params.name}“ nicht erlaubt` }
   if (Object.keys(message.params.payload).length > 12) return { _tag: 'Rejected', reason: 'zu viele Felder' }
   return { _tag: 'Event', name: message.params.name, payload: message.params.payload }
@@ -76,10 +85,23 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 -apple-sy
 <script>
 (() => {
   const send = (message) => parent.postMessage(message, '*');
+  const listeners = [];
   window.blackboard = Object.freeze({
     emit(name, payload) { send({ jsonrpc: '2.0', method: 'ui/event', params: { name: String(name), payload: payload || {} } }); },
+    onState(fn) { listeners.push(fn); },
   });
-  addEventListener('load', () => send({ jsonrpc: '2.0', method: 'ui/notifications/initialized' }));
+  addEventListener('message', (event) => {
+    if (event.source !== parent) return;
+    const m = event.data;
+    if (m && m.jsonrpc === '2.0' && m.method === 'ui/notifications/host-context' && m.params && typeof m.params.state === 'object') {
+      listeners.forEach((fn) => { try { fn(m.params.state); } catch (e) {} });
+    }
+  });
+  addEventListener('load', () => {
+    send({ jsonrpc: '2.0', method: 'ui/notifications/initialized' });
+    const report = () => send({ jsonrpc: '2.0', method: 'ui/notifications/size-changed', params: { height: document.documentElement.scrollHeight } });
+    new ResizeObserver(report).observe(document.body);
+  });
 })();
 </script></head><body>${html}</body></html>`
 
@@ -134,6 +156,12 @@ const draw = () => {
   $('teamv').textContent = $('team').value;
 };
 ['buddy', 'docs', 'team'].forEach((id) => $(id).addEventListener('input', draw));
+blackboard.onState((state) => {
+  if (typeof state.buddy === 'boolean') $('buddy').checked = state.buddy;
+  if (typeof state.docs === 'boolean') $('docs').checked = state.docs;
+  if (typeof state.team === 'number') $('team').value = String(state.team);
+  draw();
+});
 $('choose').addEventListener('click', () => blackboard.emit('scenario.chosen', { weeks: weeksFor(), buddy: $('buddy').checked, docs: $('docs').checked, team: +$('team').value }));
 draw();
 // Isolation self-check, visible inside the artifact.
@@ -155,4 +183,12 @@ export const onboardingSimulator: Representation = {
       { type: 'callout', tone: 'neutral', markdown: 'Das Artefakt läuft ohne Zugriff auf Speicher, Netzwerk oder diese Seite. Nur die Ereignisse *scenario.chosen* und *sandbox.probe* werden angenommen und geprüft.' },
     ],
   },
+}
+
+/** Post the last accepted state into an artifact. Data only, never authority. */
+export const postArtifactState = (artifactId: string, state: Readonly<Record<string, string | number | boolean>>, doc: Document = document): boolean => {
+  const frame = doc.querySelector<HTMLIFrameElement>(`iframe[data-artifact-id="${CSS.escape(artifactId)}"]`)
+  if (!frame?.contentWindow) return false
+  frame.contentWindow.postMessage({ jsonrpc: '2.0', method: 'ui/notifications/host-context', params: { state } }, '*')
+  return true
 }

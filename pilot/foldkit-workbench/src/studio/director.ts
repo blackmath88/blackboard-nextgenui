@@ -362,19 +362,28 @@ const budgetImplications = (conversation: Conversation, packet: Packet, question
       ],
     },
   }
+  const editLine = edits.length
+    ? `Sie haben ${edits.map((e) => `[[${e.id}]] von ${chf(e.proposed)} auf **${chf(e.value)}**`).join(', ')} geändert.`
+    : 'Sie haben noch keine Beträge verändert; ich beziehe mich auf den Vorschlag.'
   return {
-    markdown: [
-      edits.length
-        ? `Sie haben ${edits.map((e) => `[[${e.id}]] von ${chf(e.proposed)} auf **${chf(e.value)}**`).join(', ')} geändert.`
-        : 'Sie haben noch keine Beträge verändert; ich beziehe mich auf den Vorschlag.',
-      '',
-      verdict,
-      `Verplant sind ${chf(allocated)}, also ${chf(allocated / 12)} pro Monat.`,
-      '',
-      hires
-        ? `**Zwei Einstellungen** (≈ ${chf(hireCost)}) ${reserve - hireCost < 0 ? `passen mit Ihren aktuellen Werten **nicht** hinein — es fehlen ${chf(hireCost - reserve)}. Am ehesten liesse sich das über [[b.design]] oder [[b.infra]] ausgleichen.` : `passen hinein; die Reserve sänke auf ${chf(reserve - hireCost)}.`}`
-        : 'Die Gegenüberstellung auf der Arbeitsfläche zeigt Vorschlag und Ihre Werte nebeneinander. Ihre Änderungen bleiben erhalten, auch wenn ich die Darstellung neu aufbaue.',
-    ].join('\n'),
+    markdown: (hires
+      ? [
+          `**Zwei Einstellungen** kosten rund ${chf(hireCost)} pro Jahr.`,
+          '',
+          reserve - hireCost < 0
+            ? `Mit Ihren aktuellen Werten passt das **nicht** — die Reserve liegt bei ${chf(reserve)}, es fehlen ${chf(hireCost - reserve)}.${edits.length ? ` Ich rechne mit Ihrer Änderung (${edits.map((e) => `[[${e.id}]] ${chf(e.value)}`).join(', ')}), nicht mit meinem Vorschlag.` : ''}`
+            : `Das passt: die Reserve sänke von ${chf(reserve)} auf ${chf(reserve - hireCost)}.`,
+          '',
+          reserve - hireCost < 0 ? 'Am ehesten liesse sich das über [[b.design]] oder [[b.infra]] ausgleichen — oder über ein höheres [[b.total]].' : 'Eine Reserve unter 5 % würde ich trotzdem vermeiden.',
+        ]
+      : [
+          editLine,
+          '',
+          verdict,
+          `Verplant sind ${chf(allocated)}, also ${chf(allocated / 12)} pro Monat.`,
+          '',
+          'Die Gegenüberstellung auf der Arbeitsfläche zeigt Vorschlag und Ihre Werte nebeneinander. Ihre Änderungen bleiben erhalten, auch wenn ich die Darstellung neu aufbaue.',
+        ]).join('\n'),
     patch: { upsert: [rep], focus: 'budget.compare' },
   }
 }

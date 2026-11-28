@@ -16,8 +16,9 @@ import { blocks, inlines, streamSafe } from './markdown.js'
 import { Message, type ExplicitAction } from './message.js'
 import { type ChatEntry, type Conversation, type Model, type Pane, active, assumptionValues } from './model.js'
 import { FollowStudioChat } from './mount.js'
-import { evaluate, type Expr, type Node, type Tone } from './spec.js'
+import { evaluate, objectIndex, type Expr, type Node, type Tone } from './spec.js'
 import { undiscussed } from './update.js'
+import { OverviewId, overviewOf, promotable } from './derive.js'
 
 type H = HtmlBuilder<Message>
 type Html = ReturnType<H['div']>
@@ -115,7 +116,7 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
       ...recentPanes.map(({ conv, p }) => h.button([
         h.Type('button'), h.Class('rail-item small'),
         h.OnClick(Message.OpenedRecentPane({ conversationId: conv.id, paneId: p.rep.id })),
-      ], [h.span([h.Class('pin-glyph'), h.AriaHidden(true)], ['⌁']), h.span([h.Class('conv-title')], [p.rep.title]), h.span([h.Class('faint')], [conv.title.split(' ')[0] ?? ''])])),
+      ], [pinIcon(h), h.span([h.Class('conv-title')], [p.rep.title]), h.span([h.Class('faint')], [conv.title.split(' ')[0] ?? ''])])),
     ])] : []),
     h.div([h.Class('rail-foot')], [
       h.p([], ['Synthetischer Modus — Antworten stammen aus Fixtures, nicht aus einem Modell.']),
@@ -135,12 +136,20 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
     : h.li([h.Class(`msg assistant${live ? ' live' : ''}`)], [
         prose(live ? streamSafe(entry.markdown) : entry.markdown),
         ...(entry.refused ? [h.p([h.Class('refused'), h.Role('status')], [entry.refused])] : []),
+        ...(!live ? promotable(entry).map((index) => {
+          const id = `chat.${entry.id}.b${index}`
+          const there = c.panes.some((p) => p.rep.id === id)
+          return h.button([
+            h.Type('button'), h.Class(`promote${there ? ' done' : ''}`),
+            h.OnClick(there ? Message.FocusedPane({ paneId: id }) : Message.PromotedBlock({ messageId: entry.id, block: index })),
+          ], [there ? 'Auf dem Blackboard' : (blocks(entry.markdown)[index]?.kind === 'table' ? 'Tabelle aufs Blackboard' : 'Liste aufs Blackboard')])
+        }) : []),
         ...(!live && entry.touched.length ? [h.div([h.Class('touched')], [
           h.span([h.Class('faint')], ['Arbeitsfläche: ']),
           ...entry.touched.map((id) => {
             const pane = c.panes.find((p) => p.rep.id === id)
             return pane
-              ? h.button([h.Type('button'), h.Class('pane-chip'), h.OnClick(Message.FocusedPane({ paneId: id }))], [pane.rep.title, pane.revision > 1 ? ` · Rev. ${pane.revision}` : ''])
+              ? h.button([h.Type('button'), h.Class('pane-chip'), h.OnClick(Message.FocusedPane({ paneId: id }))], [pane.rep.title])
               : h.span([h.Class('pane-chip gone')], [id])
           }),
         ])] : []),
@@ -443,17 +452,50 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
             h.DataAttribute('artifact-id', node.id),
             h.DataAttribute('pane-id', paneId),
             h.Srcdoc(artifactDocument(node.html, prefersDark())),
-            h.Style({ height: `${Math.min(640, Math.max(160, node.height ?? 280))}px` }),
+            h.Style({ height: `${Math.min(720, Math.max(120, model.artifactHeights[`${paneId}/${node.id}`] ?? node.height ?? 280))}px` }),
           ], []),
         ])
     }
   }
 
   // ------------------------------------------------------------ board
-  const focus = c.panes.find((p) => p.rep.id === c.focusPaneId) ?? c.panes[0]
-  const ordered = [...c.panes.filter((p) => p.pinned), ...c.panes.filter((p) => !p.pinned)]
+  const overview = overviewOf(c)
+  const overviewPane: Pane | undefined = overview ? { rep: overview, revision: 0, turnId: '', pinned: false, history: [] } : undefined
+  const focus = c.focusPaneId === OverviewId && overviewPane ? overviewPane : (c.panes.find((p) => p.rep.id === c.focusPaneId) ?? c.panes[0])
+  const ordered = [...(overviewPane ? [overviewPane] : []), ...c.panes.filter((p) => p.pinned), ...c.panes.filter((p) => !p.pinned)]
   const pendingPatch = streaming?.patch as { upsert: Array<{ id: string; title: string }> } | null | undefined
-  const board = h.aside([h.Class('board'), h.AriaLabel('Blackboard'), h.Style({ '--board-w': `${model.boardWidth}px` })], [
+  const secondary = model.split ? c.panes.find((p) => p.pinned && p !== focus) : undefined
+  const canSplit = c.panes.some((p) => p.pinned && p !== focus)
+  const paneView = (pane: Pane, role: 'primary' | 'secondary'): Html => {
+    const derivedPane = pane.rep.id === OverviewId
+    return h.div([h.Class(`pane ${role}${streaming && pendingPatch?.upsert.some((r) => r.id === pane.rep.id) ? ' refreshing' : ''}`), h.Key(`${role}/${pane.rep.id}`), h.AriaLabel(pane.rep.title)], [
+      h.div([h.Class('pane-head')], [
+        h.div([], [
+          h.h2([], [pane.rep.title]),
+          ...(pane.rep.purpose ? [h.p([h.Class('purpose')], [pane.rep.purpose])] : []),
+        ]),
+        ...(derivedPane ? [] : [h.div([h.Class('pane-tools')], [
+          h.button([h.Type('button'), h.Class(`tool${pane.pinned ? ' on' : ''}`), h.AriaPressed(String(pane.pinned)), h.OnClick(Message.ToggledPin({ paneId: pane.rep.id }))], [...(pane.pinned ? [pinIcon(h)] : []), pane.pinned ? 'Angeheftet' : 'Anheften']),
+          ...(pane.history.length && !pane.pinned ? [h.button([h.Type('button'), h.Class('tool'), h.Title('Vorherige Fassung wiederherstellen'), h.OnClick(Message.RestoredRevision({ paneId: pane.rep.id }))], ['Vorherige'])] : []),
+          ...(!pane.pinned ? [h.button([h.Type('button'), h.Class('tool icon'), h.AriaLabel('Darstellung schliessen'), h.OnClick(Message.ClosedPane({ paneId: pane.rep.id }))], ['×'])] : []),
+        ])]),
+      ]),
+      ...(derivedPane ? [h.p([h.Class('provenance')], ['Live aus dem Sitzungszustand'])] : [h.p([h.Class('provenance')], [
+        `Rev. ${pane.revision}`,
+        ' · ',
+        (() => {
+          const turn = c.messages.find((m) => m.id === pane.turnId)
+          return turn ? `aus der Antwort von ${time(turn.at)}` : 'aus einer früheren Antwort'
+        })(),
+        ...((() => {
+          const ids = objectIndex(pane.rep.root)
+          return [...Object.keys(c.assumptions), ...Object.keys(c.cards)].some((id) => ids.has(id))
+        })() ? [' · ', h.span([h.Class('human')], ['enthält Ihre Änderungen'])] : []),
+      ])]),
+      h.div([h.Class('pane-body')], [render(pane.rep.root, pane)]),
+    ])
+  }
+  const board = h.aside([h.Class(`board${secondary ? ' split' : ''}`), h.AriaLabel('Blackboard'), h.Style({ '--board-w': `${model.boardWidth}px` })], [
     h.div([
       h.Class('handle'), h.Role('separator'), h.AriaOrientation('vertical'), h.AriaLabel('Breite des Blackboards'), h.Tabindex(0),
       h.AriaValuenow(model.boardWidth),
@@ -464,40 +506,24 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
       h.div([h.Class('tabs'), h.Role('tablist'), h.AriaLabel('Darstellungen')], [
         ...ordered.map((p) => h.button([
           h.Type('button'), h.Role('tab'), h.AriaSelected(p === focus),
-          h.Class(`tab${p === focus ? ' on' : ''}${p.pinned ? ' pinned' : ''}${pendingPatch?.upsert.some((r) => r.id === p.rep.id) ? ' updating' : ''}`),
+          h.Class(`tab${p === focus ? ' on' : ''}${p === secondary ? ' beside' : ''}${p.pinned ? ' pinned' : ''}${p === overviewPane ? ' overview' : ''}${pendingPatch?.upsert.some((r) => r.id === p.rep.id) ? ' updating' : ''}`),
           h.OnClick(Message.FocusedPane({ paneId: p.rep.id })),
         ], [
-          ...(p.pinned ? [h.span([h.Class('pin-glyph'), h.AriaLabel('angeheftet')], ['⌁'])] : []),
+          ...(p.pinned ? [pinIcon(h)] : []),
           p.rep.title,
         ])),
         ...(pendingPatch?.upsert.filter((r) => !c.panes.some((p) => p.rep.id === r.id)).map((r) => h.span([h.Class('tab ghost-tab')], [r.title])) ?? []),
       ]),
+      h.button([
+        h.Type('button'), h.Class(`icon split-toggle${model.split ? ' on' : ''}`), h.Disabled(!canSplit),
+        h.AriaPressed(String(model.split)), h.AriaLabel('Angeheftete Darstellung daneben zeigen'),
+        h.Title(canSplit ? 'Angeheftete Darstellung daneben zeigen' : 'Heften Sie eine Darstellung an, um sie daneben zu zeigen'),
+        h.OnClick(Message.ToggledSplit()),
+      ], [splitIcon(h)]),
       h.button([h.Type('button'), h.Class(`icon log-toggle${model.showLog ? ' on' : ''}`), h.AriaLabel('Interaktionsprotokoll'), h.Title('Interaktionsprotokoll'), h.OnClick(Message.ToggledLog())], ['≡']),
     ]),
     focus
-      ? h.div([h.Class(`pane${streaming && pendingPatch?.upsert.some((r) => r.id === focus.rep.id) ? ' refreshing' : ''}`), h.Key(focus.rep.id)], [
-          h.div([h.Class('pane-head')], [
-            h.div([], [
-              h.h2([], [focus.rep.title]),
-              ...(focus.rep.purpose ? [h.p([h.Class('purpose')], [focus.rep.purpose])] : []),
-            ]),
-            h.div([h.Class('pane-tools')], [
-              h.button([h.Type('button'), h.Class(`tool${focus.pinned ? ' on' : ''}`), h.AriaPressed(String(focus.pinned)), h.OnClick(Message.ToggledPin({ paneId: focus.rep.id }))], [focus.pinned ? 'Angeheftet' : 'Anheften']),
-              ...(focus.history.length && !focus.pinned ? [h.button([h.Type('button'), h.Class('tool'), h.Title('Vorherige Fassung wiederherstellen'), h.OnClick(Message.RestoredRevision({ paneId: focus.rep.id }))], ['Vorherige'])] : []),
-              ...(!focus.pinned ? [h.button([h.Type('button'), h.Class('tool icon'), h.AriaLabel('Darstellung schliessen'), h.OnClick(Message.ClosedPane({ paneId: focus.rep.id }))], ['×'])] : []),
-            ]),
-          ]),
-          h.p([h.Class('provenance')], [
-            `Rev. ${focus.revision}`,
-            ' · ',
-            (() => {
-              const turn = c.messages.find((m) => m.id === focus.turnId)
-              return turn ? `aus der Antwort von ${time(turn.at)}` : 'aus einer früheren Antwort'
-            })(),
-            ...(Object.keys(c.assumptions).length || Object.keys(c.cards).length ? [' · ', h.span([h.Class('human')], ['enthält Ihre Änderungen'])] : []),
-          ]),
-          h.div([h.Class('pane-body')], [render(focus.rep.root, focus)]),
-        ])
+      ? (secondary ? h.div([h.Class('panes')], [paneView(focus, 'primary'), paneView(secondary, 'secondary')]) : paneView(focus, 'primary'))
       : h.div([h.Class('board-empty')], [
           ...(streaming && pendingPatch ? [h.div([h.Class('skeleton')], [h.span([], []), h.span([], []), h.span([], [])]), h.p([], ['Darstellung entsteht …'])] : [
             h.p([h.Class('board-empty-title')], ['Das Blackboard ist leer']),
@@ -586,6 +612,7 @@ const diagram = (h: H, node: Extract<Node, { type: 'diagram' }>, paneId: string,
         h.OnClick(Message.ToggledObject({ paneId, objectId: n.id })),
         h.OnKeyDownPreventDefault((key) => (key === 'Enter' || key === ' ' ? Option.some(Message.ToggledObject({ paneId, objectId: n.id })) : Option.none())),
       ], [
+        h.title([], [`${n.label}${n.detail ? ` — ${n.detail}` : ''}`]),
         h.rect([h.Width(String(nodeW)), h.Height(String(nodeH)), h.Rx('9')], []),
         h.text([h.X('12'), h.Y('19'), h.Class('dn-label')], [n.label]),
         ...(n.detail ? [h.text([h.X('12'), h.Y('35'), h.Class('dn-detail')], [n.detail.length > 19 ? n.detail.slice(0, 18) + '…' : n.detail])] : []),
@@ -593,3 +620,13 @@ const diagram = (h: H, node: Extract<Node, { type: 'diagram' }>, paneId: string,
     }),
   ])])
 }
+
+const pinIcon = (h: H): Html =>
+  h.svg([h.Class('pin-icon'), h.ViewBox('0 0 12 12'), h.AriaHidden(true)], [
+    h.path([h.D('M4 1.5h4l-.6 3.2L9.5 7H6.6v3.5L6 11l-.6-.5V7H2.5l2.1-2.3z')], []),
+  ])
+const splitIcon = (h: H): Html =>
+  h.svg([h.Class('split-icon'), h.ViewBox('0 0 14 14'), h.AriaHidden(true)], [
+    h.rect([h.X('1.5'), h.Y('2.5'), h.Width('11'), h.Height('9'), h.Rx('2')], []),
+    h.path([h.D('M7 2.5v9')], []),
+  ])

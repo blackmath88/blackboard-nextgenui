@@ -18,7 +18,8 @@ import { Command } from 'foldkit'
 import { Effect, Schema } from 'effect'
 import type { Return } from 'foldkit/update'
 
-import { reviewArtifactMessage } from './artifact.js'
+import { postArtifactState, reviewArtifactMessage } from './artifact.js'
+import { promoteBlock } from './derive.js'
 import { buildPacket, findObject, refFor } from './context.js'
 import { respond } from './director.js'
 import { Message, type ExplicitAction } from './message.js'
@@ -42,6 +43,15 @@ export const SaveStudio = Command.define('SaveStudio', {
     },
     catch: (cause) => String(cause),
   }).pipe(Effect.catch((cause) => Effect.succeed(Message.FailedSave({ message: String(cause) })))),
+})
+
+export const SendArtifactState = Command.define('SendArtifactState', {
+  args: { artifactId: Schema.String, state: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Number, Schema.Boolean])) },
+  messages: [Message.SentArtifactState],
+  execute: ({ artifactId, state }) => Effect.sync(() => {
+    try { postArtifactState(artifactId, state) } catch { /* the frame may be gone */ }
+    return Message.SentArtifactState()
+  }),
 })
 
 export const encodeStudio = (model: Model): string =>
@@ -352,6 +362,16 @@ export const makeStudioUpdate = (deps: StudioDeps) => (model: Model, message: Me
         : p),
     }))),
     ToggledLog: () => ({ model: { ...model, showLog: !model.showLog } }),
+    ToggledSplit: () => save({ ...model, split: !model.split, boardWidth: !model.split ? Math.max(model.boardWidth, 900) : model.boardWidth }),
+    SentArtifactState: () => ({ model }),
+    PromotedBlock: ({ messageId, block }) => {
+      const entry = c.messages.find((m) => m.id === messageId && m.role === 'assistant')
+      const rep = entry ? promoteBlock(entry, block, entry.at) : undefined
+      if (!rep) return { model }
+      const [withLog, , sequence] = record(model, c, at, { type: 'promote', paneId: rep.id, objectIds: [], payload: { message: messageId, block }, explicit: false })
+      const next = applyPatch(withLog, [rep], rep.id, messageId)
+      return save({ ...updateActive({ ...model, narrowView: 'board' }, () => next), sequence })
+    },
 
     // ------------------------------------------------------------ layout
     StartedResize: () => ({ model: { ...model, resizing: true } }),
@@ -368,7 +388,16 @@ export const makeStudioUpdate = (deps: StudioDeps) => (model: Model, message: Me
       if (!node || node.node.type !== 'artifact') return { model: { ...model, bridgeLog: log(false, 'unbekanntes Artefakt') } }
       const verdict = reviewArtifactMessage(raw, allowed)
       if (verdict._tag === 'Rejected') return { model: { ...model, bridgeLog: log(false, verdict.reason) } }
-      if (verdict._tag === 'Initialized') return { model: { ...model, bridgeLog: log(true, 'initialisiert') } }
+      if (verdict._tag === 'Resized') return { model: { ...model, artifactHeights: { ...model.artifactHeights, [`${paneId}/${artifactId}`]: verdict.height } } }
+      if (verdict._tag === 'Initialized') {
+        // Continuity: hand the artifact the last state the human accepted from it.
+        const last = [...c.interactions].reverse().find((i) => i.type === 'artifact-event' && i.objectIds[0] === artifactId && i.payload['event'] !== 'sandbox.probe')
+        const state = last ? Object.fromEntries(Object.entries(last.payload).filter(([k]) => k !== 'event')) : null
+        return {
+          model: { ...model, bridgeLog: log(true, state ? 'initialisiert · letzter Zustand übergeben' : 'initialisiert') },
+          ...(state ? { commands: [SendArtifactState({ artifactId, state })] } : {}),
+        }
+      }
       if (verdict.name === 'sandbox.probe') {
         const sealed = Object.values(verdict.payload).every((v) => v === true)
         return { model: { ...model, bridgeLog: log(true, sealed ? 'Isolationsprüfung: Speicher, DOM und Netzwerk gesperrt' : `Isolationsprüfung unvollständig: ${JSON.stringify(verdict.payload)}`) } }

@@ -20,7 +20,7 @@ export type ContextRef = typeof ContextRef.Type
 
 export const InteractionType = Schema.Literals([
   'select', 'ask-why', 'compare', 'investigate', 'inspect-source', 'edit-assumption', 'move-card',
-  'pin', 'unpin', 'artifact-event', 'reset-assumption', 'close-pane',
+  'pin', 'unpin', 'artifact-event', 'reset-assumption', 'close-pane', 'promote',
 ])
 export type InteractionType = typeof InteractionType.Type
 
@@ -125,6 +125,9 @@ export const Model = Schema.Struct({
   resizing: Schema.Boolean,
   dragCard: Schema.NullOr(Schema.String),
   showLog: Schema.Boolean,
+  split: Schema.Boolean,
+  /** Heights artifacts reported for themselves, bounded by the host. Not persisted. */
+  artifactHeights: Schema.Record(Schema.String, Schema.Number),
   /** Artifact bridge decisions, newest first. Not persisted. */
   bridgeLog: Schema.Array(BridgeEntry),
 })
@@ -170,6 +173,8 @@ export const initialModel = (at: string): Model => ({
   resizing: false,
   dragCard: null,
   showLog: false,
+  split: false,
+  artifactHeights: {},
   bridgeLog: [],
 })
 
