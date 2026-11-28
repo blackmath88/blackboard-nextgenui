@@ -236,7 +236,7 @@ export const makeStudioUpdate = (deps: StudioDeps) => (model: Model, message: Me
     DismissedNotice: () => ({ model: { ...model, notice: null } }),
 
     // ------------------------------------------------------------ conversation
-    ChangedDraft: ({ value }) => ({ model: updateActive(model, (x) => ({ ...x, draft: value.slice(0, 2000) })) }),
+    ChangedDraft: ({ value }) => save(updateActive(model, (x) => ({ ...x, draft: value.slice(0, 2000) }))),
     PressedComposerKey: ({ key, shift }) => {
       if (key !== 'Enter' || shift) return { model }
       const text = c.draft.trim()
@@ -365,6 +365,18 @@ export const makeStudioUpdate = (deps: StudioDeps) => (model: Model, message: Me
     ToggledSplit: () => save(model.split
       ? { ...model, split: false, boardWidth: model.widthBeforeSplit ?? model.boardWidth, widthBeforeSplit: null }
       : { ...model, split: true, boardWidth: Math.max(model.boardWidth, 900), widthBeforeSplit: model.boardWidth }),
+    StartedPaneDrag: ({ paneId }) => ({ model: { ...model, dragPane: paneId } }),
+    DroppedPaneBefore: ({ paneId }) => {
+      const moving = model.dragPane
+      if (!moving || moving === paneId) return { model: { ...model, dragPane: null } }
+      return save({ ...updateActive({ ...model, dragPane: null }, (x) => ({ ...x, panes: reorder(x.panes, moving, paneId) })) })
+    },
+    MovedPaneBy: ({ paneId, delta }) => {
+      const index = c.panes.findIndex((p) => p.rep.id === paneId)
+      const target = c.panes[index + (delta < 0 ? -1 : 2)]
+      if (index < 0) return { model }
+      return save(updateActive(model, (x) => ({ ...x, panes: target ? reorder(x.panes, paneId, target.rep.id) : delta > 0 ? [...x.panes.filter((p) => p.rep.id !== paneId), x.panes[index]!] : x.panes })))
+    },
     DismissedRestore: () => ({ model: { ...model, restoreDismissed: true } }),
     SentArtifactState: () => ({ model }),
     PromotedBlock: ({ messageId, block }) => {
@@ -417,6 +429,15 @@ export const makeStudioUpdate = (deps: StudioDeps) => (model: Model, message: Me
     Saved: () => (model.saveFailed ? { model: { ...model, saveFailed: false } } : { model }),
     FailedSave: () => ({ model: { ...model, saveFailed: true } }),
   })
+}
+
+/** Move pane `moving` to sit just before pane `before`. Pure presentation order. */
+export const reorder = (panes: ReadonlyArray<Pane>, moving: string, before: string): Pane[] => {
+  const item = panes.find((p) => p.rep.id === moving)
+  if (!item) return [...panes]
+  const rest = panes.filter((p) => p.rep.id !== moving)
+  const at = rest.findIndex((p) => p.rep.id === before)
+  return at < 0 ? [...rest, item] : [...rest.slice(0, at), item, ...rest.slice(at)]
 }
 
 const clampWidth = (width: number) => Math.round(Math.min(1100, Math.max(380, width)))

@@ -517,6 +517,13 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
           h.Type('button'), h.Role('tab'), h.AriaSelected(p === focus),
           h.Class(`tab${p === focus ? ' on' : ''}${p === secondary ? ' beside' : ''}${p.pinned ? ' pinned' : ''}${p === overviewPane ? ' overview' : ''}${pendingPatch?.upsert.some((r) => r.id === p.rep.id) ? ' updating' : ''}`),
           h.OnClick(Message.FocusedPane({ paneId: p.rep.id })),
+          ...(p === overviewPane ? [] : [
+            h.Draggable(true), h.OnDragStart(Message.StartedPaneDrag({ paneId: p.rep.id })),
+            h.AllowDrop(), h.OnDrop(Message.DroppedPaneBefore({ paneId: p.rep.id })),
+            h.Title('Ziehen zum Umordnen · Alt+←/→'),
+            h.OnKeyDownPreventDefault((key, mods) => mods.altKey && (key === 'ArrowLeft' || key === 'ArrowRight')
+              ? Option.some(Message.MovedPaneBy({ paneId: p.rep.id, delta: key === 'ArrowLeft' ? -1 : 1 })) : Option.none()),
+          ]),
         ], [
           ...(p.pinned ? [pinIcon(h)] : []),
           p.rep.title,
@@ -613,18 +620,18 @@ const diagram = (h: H, node: Extract<Node, { type: 'diagram' }>, paneId: string,
     ...node.nodes.map((n) => {
       const p = pos.get(n.id)!
       const on = selected.has(n.id)
+      const shown = n.detail ? (n.detail.length > 19 ? n.detail.slice(0, 18) + '…' : n.detail) : ''
       const near = hasSelection && node.edges.some((e) => (e.from === n.id && selected.has(e.to)) || (e.to === n.id && selected.has(e.from)))
       return h.g([
         h.Class(`dnode${on ? ' selected' : ''}${near ? ' near' : ''}${hasSelection && !on && !near ? ' dim' : ''}${n.tone ? ` tone-${n.tone}` : ''}`),
         h.Transform(`translate(${p.x},${p.y})`),
-        h.Tabindex(0), h.Role('button'), h.AriaLabel(`${n.label}${n.detail ? `: ${n.detail}` : ''}`), h.AriaPressed(String(on)),
+        h.Tabindex(0), h.Role('button'), ...(n.detail ? [h.AriaDescription(n.detail)] : []), h.AriaPressed(String(on)),
         h.OnClick(Message.ToggledObject({ paneId, objectId: n.id })),
         h.OnKeyDownPreventDefault((key) => (key === 'Enter' || key === ' ' ? Option.some(Message.ToggledObject({ paneId, objectId: n.id })) : Option.none())),
       ], [
-        h.title([], [`${n.label}${n.detail ? ` — ${n.detail}` : ''}`]),
         h.rect([h.Width(String(nodeW)), h.Height(String(nodeH)), h.Rx('9')], []),
         h.text([h.X('12'), h.Y('19'), h.Class('dn-label')], [n.label]),
-        ...(n.detail ? [h.text([h.X('12'), h.Y('35'), h.Class('dn-detail')], [n.detail.length > 19 ? n.detail.slice(0, 18) + '…' : n.detail])] : []),
+        ...(shown ? [h.text([h.X('12'), h.Y('35'), h.Class('dn-detail')], [shown])] : []),
       ])
     }),
   ])])

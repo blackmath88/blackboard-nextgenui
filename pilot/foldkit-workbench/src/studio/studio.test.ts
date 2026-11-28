@@ -299,3 +299,18 @@ describe('replayed model-format replies', () => {
     expect(c.messages.at(-1)!.refused).toBeDefined()
   })
 })
+
+describe('arranging and drafts', () => {
+  it('reorders panes without touching their content and persists the draft', async () => {
+    const { reorder } = await import('./update.js')
+    let m = start(starters[0]!.prompt)
+    expect(active(m).panes.map((p) => p.rep.id)).toEqual(['arch.map', 'arch.options'])
+    m = run(m, Message.MovedPaneBy({ paneId: 'arch.options', delta: -1 }))
+    expect(active(m).panes.map((p) => p.rep.id)).toEqual(['arch.options', 'arch.map'])
+    m = run(m, Message.StartedPaneDrag({ paneId: 'arch.map' }), Message.DroppedPaneBefore({ paneId: 'arch.options' }))
+    expect(active(m).panes.map((p) => p.rep.id)).toEqual(['arch.map', 'arch.options'])
+    expect(reorder(active(m).panes, 'nope', 'arch.map').length).toBe(2)
+    m = run(m, Message.ChangedDraft({ value: 'halb geschrieben' }))
+    expect(active(restoreStudio(encodeStudio(m), 'x').model).draft).toBe('halb geschrieben')
+  })
+})

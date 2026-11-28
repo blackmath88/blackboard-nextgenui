@@ -1,6 +1,6 @@
 {
   "base": "http://127.0.0.1:4330/studio.html",
-  "startedAt": "2026-11-28T09:04:48.998Z",
+  "startedAt": "2026-11-28T09:09:34.302Z",
   "checks": [
     {
       "name": "architecture: options pane composed",
@@ -233,7 +233,8 @@
     "architecture": [],
     "budget": [],
     "research": [],
-    "learning": []
+    "learning": [],
+    "dark-architecture": []
   },
   "overflow": {
     "split": 1440,
@@ -253,10 +254,12 @@
       "Connecting to 'https://example.org/' violates the following Content Security Policy directive: \"connect-src 'none'\". The action has been blocked.",
       "Fetch API cannot load https://example.org/. Refused to connect because it violates the document's Content Security Policy.",
       "Connecting to 'https://example.org/' violates the following Content Security Policy directive: \"connect-src 'none'\". The action has been blocked.",
+      "Fetch API cannot load https://example.org/. Refused to connect because it violates the document's Content Security Policy.",
+      "Connecting to 'https://example.org/' violates the following Content Security Policy directive: \"connect-src 'none'\". The action has been blocked.",
       "Fetch API cannot load https://example.org/. Refused to connect because it violates the document's Content Security Policy."
     ]
   },
-  "finishedAt": "2026-11-28T09:05:26.248Z",
+  "finishedAt": "2026-11-28T09:10:12.808Z",
   "passed": 45,
   "failed": 0
 }

@@ -126,6 +126,7 @@ export const Model = Schema.Struct({
   saveFailed: Schema.Boolean,
   resizing: Schema.Boolean,
   dragCard: Schema.NullOr(Schema.String),
+  dragPane: Schema.NullOr(Schema.String),
   showLog: Schema.Boolean,
   split: Schema.Boolean,
   /** Board width before split view widened it, restored when split closes. */
@@ -177,6 +178,7 @@ export const initialModel = (at: string): Model => ({
   saveFailed: false,
   resizing: false,
   dragCard: null,
+  dragPane: null,
   showLog: false,
   split: false,
   widthBeforeSplit: null,

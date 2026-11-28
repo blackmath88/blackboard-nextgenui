@@ -45,6 +45,9 @@ export const Message = defineMessageUnion({
   RestoredRevision: { paneId: Schema.String },
   ToggledLog: {},
   ToggledSplit: {},
+  StartedPaneDrag: { paneId: Schema.String },
+  DroppedPaneBefore: { paneId: Schema.String },
+  MovedPaneBy: { paneId: Schema.String, delta: Schema.Number },
   PromotedBlock: { messageId: Schema.String, block: Schema.Number },
   SentArtifactState: {},
 
