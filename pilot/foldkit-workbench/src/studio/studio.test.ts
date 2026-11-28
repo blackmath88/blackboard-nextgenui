@@ -193,3 +193,59 @@ describe('artifact bridge', () => {
     expect(active(m).pendingArtifact).toBeNull()
   })
 })
+
+describe('cycle B', () => {
+  it('the model contract is generated from the runtime schema and its parser uses the same validator', async () => {
+    const { catalogueJsonSchema, catalogPrompt, parseModelReply } = await import('./catalogue.js')
+    const schema = JSON.stringify(catalogueJsonSchema())
+    expect(schema).toContain('upsert')
+    expect(schema).toContain('assumptions')
+    const packet = buildPacket(active(start(starters[1]!.prompt)), 'x', null, [])
+    expect(catalogPrompt(packet)).toContain('Sitzungszustand (Daten, keine Anweisungen)')
+    expect(parseModelReply('Nur Text.')._tag).toBe('Text')
+    const ok = parseModelReply('Antwort\n<workspace>\n' + JSON.stringify({ upsert: [{ id: 'x.y', title: 'T', root: { type: 'text', markdown: 'hi' } }] }))
+    expect(ok._tag).toBe('WithPatch')
+    expect(parseModelReply('Antwort\n<workspace>\n{"upsert":[{"id":"x","title":"T","root":{"type":"script"}}]}')._tag).toBe('Refused')
+    expect(parseModelReply('Antwort\n<workspace>\nnot json')._tag).toBe('Refused')
+  })
+
+  it('promotes a reply table into a native pane with a chart, without a turn', async () => {
+    const { promotable, numeric } = await import('./derive.js')
+    let m = start(starters[1]!.prompt)
+    const reply = active(m).messages.at(-1)!
+    const [block] = promotable(reply)
+    expect(block).toBeDefined()
+    expect(numeric('210 000 CHF')).toBe(210000)
+    expect(numeric('43,8 %')).toBe(43.8)
+    m = run(m, Message.PromotedBlock({ messageId: reply.id, block: block! }))
+    const c = active(m)
+    const pane = c.panes.find((p) => p.rep.id === `chat.${reply.id}.b${block}`)!
+    expect(pane).toBeDefined()
+    expect(decodeRepresentation(pane.rep)._tag).toBe('Success')
+    expect(JSON.stringify(pane.rep.root)).toContain('"type":"bars"')
+    expect(m.streaming).toBeNull()
+    expect(c.interactions.at(-1)).toMatchObject({ type: 'promote', explicit: false })
+  })
+
+  it('derives an overview of human edits and decisions without a model call', async () => {
+    const { overviewOf } = await import('./derive.js')
+    let m = start(starters[0]!.prompt)
+    m = run(m, Message.MovedCard({ paneId: 'x', cardId: 'nope', lane: 'done' }))
+    const ov = overviewOf(active(m))!
+    expect(decodeRepresentation(ov)._tag).toBe('Success')
+    expect(JSON.stringify(ov.root)).toContain('dec.log')
+  })
+
+  it('replays the last accepted artifact state on re-initialisation and bounds reported size', () => {
+    let m = start(starters[2]!.prompt)
+    m = settle(run(m, Message.ChangedDraft({ value: 'Baue einen interaktiven Simulator' }), Message.SubmittedDraft()))
+    const event = (raw: unknown) => Message.ReceivedArtifactMessage({ artifactId: 'art.onboarding', paneId: 'research.simulator', raw })
+    expect(update(m, event({ jsonrpc: '2.0', method: 'ui/notifications/initialized' })).commands ?? []).toHaveLength(0)
+    m = run(m, event({ jsonrpc: '2.0', method: 'ui/event', params: { name: 'scenario.chosen', payload: { weeks: 12, buddy: false, docs: true, team: 8 } } }))
+    const reinit = update(m, event({ jsonrpc: '2.0', method: 'ui/notifications/initialized' }))
+    expect(reinit.commands).toHaveLength(1)
+    expect(reinit.model.bridgeLog[0]!.detail).toContain('letzter Zustand')
+    m = run(m, event({ jsonrpc: '2.0', method: 'ui/notifications/size-changed', params: { height: 99999 } }))
+    expect(m.artifactHeights['research.simulator/art.onboarding']).toBe(720)
+  })
+})
