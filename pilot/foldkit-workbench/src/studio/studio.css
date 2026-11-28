@@ -587,11 +587,12 @@ button:disabled { cursor: default; opacity: 0.45; }
 .tray-row { flex-wrap: nowrap; }
 .tray-row .act { white-space: nowrap; }
 /* calmer composition: fewer boxes */
-.n-grid > .n-metric { border: 0; border-left: 1px solid var(--line); border-radius: 0; background: transparent; padding: 2px 14px; }
-.n-grid > .n-metric:first-child { border-left: 0; padding-left: 0; }
-.n-grid > .n-metric.selected { box-shadow: none; background: var(--accent-soft); border-radius: 8px; border-left-color: transparent; }
+.n-grid > .n-metric { border: 0; border-radius: 8px; background: transparent; padding: 4px 8px; margin-left: -8px; }
+.n-grid > .n-metric:hover { background: var(--hover); }
+.n-grid > .n-metric.selected { box-shadow: none; background: var(--accent-soft); }
 .n-callout { border: 0; background: var(--rail); }
 .n-bars, .n-assumptions { border-color: transparent; background: transparent; padding-left: 0; padding-right: 0; }
 .n-bars figcaption { font-weight: 600; color: var(--fg-2); }
 .log li.rejected { color: var(--fg-2); }
 .log li.rejected::first-letter { color: var(--critical); }
+.origin { display: inline-block; margin-bottom: 6px; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }

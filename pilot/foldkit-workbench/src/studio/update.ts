@@ -144,7 +144,7 @@ const beginTurn = (model: Model, text: string, interaction: Interaction | null, 
   }
   const assistant: ChatEntry = {
     id: `m-${model.sequence + 1}`, role: 'assistant', markdown: turn.markdown, at, context: [],
-    touched: patch?.map((r) => r.id) ?? [], ...(refused ? { refused } : {}),
+    touched: patch?.map((r) => r.id) ?? [], ...(refused ? { refused } : {}), ...(turn.origin ? { origin: turn.origin } : {}),
   }
   return {
     ...updateActive(model, () => withUser),

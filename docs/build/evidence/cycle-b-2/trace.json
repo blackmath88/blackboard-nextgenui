@@ -1,5 +1,203 @@
 [
   {
+    "title": "Sitzungsspeicher",
+    "scenario": "open",
+    "interactions": [
+      {
+        "type": "select",
+        "paneId": "db.decision",
+        "objectIds": [
+          "db.postgres"
+        ],
+        "payload": {
+          "selected": true
+        },
+        "explicit": false,
+        "id": "i-67",
+        "at": "2026-11-28T09:05:21.588Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "db.decision",
+        "objectIds": [
+          "dw.multi"
+        ],
+        "payload": {
+          "from": 1,
+          "to": 5
+        },
+        "explicit": false,
+        "id": "i-68",
+        "at": "2026-11-28T09:05:21.798Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "db.decision",
+        "objectIds": [
+          "dw.ops"
+        ],
+        "payload": {
+          "from": 3,
+          "to": 1
+        },
+        "explicit": false,
+        "id": "i-69",
+        "at": "2026-11-28T09:05:21.801Z",
+        "paneRevision": 1
+      },
+      {
+        "type": "edit-assumption",
+        "paneId": "db.decision",
+        "objectIds": [
+          "dw.multi",
+          "dw.ops"
+        ],
+        "payload": {
+          "count": 2
+        },
+        "explicit": true,
+        "id": "i-70",
+        "at": "2026-11-28T09:05:22.028Z",
+        "paneRevision": 1
+      }
+    ],
+    "turns": [
+      {
+        "text": "Sollen wir für den Sitzungsspeicher PostgreSQL oder SQLite verwenden?",
+        "packet": {
+          "request": "Sollen wir für den Sitzungsspeicher PostgreSQL oder SQLite verwenden?",
+          "interaction": null,
+          "selection": [],
+          "humanEdits": [],
+          "movedCards": [],
+          "values": {},
+          "workspace": [],
+          "focus": null,
+          "recent": []
+        }
+      },
+      {
+        "text": "Was bedeuten meine Änderungen an „Gleichzeitige Nutzer“ und „Betriebsaufwand“?",
+        "packet": {
+          "request": "Was bedeuten meine Änderungen an „Gleichzeitige Nutzer“ und „Betriebsaufwand“?",
+          "interaction": {
+            "type": "edit-assumption",
+            "pane": "db.decision",
+            "paneRevision": 1,
+            "payload": {
+              "count": 2
+            }
+          },
+          "selection": [],
+          "humanEdits": [
+            {
+              "id": "dw.multi",
+              "label": "Gleichzeitige Nutzer",
+              "proposed": 1,
+              "value": 5
+            },
+            {
+              "id": "dw.ops",
+              "label": "Betriebsaufwand",
+              "proposed": 3,
+              "value": 1
+            }
+          ],
+          "movedCards": [],
+          "values": {
+            "dw.ops": 1,
+            "dw.multi": 5,
+            "dw.backup": 2,
+            "dw.query": 1
+          },
+          "workspace": [
+            {
+              "id": "db.decision",
+              "title": "Sitzungsspeicher",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "db.decision",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Sollen wir für den Sitzungsspeicher PostgreSQL oder SQLite verwenden?"
+            },
+            {
+              "role": "assistant",
+              "text": "Für **einen Nutzer auf einem Rechner** spricht fast alles für [[db.sqlite]]: keine laufende Instanz, Datei-Backup, Transaktionen sind trotzdem da.\n\n[[db.postgres]] lohnt sich erst, wenn mehrere Personen gleichzeitig dieselbe Sitzung bearbeiten oder der Speicher auf einen Server …"
+            }
+          ]
+        }
+      },
+      {
+        "text": "Teste bitte eine ungültige Darstellung.",
+        "packet": {
+          "request": "Teste bitte eine ungültige Darstellung.",
+          "interaction": null,
+          "selection": [],
+          "humanEdits": [
+            {
+              "id": "dw.multi",
+              "label": "Gleichzeitige Nutzer",
+              "proposed": 1,
+              "value": 5
+            },
+            {
+              "id": "dw.ops",
+              "label": "Betriebsaufwand",
+              "proposed": 3,
+              "value": 1
+            }
+          ],
+          "movedCards": [],
+          "values": {
+            "dw.ops": 1,
+            "dw.multi": 5,
+            "dw.backup": 2,
+            "dw.query": 1
+          },
+          "workspace": [
+            {
+              "id": "db.decision",
+              "title": "Sitzungsspeicher",
+              "revision": 1,
+              "pinned": false
+            }
+          ],
+          "focus": {
+            "id": "db.decision",
+            "revision": 1
+          },
+          "recent": [
+            {
+              "role": "user",
+              "text": "Sollen wir für den Sitzungsspeicher PostgreSQL oder SQLite verwenden?"
+            },
+            {
+              "role": "assistant",
+              "text": "Für **einen Nutzer auf einem Rechner** spricht fast alles für [[db.sqlite]]: keine laufende Instanz, Datei-Backup, Transaktionen sind trotzdem da.\n\n[[db.postgres]] lohnt sich erst, wenn mehrere Personen gleichzeitig dieselbe Sitzung bearbeiten oder der Speicher auf einen Server …"
+            },
+            {
+              "role": "user",
+              "text": "Was bedeuten meine Änderungen an „Gleichzeitige Nutzer“ und „Betriebsaufwand“?"
+            },
+            {
+              "role": "assistant",
+              "text": "Sie gewichten [[dw.multi]] mit **5** statt 1, [[dw.ops]] mit **1** statt 3.\n\nDamit **kippt die Empfehlung**: [[db.postgres]] liegt jetzt mit 38 von 45 Punkten vorn, vor [[db.sqlite]] (28). Mit meiner Gewichtung lag [[db.sqlite]] vorn.\n\nDas ist eine echte Wertentscheidung, keine …"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
     "title": "Lernplan Effect & Foldkit",
     "scenario": "learning",
     "interactions": [
@@ -15,7 +213,7 @@
         },
         "explicit": false,
         "id": "i-56",
-        "at": "2026-11-28T09:02:50.754Z",
+        "at": "2026-11-28T09:05:17.800Z",
         "paneRevision": 1
       },
       {
@@ -29,7 +227,7 @@
         },
         "explicit": true,
         "id": "i-57",
-        "at": "2026-11-28T09:02:51.029Z",
+        "at": "2026-11-28T09:05:18.078Z",
         "paneRevision": 1
       },
       {
@@ -44,7 +242,7 @@
         },
         "explicit": false,
         "id": "i-60",
-        "at": "2026-11-28T09:02:51.747Z",
+        "at": "2026-11-28T09:05:18.795Z",
         "paneRevision": 1
       },
       {
@@ -58,7 +256,7 @@
         },
         "explicit": true,
         "id": "i-61",
-        "at": "2026-11-28T09:02:52.031Z",
+        "at": "2026-11-28T09:05:19.080Z",
         "paneRevision": 1
       }
     ],
@@ -208,7 +406,7 @@
         },
         "explicit": false,
         "id": "i-43",
-        "at": "2026-11-28T09:02:44.716Z",
+        "at": "2026-11-28T09:05:11.737Z",
         "paneRevision": 1
       },
       {
@@ -222,7 +420,7 @@
         },
         "explicit": true,
         "id": "i-44",
-        "at": "2026-11-28T09:02:45.000Z",
+        "at": "2026-11-28T09:05:12.017Z",
         "paneRevision": 1
       },
       {
@@ -240,7 +438,7 @@
         },
         "explicit": false,
         "id": "i-49",
-        "at": "2026-11-28T09:02:46.602Z",
+        "at": "2026-11-28T09:05:13.630Z",
         "paneRevision": 1
       },
       {
@@ -258,7 +456,7 @@
         },
         "explicit": true,
         "id": "i-50",
-        "at": "2026-11-28T09:02:47.263Z",
+        "at": "2026-11-28T09:05:14.310Z",
         "paneRevision": 1
       }
     ],
@@ -468,7 +666,7 @@
         },
         "explicit": false,
         "id": "i-32",
-        "at": "2026-11-28T09:02:37.724Z",
+        "at": "2026-11-28T09:05:04.774Z",
         "paneRevision": 1
       },
       {
@@ -482,7 +680,7 @@
         },
         "explicit": true,
         "id": "i-33",
-        "at": "2026-11-28T09:02:38.113Z",
+        "at": "2026-11-28T09:05:05.159Z",
         "paneRevision": 1
       },
       {
@@ -492,7 +690,7 @@
         "payload": {},
         "explicit": false,
         "id": "i-38",
-        "at": "2026-11-28T09:02:40.333Z",
+        "at": "2026-11-28T09:05:07.395Z",
         "paneRevision": 1
       },
       {
@@ -505,7 +703,7 @@
         },
         "explicit": false,
         "id": "i-39",
-        "at": "2026-11-28T09:02:40.463Z",
+        "at": "2026-11-28T09:05:07.527Z",
         "paneRevision": 0
       }
     ],
@@ -656,7 +854,7 @@
         },
         "explicit": false,
         "id": "i-3",
-        "at": "2026-11-28T09:02:27.580Z",
+        "at": "2026-11-28T09:04:54.545Z",
         "paneRevision": 1
       },
       {
@@ -670,7 +868,7 @@
         },
         "explicit": false,
         "id": "i-4",
-        "at": "2026-11-28T09:02:27.631Z",
+        "at": "2026-11-28T09:04:54.578Z",
         "paneRevision": 1
       },
       {
@@ -685,7 +883,7 @@
         },
         "explicit": true,
         "id": "i-5",
-        "at": "2026-11-28T09:02:27.814Z",
+        "at": "2026-11-28T09:04:54.763Z",
         "paneRevision": 1
       },
       {
@@ -699,7 +897,7 @@
         },
         "explicit": false,
         "id": "i-8",
-        "at": "2026-11-28T09:02:29.323Z",
+        "at": "2026-11-28T09:04:56.387Z",
         "paneRevision": 1
       },
       {
@@ -713,7 +911,7 @@
         },
         "explicit": true,
         "id": "i-9",
-        "at": "2026-11-28T09:02:29.600Z",
+        "at": "2026-11-28T09:04:56.647Z",
         "paneRevision": 1
       },
       {
@@ -727,7 +925,7 @@
         },
         "explicit": false,
         "id": "i-12",
-        "at": "2026-11-28T09:02:30.881Z",
+        "at": "2026-11-28T09:04:57.931Z",
         "paneRevision": 1
       },
       {
@@ -741,7 +939,7 @@
         },
         "explicit": true,
         "id": "i-13",
-        "at": "2026-11-28T09:02:31.168Z",
+        "at": "2026-11-28T09:04:58.215Z",
         "paneRevision": 1
       },
       {
@@ -756,7 +954,7 @@
         },
         "explicit": false,
         "id": "i-16",
-        "at": "2026-11-28T09:02:32.414Z",
+        "at": "2026-11-28T09:04:59.440Z",
         "paneRevision": 1
       },
       {
@@ -771,7 +969,7 @@
         },
         "explicit": false,
         "id": "i-17",
-        "at": "2026-11-28T09:02:32.427Z",
+        "at": "2026-11-28T09:04:59.454Z",
         "paneRevision": 1
       },
       {
@@ -786,7 +984,7 @@
         },
         "explicit": false,
         "id": "i-18",
-        "at": "2026-11-28T09:02:32.436Z",
+        "at": "2026-11-28T09:04:59.459Z",
         "paneRevision": 1
       },
       {
@@ -802,7 +1000,7 @@
         },
         "explicit": true,
         "id": "i-19",
-        "at": "2026-11-28T09:02:32.812Z",
+        "at": "2026-11-28T09:04:59.844Z",
         "paneRevision": 1
       },
       {
@@ -817,7 +1015,7 @@
         },
         "explicit": false,
         "id": "i-24",
-        "at": "2026-11-28T09:02:34.615Z",
+        "at": "2026-11-28T09:05:01.643Z",
         "paneRevision": 1
       },
       {
@@ -831,7 +1029,7 @@
         },
         "explicit": true,
         "id": "i-25",
-        "at": "2026-11-28T09:02:34.900Z",
+        "at": "2026-11-28T09:05:01.928Z",
         "paneRevision": 1
       },
       {
@@ -841,7 +1039,7 @@
         "payload": {},
         "explicit": false,
         "id": "i-28",
-        "at": "2026-11-28T09:02:35.566Z",
+        "at": "2026-11-28T09:05:02.598Z",
         "paneRevision": 2
       }
     ],

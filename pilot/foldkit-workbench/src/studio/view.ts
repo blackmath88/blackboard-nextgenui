@@ -136,6 +136,7 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
         ...(entry.packet ? [h.button([h.Type('button'), h.Class('packet-link'), h.OnClick(Message.InspectedPacket({ messageId: entry.id }))], ['Was die KI sieht'])] : []),
       ])
     : h.li([h.Class(`msg assistant${live ? ' live' : ''}`)], [
+        ...(entry.origin === 'replay' ? [h.span([h.Class('origin'), h.Title('Antwort im Modellformat, während der Entwicklung verfasst — kein Live-Modell')], ['Wiedergabe · Modellformat'])] : []),
         prose(live ? streamSafe(entry.markdown) : entry.markdown),
         ...(entry.refused ? [h.p([h.Class('refused'), h.Role('status')], [entry.refused])] : []),
         ...(!live ? promotable(entry).map((index) => {
@@ -465,6 +466,8 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
   }
 
   // ------------------------------------------------------------ board
+  const artifactIds = new Set(c.panes.flatMap((p) => [...objectIndex(p.rep.root).entries()].filter(([, v]) => v.kind === 'Artefakt').map(([id]) => id)))
+  const bridgeHere = model.bridgeLog.filter((b) => artifactIds.has(b.artifactId) || (b.artifactId === '—' && artifactIds.size > 0))
   const overview = overviewOf(c)
   const overviewPane: Pane | undefined = overview ? { rep: overview, revision: 0, turnId: '', pinned: false, history: [] } : undefined
   const focus = c.focusPaneId === OverviewId && overviewPane ? overviewPane : (c.panes.find((p) => p.rep.id === c.focusPaneId) ?? c.panes[0])
@@ -543,9 +546,9 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
         ' ', i.objectIds.map((id) => labelOf(c, id)?.label ?? id).join(', '),
         h.span([h.Class('faint')], [` · ${i.paneId || '—'} r${i.paneRevision} · ${time(i.at)}${i.explicit ? ' · Turn' : ''}`]),
       ]))),
-      ...(model.bridgeLog.length ? [
+      ...(bridgeHere.length ? [
         h.h3([], ['Artefakt-Brücke']),
-        h.ol([], model.bridgeLog.slice(0, 6).map((b) => h.li([h.Class(b.accepted ? '' : 'rejected')], [b.accepted ? '✓ ' : '✕ ', b.detail, h.span([h.Class('faint')], [` · ${b.artifactId}`])]))),
+        h.ol([], bridgeHere.slice(0, 6).map((b) => h.li([h.Class(b.accepted ? '' : 'rejected')], [b.accepted ? '✓ ' : '✕ ', b.detail, h.span([h.Class('faint')], [` · ${b.artifactId}`])]))),
       ] : []),
     ])] : []),
   ])

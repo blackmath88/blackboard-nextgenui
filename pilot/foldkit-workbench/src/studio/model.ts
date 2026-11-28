@@ -50,6 +50,8 @@ export const ChatEntry = Schema.Struct({
   touched: Schema.Array(Schema.String),
   /** The workspace patch failed validation; the previous view was kept. */
   refused: Schema.optional(Schema.String),
+  /** Replayed model-format reply rather than the scripted director. */
+  origin: Schema.optional(Schema.Literals(['director', 'replay'])),
 })
 export type ChatEntry = typeof ChatEntry.Type
 

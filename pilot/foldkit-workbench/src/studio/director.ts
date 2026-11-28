@@ -17,9 +17,13 @@ import { archMap, archOptions, archPlan, budgetPlan, learnPlan, researchEvidence
 import { evaluate, type Representation } from './spec.js'
 import { findObject } from './context.js'
 import { onboardingSimulator } from './artifact.js'
+import { parseModelReply, WorkspaceMarker } from './catalogue.js'
+import { replays } from './replay.js'
 
 export type Turn = {
   markdown: string
+  /** Where the reply came from: the scripted director or a replayed model-format reply. */
+  origin?: 'director' | 'replay'
   /** Untrusted until decoded by the host. */
   patch: unknown
   scenario?: Scenario
@@ -381,7 +385,7 @@ const budgetImplications = (conversation: Conversation, packet: Packet, question
         ...(hires ? [{
           type: 'callout' as const, tone: (reserve - hireCost < 0 ? 'critical' : 'caution') as 'critical' | 'caution',
           title: 'Zwei zusätzliche Stellen',
-          markdown: `Zwei Stellen à rund 95 000 CHF kosten ${chf(hireCost)}. Danach bliebe eine Reserve von **${chf(reserve - hireCost)}**.`,
+          markdown: `Zwei Stellen à rund ${chf(95_000)} kosten ${chf(hireCost)}. Danach bliebe eine Reserve von **${chf(reserve - hireCost)}**.`,
         }] : []),
       ],
     },
@@ -469,15 +473,22 @@ const reassess = (conversation: Conversation, packet: Packet): Turn => {
 }
 
 const weightsChanged = (conversation: Conversation, packet: Packet): Turn => {
-  const options = ['opt.events', 'opt.shared', 'opt.direct']
-  const now = options.map((id) => ({ id, ...weighted(conversation, id) })).sort((a, b) => b.score - a.score)
-  const proposed = { ...conversation, assumptions: {} }
-  const before = options.map((id) => ({ id, ...weighted(proposed, id) })).sort((a, b) => b.score - a.score)
+  const edits = packet.humanEdits
+  const matrix = conversation.panes.flatMap((p) => collect(p.rep.root))
+    .find((n) => n.type === 'matrix' && n.criteria.some((c) => c.assumption && edits.some((e) => e.id === c.assumption)))
+  if (!matrix || matrix.type !== 'matrix') return { markdown: 'Ihre Änderung ist gespeichert.', patch: null }
+  const rank = (conv: Conversation) => matrix.options.map((o) => {
+    let score = 0, max = 0
+    for (const c of matrix.criteria) { const w = weightIn(conv, c); score += (matrix.scores[o.id]?.[c.id] ?? 0) * w; max += 5 * w }
+    return { id: o.id, score, max }
+  }).sort((a, b) => b.score - a.score)
+  const now = rank(conversation)
+  const before = rank({ ...conversation, assumptions: {} })
   const flipped = now[0]!.id !== before[0]!.id
-  const edits = packet.humanEdits.filter((e) => e.id.startsWith('w.'))
+  const relevant = edits.filter((e) => matrix.criteria.some((c) => c.assumption === e.id))
   return {
     markdown: [
-      edits.length ? `Sie gewichten ${edits.map((e) => `[[${e.id}]] mit **${e.value}** statt ${e.proposed}`).join(', ')}.` : 'Die Gewichtung entspricht meinem Vorschlag.',
+      `Sie gewichten ${relevant.map((e) => `[[${e.id}]] mit **${e.value}** statt ${e.proposed}`).join(', ')}.`,
       '',
       flipped
         ? `Damit **kippt die Empfehlung**: [[${now[0]!.id}]] liegt jetzt mit ${now[0]!.score} von ${now[0]!.max} Punkten vorn, vor [[${now[1]!.id}]] (${now[1]!.score}). Mit meiner Gewichtung lag [[${before[0]!.id}]] vorn.`
@@ -543,6 +554,15 @@ const freeText = (conversation: Conversation, packet: Packet): Turn => {
 }
 
 export const respond = (conversation: Conversation, packet: Packet): Turn => {
+  const replay = packet.interaction ? undefined : replays.find((r) => r.match.test(packet.request))
+  if (replay) {
+    const parsed = parseModelReply(replay.raw)
+    const at = replay.raw.indexOf(`\n${WorkspaceMarker}\n`)
+    // Hand the host the raw patch: it validates replayed output like any model output.
+    const patch = at >= 0 ? JSON.parse(replay.raw.slice(at + WorkspaceMarker.length + 2)) : null
+    const title = parsed._tag === 'WithPatch' ? parsed.patch.upsert[0]?.title : undefined
+    return { markdown: parsed.markdown, patch, origin: 'replay', ...(title && conversation.messages.length <= 1 ? { title } : {}) }
+  }
   if (conversation.messages.filter((m) => m.role === 'assistant').length === 0 || conversation.scenario === 'open') {
     const scenario = detect(packet.request)
     if (scenario !== 'open' || conversation.messages.length <= 1) return opening(scenario)
@@ -553,7 +573,7 @@ export const respond = (conversation: Conversation, packet: Packet): Turn => {
     case 'investigate': return investigate(conversation, packet)
     case 'inspect-source': return inspectSource(conversation, packet)
     case 'edit-assumption':
-      return conversation.scenario === 'architecture' ? weightsChanged(conversation, packet)
+      return conversation.scenario === 'architecture' || conversation.scenario === 'open' ? weightsChanged(conversation, packet)
         : conversation.scenario === 'learning' ? learningImplications(conversation, packet)
         : budgetImplications(conversation, packet)
     case 'move-card': return reassess(conversation, packet)

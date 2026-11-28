@@ -275,3 +275,27 @@ describe('weights and learning', () => {
     expect(c.messages.at(-1)!.markdown).toContain('[[lc.project]]')
   })
 })
+
+describe('replayed model-format replies', () => {
+  it('a novel question is composed through the model contract and the host validator', async () => {
+    const { replays } = await import('./replay.js')
+    let m = start(replays[0]!.prompt)
+    let c = active(m)
+    expect(c.title).toBe('Sitzungsspeicher')
+    expect(c.messages.at(-1)!.origin).toBe('replay')
+    expect(c.panes.map((p) => p.rep.id)).toEqual(['db.decision'])
+    m = run(m,
+      Message.ChangedAssumption({ paneId: 'db.decision', id: 'dw.multi', value: 5 }),
+      Message.ChangedAssumption({ paneId: 'db.decision', id: 'dw.ops', value: 1 }))
+    m = settle(run(m, Message.ClickedAction({ action: 'edit-assumption' })))
+    c = active(m)
+    expect(c.messages.at(-1)!.markdown).toContain('kippt die Empfehlung')
+    expect(c.messages.at(-1)!.markdown).toContain('[[db.postgres]]')
+  })
+  it('an out-of-catalogue replay is refused and leaves the workspace untouched', async () => {
+    const { replays } = await import('./replay.js')
+    const c = active(start(replays[2]!.prompt))
+    expect(c.panes).toEqual([])
+    expect(c.messages.at(-1)!.refused).toBeDefined()
+  })
+})

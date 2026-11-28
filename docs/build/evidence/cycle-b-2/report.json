@@ -1,6 +1,6 @@
 {
   "base": "http://127.0.0.1:4330/studio.html",
-  "startedAt": "2026-11-28T09:02:22.815Z",
+  "startedAt": "2026-11-28T09:04:48.998Z",
   "checks": [
     {
       "name": "architecture: options pane composed",
@@ -158,6 +158,26 @@
       "detail": ""
     },
     {
+      "name": "replay: novel question composed via model contract",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "keyboard selection reaches the context tray",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "replay pane weights flip the recommendation",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "out-of-catalogue representation refused in the UI, workspace kept",
+      "ok": true,
+      "detail": ""
+    },
+    {
       "name": "reload keeps state byte-identical",
       "ok": true,
       "detail": ""
@@ -236,7 +256,7 @@
       "Fetch API cannot load https://example.org/. Refused to connect because it violates the document's Content Security Policy."
     ]
   },
-  "finishedAt": "2026-11-28T09:02:55.938Z",
-  "passed": 41,
+  "finishedAt": "2026-11-28T09:05:26.248Z",
+  "passed": 45,
   "failed": 0
 }
