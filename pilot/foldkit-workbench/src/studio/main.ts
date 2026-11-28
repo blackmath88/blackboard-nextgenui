@@ -18,6 +18,7 @@ const read = (): string | null => {
 }
 
 const now = () => new Date().toISOString()
+const bootedAt = now()
 const { model, restored, ignored } = restoreStudio(read(), now())
 const restoreNote = restored
   ? 'Wieder geöffnet: Gespräche, Darstellungen, Auswahl und Ihre Änderungen wurden aus dem lokalen Speicher wiederhergestellt.'
@@ -27,7 +28,7 @@ Runtime.run(Runtime.makeApplication({
   Model,
   init: () => ({ model }),
   update: makeStudioUpdate({ now }),
-  view: (current, h) => studioView(current, h, { restoreNote }),
+  view: (current, h) => studioView(current, h, { restoreNote, bootedAt }),
   subscriptions: studioSubscriptions,
   container: document.getElementById('app'),
 }))

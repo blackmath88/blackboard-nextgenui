@@ -65,14 +65,14 @@ export const blocks = (source: string): Block[] => {
 
 export const inlines = (text: string): Inline[] => {
   const out: Inline[] = []
-  const pattern = /\[\[([a-z0-9][a-z0-9._-]*)\]\]|\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`/g
+  const pattern = /\[\[([A-Za-z0-9][A-Za-z0-9._-]*)\]\]|\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`/g
   let last = 0
   for (const match of text.matchAll(pattern)) {
     if (match.index > last) out.push({ kind: 'text', text: text.slice(last, match.index) })
     if (match[1]) out.push({ kind: 'ref', id: match[1] })
     else if (match[2]) {
       // Allow a reference inside bold: **[[id]]**
-      const inner = /^\[\[([a-z0-9][a-z0-9._-]*)\]\]$/.exec(match[2])
+      const inner = /^\[\[([A-Za-z0-9][A-Za-z0-9._-]*)\]\]$/.exec(match[2])
       out.push(inner ? { kind: 'ref', id: inner[1]! } : { kind: 'strong', text: match[2] })
     } else if (match[3]) out.push({ kind: 'em', text: match[3] })
     else if (match[4]) out.push({ kind: 'code', text: match[4] })

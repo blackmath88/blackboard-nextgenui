@@ -295,7 +295,10 @@ const inspectSource = (conversation: Conversation, packet: Packet): Turn => {
   const findings = researchFindings.root.type === 'section'
     ? researchFindings.root.children.flatMap((n) => n.type === 'records' ? n.items : []).filter((f) => f.sources?.includes(target.id))
     : []
-  const src = findObject(conversation, target.id)?.item as { excerpt?: string; method?: string; cells?: Record<string, unknown> } | undefined
+  const src = conversation.panes
+    .flatMap((p) => collect(p.rep.root))
+    .flatMap((n) => (n.type === 'sources' ? n.items : []))
+    .find((s) => s.id === target.id)
   return {
     markdown: [
       `**[[${target.id}]]** ist relevant für ${findings.length ? findings.map((f) => `[[${f.id}]]`).join(' und ') : 'keinen der aktuellen Befunde'}.`,
@@ -323,6 +326,8 @@ const budgetImplications = (conversation: Conversation, packet: Packet, question
       : share > 20
         ? `Mit ${pct(share)} Reserve bleibt **viel ungenutzt**. Das ist vorsichtig, verschenkt aber Wirkung.`
         : `Die Reserve von ${pct(share)} liegt im gesunden Bereich.`
+  const proposedVals = Object.fromEntries(Object.entries(vals).map(([id, v]) => [id, conversation.assumptions[id]?.proposed ?? v]))
+  const proposedReserve = evaluate({ ref: 'reserve' }, proposedVals, budgetPlan().derived ?? {})
   const hires = question && /einstell|person|stelle|hire/i.test(question)
   const hireCost = 2 * 95_000
   const rep: Representation = {
@@ -346,7 +351,7 @@ const budgetImplications = (conversation: Conversation, packet: Packet, question
                 ...(current !== proposed ? { tone: 'accent' as const } : {}),
               }
             }),
-            { id: 'diff.reserve', cells: { item: 'Reserve', proposed: chf(72_000), current: chf(reserve), delta: '' }, tone: share < 8 ? 'critical' as const : 'positive' as const },
+            { id: 'diff.reserve', cells: { item: 'Reserve', proposed: chf(proposedReserve), current: chf(reserve), delta: '' }, tone: share < 8 ? 'critical' as const : 'positive' as const },
           ],
         },
         ...(hires ? [{

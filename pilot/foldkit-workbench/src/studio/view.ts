@@ -37,7 +37,7 @@ const time = (iso: string) => {
 
 const scenarioGlyph: Record<Conversation['scenario'], string> = { architecture: '◇', budget: '◐', research: '◎', open: '○' }
 
-export const studioView = (model: Model, h: H, deps: { restoreNote: string | undefined }): Document => {
+export const studioView = (model: Model, h: H, deps: { restoreNote: string | undefined; bootedAt: string }): Document => {
   const c = active(model)
   const selected = new Set(c.selection.map((s) => s.objectId))
   const values = assumptionValues(c)
@@ -224,7 +224,7 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
         h.button([h.Type('button'), h.Role('tab'), h.AriaSelected(model.narrowView === 'board'), h.Class(model.narrowView === 'board' ? 'on' : ''), h.OnClick(Message.SelectedNarrowView({ view: 'board' }))], [`Blackboard${c.panes.length ? ` · ${c.panes.length}` : ''}`]),
       ]),
     ]),
-    ...(deps.restoreNote && c.messages.length ? [h.p([h.Class('restore')], [deps.restoreNote])] : []),
+    ...(deps.restoreNote && c.messages.length && (c.messages.at(-1)?.at ?? '') < deps.bootedAt ? [h.p([h.Class('restore')], [deps.restoreNote])] : []),
     c.messages.length === 0 && !streaming
       ? emptyChat
       : h.ol([h.Class('messages'), h.OnMount(FollowStudioChat())], [
@@ -272,7 +272,10 @@ export const studioView = (model: Model, h: H, deps: { restoreNote: string | und
         const tone = node.tone ?? (node.derived === 'reserve' || node.derived === 'reserveShare' ? (value < 0 ? 'critical' : node.derived === 'reserveShare' && value < 8 ? 'caution' : undefined) : undefined)
         return h.button([h.Type('button'), h.Class(`n-metric${sel(node.id)}${toneClass(tone)}`), h.AriaPressed(String(selected.has(node.id))), h.OnClick(pick(paneId, node.id))], [
           h.span([h.Class('metric-label')], [node.label]),
-          h.span([h.Class('metric-value')], [fmt(value, node.unit)]),
+          h.span([h.Class('metric-value')], [
+            node.unit === 'CHF' && Math.abs(value) >= 10_000 ? nf.format(value / 1000) + 'k' : nf.format(Number.isFinite(value) ? value : NaN).replace('NaN', '—'),
+            ...(node.unit ? [h.small([], [node.unit === 'CHF' ? ' CHF' : ` ${node.unit}`])] : []),
+          ]),
           ...(node.note ? [h.span([h.Class('metric-note')], [node.note])] : []),
         ])
       }
@@ -533,7 +536,8 @@ const prefersDark = () => typeof matchMedia === 'function' && matchMedia('(prefe
 
 const diagram = (h: H, node: Extract<Node, { type: 'diagram' }>, paneId: string, selected: ReadonlySet<string>): Html => {
   const layers = Math.max(1, ...node.nodes.map((n) => n.layer + 1))
-  const W = 680, nodeW = 132, nodeH = 46, gapY = 18, top = node.layers ? 34 : 12
+  const nodeW = 124, gapX = 34, nodeH = 48, gapY = 16, top = node.layers ? 30 : 10
+  const W = Math.max(nodeW + 16, layers * nodeW + (layers - 1) * gapX + 16)
   const perLayer = Array.from({ length: layers }, (_, l) => node.nodes.filter((n) => n.layer === l))
   const tallest = Math.max(...perLayer.map((l) => l.length))
   const H = top + tallest * (nodeH + gapY) + 8
@@ -580,7 +584,7 @@ const diagram = (h: H, node: Extract<Node, { type: 'diagram' }>, paneId: string,
       ], [
         h.rect([h.Width(String(nodeW)), h.Height(String(nodeH)), h.Rx('9')], []),
         h.text([h.X('12'), h.Y('19'), h.Class('dn-label')], [n.label]),
-        ...(n.detail ? [h.text([h.X('12'), h.Y('35'), h.Class('dn-detail')], [n.detail.length > 22 ? n.detail.slice(0, 21) + '…' : n.detail])] : []),
+        ...(n.detail ? [h.text([h.X('12'), h.Y('35'), h.Class('dn-detail')], [n.detail.length > 19 ? n.detail.slice(0, 18) + '…' : n.detail])] : []),
       ])
     }),
   ])])

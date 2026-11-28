@@ -177,35 +177,29 @@ export const budgetPlan = (total = 480_000): Representation => ({
         ],
       },
       {
-        type: 'grid',
-        columns: 2,
-        children: [
-          {
-            type: 'assumptions',
-            id: 'budget.inputs',
-            items: [
-              { id: 'b.total', label: 'Gesamtbudget', value: total, min: 300_000, max: 700_000, step: 10_000, unit: 'CHF' },
-              { id: 'b.dev', label: 'Entwicklung', value: 210_000, min: 0, max: 400_000, step: 5_000, unit: 'CHF' },
-              { id: 'b.design', label: 'Design', value: 80_000, min: 0, max: 200_000, step: 5_000, unit: 'CHF' },
-              { id: 'b.research', label: 'Nutzerforschung', value: 45_000, min: 0, max: 150_000, step: 5_000, unit: 'CHF' },
-              { id: 'b.infra', label: 'Infrastruktur', value: 50_000, min: 0, max: 150_000, step: 5_000, unit: 'CHF' },
-              { id: 'b.events', label: 'Weiterbildung', value: 25_000, min: 0, max: 100_000, step: 5_000, unit: 'CHF' },
-            ],
-          },
-          {
-            type: 'bars',
-            id: 'budget.bars',
-            title: 'Verteilung',
-            unit: 'CHF',
-            items: [
-              { id: 'bar.dev', label: 'Entwicklung', assumption: 'b.dev', tone: 'accent' },
-              { id: 'bar.design', label: 'Design', assumption: 'b.design' },
-              { id: 'bar.research', label: 'Nutzerforschung', assumption: 'b.research' },
-              { id: 'bar.infra', label: 'Infrastruktur', assumption: 'b.infra' },
-              { id: 'bar.events', label: 'Weiterbildung', assumption: 'b.events' },
-              { id: 'bar.reserve', label: 'Reserve', assumption: 'reserve', tone: 'positive' },
-            ],
-          },
+        type: 'bars',
+        id: 'budget.bars',
+        title: 'Verteilung',
+        unit: 'CHF',
+        items: [
+          { id: 'bar.dev', label: 'Entwicklung', assumption: 'b.dev', tone: 'accent' },
+          { id: 'bar.design', label: 'Design', assumption: 'b.design' },
+          { id: 'bar.research', label: 'Nutzerforschung', assumption: 'b.research' },
+          { id: 'bar.infra', label: 'Infrastruktur', assumption: 'b.infra' },
+          { id: 'bar.events', label: 'Weiterbildung', assumption: 'b.events' },
+          { id: 'bar.reserve', label: 'Reserve', assumption: 'reserve', tone: 'positive' },
+        ],
+      },
+      {
+        type: 'assumptions',
+        id: 'budget.inputs',
+        items: [
+          { id: 'b.total', label: 'Gesamtbudget', value: total, min: 300_000, max: 700_000, step: 10_000, unit: 'CHF' },
+          { id: 'b.dev', label: 'Entwicklung', value: 210_000, min: 0, max: 400_000, step: 5_000, unit: 'CHF' },
+          { id: 'b.design', label: 'Design', value: 80_000, min: 0, max: 200_000, step: 5_000, unit: 'CHF' },
+          { id: 'b.research', label: 'Nutzerforschung', value: 45_000, min: 0, max: 150_000, step: 5_000, unit: 'CHF' },
+          { id: 'b.infra', label: 'Infrastruktur', value: 50_000, min: 0, max: 150_000, step: 5_000, unit: 'CHF' },
+          { id: 'b.events', label: 'Weiterbildung', value: 25_000, min: 0, max: 100_000, step: 5_000, unit: 'CHF' },
         ],
       },
       {

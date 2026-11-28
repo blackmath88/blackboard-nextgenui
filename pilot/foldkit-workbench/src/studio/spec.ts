@@ -14,7 +14,7 @@
 
 import { Schema } from 'effect'
 
-const Id = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9._-]{0,63}$/))
+const Id = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/))
 const Text = Schema.String.check(Schema.isMaxLength(4000))
 const Label = Schema.String.check(Schema.isMaxLength(160))
 

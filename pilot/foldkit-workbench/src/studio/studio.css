@@ -316,6 +316,7 @@ button:disabled { cursor: default; opacity: 0.45; }
 .n-metric:hover { border-color: var(--line-2); }
 .metric-label { font-size: 11.5px; color: var(--muted); }
 .metric-value { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.2s; }
+.metric-value small { font-size: 12px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
 .metric-note { font-size: 11.5px; color: var(--fg-2); }
 .n-metric.tone-positive .metric-value { color: var(--positive); }
 .n-metric.tone-caution .metric-value { color: var(--caution); }
@@ -355,7 +356,7 @@ button:disabled { cursor: default; opacity: 0.45; }
 .d { width: 7px; height: 7px; border-radius: 50%; background: var(--line-2); }
 .d.on { background: var(--fg-2); }
 .score { text-align: center; }
-.total td { vertical-align: middle; text-align: center; }
+.total td { vertical-align: middle; text-align: center; white-space: nowrap; }
 .total-bar { display: inline-block; width: 54px; height: 5px; border-radius: 3px; background: var(--line); vertical-align: middle; overflow: hidden; }
 .total-bar span { display: block; height: 100%; background: var(--muted); border-radius: 3px; }
 .best .total-bar span { background: var(--positive); }
@@ -398,8 +399,8 @@ button:disabled { cursor: default; opacity: 0.45; }
 .dnode.selected text { fill: #fff; }
 .dnode.near rect { stroke: var(--accent); }
 .dnode.dim { opacity: 0.45; }
-.dn-label { font-size: 12.5px; font-weight: 600; fill: var(--fg); }
-.dn-detail { font-size: 10.5px; fill: var(--muted); }
+.dn-label { font-size: 13px; font-weight: 600; fill: var(--fg); }
+.dn-detail { font-size: 11px; fill: var(--muted); }
 
 .n-timeline { display: grid; gap: 4px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); font-size: 12px; overflow-x: auto; }
 .tl-head, .tl-row { display: grid; grid-template-columns: 82px repeat(var(--span), minmax(34px, 1fr)); align-items: center; }
@@ -470,7 +471,7 @@ button:disabled { cursor: default; opacity: 0.45; }
 .src-origin { font-size: 11.5px; color: var(--muted); }
 .src-excerpt { font-size: 12.5px; color: var(--fg-2); font-style: italic; }
 
-.n-assumptions { display: grid; gap: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; }
+.n-assumptions { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 4px 18px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; }
 .assumption { padding: 6px 4px; border-radius: 8px; }
 .assumption.selected { background: var(--accent-soft); }
 .assumption.edited .as-value { color: var(--human); }
